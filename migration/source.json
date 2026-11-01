@@ -1,0 +1,455 @@
+{
+  "repository": "https://github.com/My-Denia/WuwaTerm",
+  "commit": "3c51ca340f0e5c1dc0c0cf4e32ff6703af9ba841",
+  "source_directory": "site",
+  "files": [
+    {
+      "path": ".gitignore",
+      "source_blob": "c95544b79fbb161bd84ed8a390968de125141e19"
+    },
+    {
+      "path": ".npmrc",
+      "source_blob": "c7d351733b3be766847fabaa08cad86a2e746c5c"
+    },
+    {
+      "path": ".openai/hosting.json",
+      "source_blob": "5dd368726c8aa2b1b02e9ecef03c1a81116fc1e8"
+    },
+    {
+      "path": "app/api/meta/route.ts",
+      "source_blob": "8c692aec717d3d87f34f2ca61c79f87462d10979"
+    },
+    {
+      "path": "app/api/pool/route.ts",
+      "source_blob": "673e1c53d45d22c22be6370400a6661411ecde11"
+    },
+    {
+      "path": "app/api/reviews/route.ts",
+      "source_blob": "63cf9a2402161c98da75d6722391fd7f1cc23266"
+    },
+    {
+      "path": "app/api/terms/route.ts",
+      "source_blob": "646eb3af0bd3c585345cfb6c94c89f63b9aba524"
+    },
+    {
+      "path": "app/api/translations/route.ts",
+      "source_blob": "9b06cbb14958f06274bc595973873858dfdf5a9f"
+    },
+    {
+      "path": "app/components/dictionary-provenance.tsx",
+      "source_blob": "8c9321400f7176049181bc46738b458d7343ba17"
+    },
+    {
+      "path": "app/components/language-toggle.tsx",
+      "source_blob": "ade5b53924ed6af84230fd24f870c01b6badda4a"
+    },
+    {
+      "path": "app/components/limits-body.tsx",
+      "source_blob": "cbd61717ce41d4a5bf60f696ed9a4ff02e95ad44"
+    },
+    {
+      "path": "app/components/privacy-body.tsx",
+      "source_blob": "74e3f70f66fb8321b1d1a6794bc74e23690dc6d2"
+    },
+    {
+      "path": "app/components/review-workbench.tsx",
+      "source_blob": "759ccc1207a0bff40a9596e045feff93b229e316"
+    },
+    {
+      "path": "app/components/site-chrome.tsx",
+      "source_blob": "3fe646ceae53079d85bdd10bc2bafe3e71d9a9c7"
+    },
+    {
+      "path": "app/components/translation-workbench.tsx",
+      "source_blob": "7a6cfa3f69b36249d438947f811c0e404bfe59f6"
+    },
+    {
+      "path": "app/components/ui-language-context.tsx",
+      "source_blob": "496b274fc742eb91bfbe84e27abc31863b25a615"
+    },
+    {
+      "path": "app/globals.css",
+      "source_blob": "1dc71c1fb6fb9c4dbded976da47432c5acc8cbd8"
+    },
+    {
+      "path": "app/layout.tsx",
+      "source_blob": "89f9818029abc2e6ee91f27251770db40723beb4"
+    },
+    {
+      "path": "app/limits/page.tsx",
+      "source_blob": "3fa288dd44c27615df6ce9f20af77c8a382c1d20"
+    },
+    {
+      "path": "app/page.tsx",
+      "source_blob": "57cbc3dba7f55b9bc0c8a85e734d9488ea829886"
+    },
+    {
+      "path": "app/privacy/page.tsx",
+      "source_blob": "f2840eafe5cf039fc1cfff1c357f1a81b98ff9d4"
+    },
+    {
+      "path": "app/query-state.ts",
+      "source_blob": "4a3cc4fd3b3f01db025552347b14ca06f120eb51"
+    },
+    {
+      "path": "app/robots.ts",
+      "source_blob": "0610c86adbfd780fe94d7acf6146b6ece84ebf9e"
+    },
+    {
+      "path": "app/sitemap.ts",
+      "source_blob": "2f6f1ebcf107df874f07be34157e59526fa19c9d"
+    },
+    {
+      "path": "app/ui-language-cookie.ts",
+      "source_blob": "253fab35ac94e00e29fc636dd08f5348bf18fa25"
+    },
+    {
+      "path": "app/ui-language-server.ts",
+      "source_blob": "ce399a29e0279370a29fffe6a38640ca5bb2eaf1"
+    },
+    {
+      "path": "db/schema.ts",
+      "source_blob": "a254879f0b6380a3b8394fa256e602df5a267e8d"
+    },
+    {
+      "path": "drizzle.config.ts",
+      "source_blob": "4f61ede754b9a6f9debca6e0e61a938902cb0963"
+    },
+    {
+      "path": "drizzle/0000_shared_pool.sql",
+      "source_blob": "bf3dee1ed79b3b890adccba0ffa8964b4a07fa92"
+    },
+    {
+      "path": "drizzle/0001_review_used.sql",
+      "source_blob": "a2052e10438ca7d3e069f41e204413c812e54ddb"
+    },
+    {
+      "path": "drizzle/meta/0000_snapshot.json",
+      "source_blob": "aefe3d7c5d91e05bf2bb61374243e4363abff09e"
+    },
+    {
+      "path": "drizzle/meta/0001_snapshot.json",
+      "source_blob": "44f82b8f8f4326e5353b555be68b931127dd8f5a"
+    },
+    {
+      "path": "drizzle/meta/_journal.json",
+      "source_blob": "625ffaba64460b7689b80641816302fd6affb3fe"
+    },
+    {
+      "path": "eslint.config.mjs",
+      "source_blob": "e44825c0904873f0aa9f76d965e3b30c0fbca90a"
+    },
+    {
+      "path": "lib/dictionary-labels.ts",
+      "source_blob": "19af07fd4a9fae918fd3dd591e20357825d163ed"
+    },
+    {
+      "path": "lib/manuscript.js",
+      "source_blob": "b98598a72626a3683e2fa8ae730452d67cdf8f3e"
+    },
+    {
+      "path": "lib/markdown-report.ts",
+      "source_blob": "fffa72bf6e98a954ada10e0de1865352128d1c7b"
+    },
+    {
+      "path": "lib/messages.ts",
+      "source_blob": "841a465bd55e3116552058d516f46d35e3f8bdc3"
+    },
+    {
+      "path": "lib/pool-snapshot.ts",
+      "source_blob": "326e2bffc25c15a36acdbb1e8decf8b36bfc7e78"
+    },
+    {
+      "path": "lib/public-metadata.ts",
+      "source_blob": "5c12433f63bd9213fa01bbb2345943952f2e0929"
+    },
+    {
+      "path": "lib/review-navigation.js",
+      "source_blob": "6067aeff07befd6fe3e93bfd9d0be6f7c71779af"
+    },
+    {
+      "path": "lib/review-report.js",
+      "source_blob": "dc58a6d03e42b590312b146b5ed5c15840c5b281"
+    },
+    {
+      "path": "lib/shared-pool.js",
+      "source_blob": "1207bdaf82333a35955d032cff2a7b1ebd1a6f88"
+    },
+    {
+      "path": "lib/target-revision.js",
+      "source_blob": "528479a4f97a724dfd2fe23a660eb3a89ff0e930"
+    },
+    {
+      "path": "lib/ui-language.ts",
+      "source_blob": "4fa347c1aa6279a78c464279892bc8c0cca7dc6f"
+    },
+    {
+      "path": "lib/wuwaterm-proxy.js",
+      "source_blob": "18369a1743cf12095a55f0920726e8d89109b3bb"
+    },
+    {
+      "path": "next.config.ts",
+      "source_blob": "b22af960af499f682e3f73236f8ae8a6bde38da1"
+    },
+    {
+      "path": "package-lock.json",
+      "source_blob": "ed7902000ee2e81e57c1121cb3380ca9f5c87c96"
+    },
+    {
+      "path": "package.json",
+      "source_blob": "14a97e39b21c51c4fd0c1314c50383988ddef0ec"
+    },
+    {
+      "path": "playwright.config.mjs",
+      "source_blob": "66f05c0df71a780246325652d78ba0fe16bb1a3d"
+    },
+    {
+      "path": "public/og.png",
+      "source_blob": "77b41a79258f70182f88417fc4400174133d52e6"
+    },
+    {
+      "path": "scripts/check-built-artifact.mjs",
+      "source_blob": "8d35d7e9bed2f8b1b8ea849315373fc9911e6008"
+    },
+    {
+      "path": "scripts/serve-built-browser.mjs",
+      "source_blob": "ec8f3aff0cfdd3d1bd3e1d244ee9ae217621a849"
+    },
+    {
+      "path": "scripts/verify-no-client-secret.mjs",
+      "source_blob": "f0f09984db2afa3a9fa2fea626afb84aec134865"
+    },
+    {
+      "path": "tests/README.md",
+      "source_blob": "da4ce1355c66edd33bb0a9f985ce21374dbeb82d"
+    },
+    {
+      "path": "tests/braces-glob-compat.test.mjs",
+      "source_blob": "90964b936cdb15517ee8bb078dd40c05c2738f13"
+    },
+    {
+      "path": "tests/braces-security.test.mjs",
+      "source_blob": "0b6aeb4e682ea7cf92041c5c87c2b8fd880d3087"
+    },
+    {
+      "path": "tests/browser/dictionary-labels.spec.mjs",
+      "source_blob": "0844b3d0bbc27a0223b84e354fb7ae39ca39ca8d"
+    },
+    {
+      "path": "tests/browser/dictionary-provenance.spec.mjs",
+      "source_blob": "ee877ac98d2a6072b5ca472e7675067fa454542b"
+    },
+    {
+      "path": "tests/browser/imported-linebreak-location.spec.mjs",
+      "source_blob": "980b76c1454c3a9b33d5632aa0263456bce4f5bc"
+    },
+    {
+      "path": "tests/browser/manuscript-import.spec.mjs",
+      "source_blob": "393f667afe62fe6e8fa89c6aa8bc98ec25826387"
+    },
+    {
+      "path": "tests/browser/manuscript-leave.spec.mjs",
+      "source_blob": "754a433e411204a02cea98a0742506c9c6527481"
+    },
+    {
+      "path": "tests/browser/manuscript-resume.spec.mjs",
+      "source_blob": "20895eb2d81dac1c472f38f6fd6e5fc8e27d4d0a"
+    },
+    {
+      "path": "tests/browser/markdown-export.spec.mjs",
+      "source_blob": "057d5c502d0ba40fc2c3633000050a4a5e0ff28c"
+    },
+    {
+      "path": "tests/browser/review-handoff.spec.mjs",
+      "source_blob": "bfa8b6b72aaf0379dfa58af4122ebea4ab743d9c"
+    },
+    {
+      "path": "tests/browser/review-navigation.spec.mjs",
+      "source_blob": "8d47f93787c4214f6775fa6c115e2519f347d90a"
+    },
+    {
+      "path": "tests/browser/review-primary-actions.spec.mjs",
+      "source_blob": "18de18162b15993994dfbaf928c36f686344cc48"
+    },
+    {
+      "path": "tests/browser/review-quota.spec.mjs",
+      "source_blob": "c5de07d449fbc6f0636bb1b209d86b0e99905e91"
+    },
+    {
+      "path": "tests/browser/target-revision.spec.mjs",
+      "source_blob": "87c8dd05af25724bcea4b71a6095618dc49cbe26"
+    },
+    {
+      "path": "tests/browser/term-interactions.spec.mjs",
+      "source_blob": "0ec13df9ceca468f0b13fe5bfae008cd378c9f01"
+    },
+    {
+      "path": "tests/browser/ui-language.spec.mjs",
+      "source_blob": "135f293439c8e755df86bf5142c67e7824ade3c7"
+    },
+    {
+      "path": "tests/built/e2e-built.test.mjs",
+      "source_blob": "aefefcc0e2cc91acec69f1e4a616b1521222bf6c"
+    },
+    {
+      "path": "tests/d1-runtime.test.mjs",
+      "source_blob": "e08b0fed26fb1847831fbacb46369074bd77736e"
+    },
+    {
+      "path": "tests/dictionary-labels.test.mjs",
+      "source_blob": "79490f4c2a87e0312ceb7dd7dc4f04e69580a79a"
+    },
+    {
+      "path": "tests/feasibility.test.mjs",
+      "source_blob": "154195098ddbdc8122a5582e38eccd24b642aa31"
+    },
+    {
+      "path": "tests/fixtures/braces-3.0.3-semantics.json",
+      "source_blob": "cce62430c1f38b8d8d0dcf56bf6df532feb5fd8e"
+    },
+    {
+      "path": "tests/fixtures/manuscript.mjs",
+      "source_blob": "d5432e8f1854683d7e0b8f663daa7a02918f7d82"
+    },
+    {
+      "path": "tests/fixtures/target-revision-engine.json",
+      "source_blob": "69255be1c7e15c92786c6ff5151dffd2a216f27b"
+    },
+    {
+      "path": "tests/helpers/built-harness.mjs",
+      "source_blob": "61e78885a639e5b19dad1b1cc3fe2765063bd65f"
+    },
+    {
+      "path": "tests/helpers/pool-fixture.mjs",
+      "source_blob": "cdca787d673eb3193c6f6f66d453feff6efdf19b"
+    },
+    {
+      "path": "tests/helpers/project-live-meta.mjs",
+      "source_blob": "8303252eeea573a02427710a5f1c29a18efc702c"
+    },
+    {
+      "path": "tests/helpers/runtime-worker.mjs",
+      "source_blob": "026d5bfc64965021ae76ff148a3a2174e5f4c2b6"
+    },
+    {
+      "path": "tests/helpers/synthetic-upstream.mjs",
+      "source_blob": "e03975f94ce63d65d7eacfc3460e07735a1a090d"
+    },
+    {
+      "path": "tests/manuscript-copy-guard.test.mjs",
+      "source_blob": "c30e52492c2c53bc1e03d655105d71b94d504c3c"
+    },
+    {
+      "path": "tests/manuscript-save-state.test.mjs",
+      "source_blob": "dea119c9c70fd2139b418dba5481e9e162803da5"
+    },
+    {
+      "path": "tests/manuscript.test.mjs",
+      "source_blob": "c2c5163fc91ba00efd8f3904af110435e6821e42"
+    },
+    {
+      "path": "tests/markdown-report.test.mjs",
+      "source_blob": "c57ad4d55bc54126e2cbbf94f5f73893d30f98e0"
+    },
+    {
+      "path": "tests/minimatch-compat.test.mjs",
+      "source_blob": "5e219ce3c965483782604ae08da3758ed4b87bd8"
+    },
+    {
+      "path": "tests/product-flow.test.mjs",
+      "source_blob": "0fe2a7cc9888c6b45fe3af3f9018caff2b112ea9"
+    },
+    {
+      "path": "tests/product-v1.test.mjs",
+      "source_blob": "abda03db61f07538207a6bd21d63fba10be205b7"
+    },
+    {
+      "path": "tests/review-navigation.test.mjs",
+      "source_blob": "c7b77c13561f48eddf7016836a9a1bf173a2210b"
+    },
+    {
+      "path": "tests/review-report.test.mjs",
+      "source_blob": "99218f1a835c29fd8cf262758aacf0d40aa392fd"
+    },
+    {
+      "path": "tests/review-v2-proxy.test.mjs",
+      "source_blob": "379baeb39f47948a9936fc6297a61a64797d597f"
+    },
+    {
+      "path": "tests/shared-pool.test.mjs",
+      "source_blob": "6a0d912ffc64b8186a5829a5e751919545a878b6"
+    },
+    {
+      "path": "tests/target-revision.test.mjs",
+      "source_blob": "1cce02c9653ae3bca5f97e1fa600fd985d616017"
+    },
+    {
+      "path": "tests/ui-language.test.mjs",
+      "source_blob": "8fd6b40fe8d846f5f2aca1d550e0597f6b1e09c8"
+    },
+    {
+      "path": "tsconfig.json",
+      "source_blob": "99754a257e5ffe28b44c3f10910e6e8db06f7119"
+    },
+    {
+      "path": "vendor/braces/LICENSE",
+      "source_blob": "9af4a67d206f24ecdbb5fdff2839041ca0bbd346"
+    },
+    {
+      "path": "vendor/braces/README.md",
+      "source_blob": "111bd9389eedd02bf078b0ef67ba1cf9a1be2a65"
+    },
+    {
+      "path": "vendor/braces/index.js",
+      "source_blob": "d222c13b579d2d476dc26d692219dbaee1665b88"
+    },
+    {
+      "path": "vendor/braces/lib/compile.js",
+      "source_blob": "15d4383eeab66fa149f31caf885564c98f239ac4"
+    },
+    {
+      "path": "vendor/braces/lib/constants.js",
+      "source_blob": "2bb3b8840382c56700869b3a9e1f958fcce01efd"
+    },
+    {
+      "path": "vendor/braces/lib/depth.js",
+      "source_blob": "7bd22bc37ba0fbe746ada4058737229c491603b2"
+    },
+    {
+      "path": "vendor/braces/lib/expand.js",
+      "source_blob": "284b8a188c7411a1fc18099d460ddde1d6d535d4"
+    },
+    {
+      "path": "vendor/braces/lib/parse.js",
+      "source_blob": "f969bca7f587c1b2b300b768d825a9a16e56bc44"
+    },
+    {
+      "path": "vendor/braces/lib/stringify.js",
+      "source_blob": "ec3fde484c9c78d0b776fec65d464b5e41be498d"
+    },
+    {
+      "path": "vendor/braces/lib/utils.js",
+      "source_blob": "5bdf67c99a54a6fa683423ac0a53676bc5e6ad4f"
+    },
+    {
+      "path": "vendor/braces/package.json",
+      "source_blob": "08c13b50405a6964b79b98521c73b2f97140d282"
+    },
+    {
+      "path": "vendor/minimatch-legacy/README.md",
+      "source_blob": "70fd9232be612f199361c67d9ea4c79f05ec5e57"
+    },
+    {
+      "path": "vendor/minimatch-legacy/index.cjs",
+      "source_blob": "7ec85aade09ea27b8b16df4736804bb48eed8236"
+    },
+    {
+      "path": "vendor/minimatch-legacy/package.json",
+      "source_blob": "112dfb40ffdea58f1556dcf0611b78528a66c34b"
+    },
+    {
+      "path": "vite.config.ts",
+      "source_blob": "d0192723d4092d1e269716a8e6fb5a2e01c7755d"
+    }
+  ]
+}
