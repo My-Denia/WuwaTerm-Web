@@ -20,9 +20,8 @@ A crash or forced quit can also discard the page. See the
 Use Node 24 and npm 11.6.2, then run:
 
 ```sh
-npm ci
+npm ci --no-audit
 npm audit --json
-npm audit --omit=dev --json
 npm test
 npm run typecheck
 npm run lint

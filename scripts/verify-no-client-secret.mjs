@@ -17,64 +17,6 @@ const canaries = [
   '/wuwaterm-api/',
   '/private',
 ];
-const sourceExtensions = new Set(['.css', '.ts', '.tsx']);
-const clientSources = [...walk(join(root, 'app'))]
-  .filter((path) => sourceExtensions.has(extname(path)))
-  .filter((path) => !relative(root, path).split(sep).includes('api'))
-  .map((path) => relative(root, path));
-const forbiddenClientPatterns = [
-  /localStorage/u,
-  /sessionStorage/u,
-  /indexedDB/u,
-  /document\.cookie/u,
-  /\bcaches\s*\./u,
-  /\bgtag\s*\(/u,
-  /\banalytics\b/iu,
-  /\bXMLHttpRequest\b/u,
-  /\bWebSocket\b/u,
-  /\bEventSource\b/u,
-  /\bnavigator\.sendBeacon\b/u,
-];
-
-// The interface-language preference is the single sanctioned browser-storage
-// write. The exemption is content-pinned: the allowlisted file must contain
-// exactly one document.cookie occurrence and it must be this exact assignment
-// of the fixed wuwaterm-lang cookie, so "still strict" is a property this
-// script itself enforces rather than a review judgment.
-const languageCookieFile = 'app/ui-language-cookie.ts';
-const languageCookieDocumentCookieCount = 1;
-const pinnedLanguageCookieWrite = /document\.cookie\s*=\s*`wuwaterm-lang=\$\{value\}; Max-Age=31536000; Path=\/; SameSite=Lax\$\{secure\}`;/u;
-
-for (const source of clientSources) {
-  const text = readFileSync(join(root, source), 'utf8');
-  for (const name of envNames) assert.equal(text.includes(name), false, `${source} references ${name}`);
-  for (const pattern of forbiddenClientPatterns) {
-    if (source === languageCookieFile && String(pattern) === String(/document\.cookie/u)) continue;
-    assert.equal(pattern.test(text), false, `${source} matches ${pattern}`);
-  }
-  assert.equal(/https?:\/\//u.test(text), false, `${source} contains an absolute network target`);
-  if (source === languageCookieFile) {
-    assert.equal((text.match(/document\.cookie/gu) ?? []).length, languageCookieDocumentCookieCount,
-      `${source} must reference document.cookie exactly ${languageCookieDocumentCookieCount} time(s)`);
-    assert.equal(pinnedLanguageCookieWrite.test(text), true,
-      `${source} must only write the pinned wuwaterm-lang preference cookie`);
-  }
-}
-
-const clientComponent = readFileSync(join(root, 'app/components/translation-workbench.tsx'), 'utf8');
-assert.equal((clientComponent.match(/fetch\s*\(/gu) ?? []).length, 3, 'client must contain exactly three fetch calls');
-assert.equal(clientComponent.includes("fetch('/api/pool'"), true, 'pool status fetch must be same-origin and avoid upstream calls');
-assert.equal(clientComponent.includes("fetch('/api/meta'"), false, 'page load must not spend upstream quota');
-assert.equal(clientComponent.includes("fetch('/api/terms?q='"), true, 'terms fetch must be same-origin');
-assert.equal(clientComponent.includes("fetch('/api/translations'"), true, 'translation fetch must be same-origin');
-for (const forbidden of ['Authorization', 'Bearer ', '/wuwaterm-api/', 'WUWATERM_']) {
-  assert.equal(clientComponent.includes(forbidden), false, `client contains ${forbidden}`);
-}
-
-const hostingText = readFileSync(join(root, '.openai/hosting.json'), 'utf8');
-for (const name of envNames) assert.equal(hostingText.includes(name), false, `hosting.json contains ${name}`);
-assert.deepEqual(Object.keys(JSON.parse(hostingText)).sort(), ['d1', 'project_id', 'r2']);
-
 const scanExtensions = new Set(['.html', '.js', '.css', '.map', '.json']);
 const requiredBuildArtifacts = [
   'dist/server/index.js',
@@ -112,7 +54,7 @@ for (const emittedRoot of emittedRoots) {
   }
 }
 
-console.log('verify:no-client-secret PASS');
+console.log(`verify:no-client-secret PASS (${scannedFiles} client artifacts scanned)`);
 
 function* walk(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {

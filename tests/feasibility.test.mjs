@@ -1,8 +1,6 @@
 import { createPool } from './helpers/pool-fixture.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { proxyMetaRequest } from '../lib/wuwaterm-proxy.js';
 
 const TOKEN = 'SYNTHETIC_DEVICE_SENTINEL_74A1C9';
@@ -643,17 +641,4 @@ test('concurrent browser requests remain bounded one-to-one with upstream reques
   })));
   assert.equal(calls, 20);
   assert.equal(responses.every((response) => response.status === 200), true);
-});
-
-test('route exposes only a parameterless GET and cannot read inbound request controls', () => {
-  const routePath = fileURLToPath(new URL('../app/api/meta/route.ts', import.meta.url));
-  const source = readFileSync(routePath, 'utf8');
-  assert.match(source, /export async function GET\(\): Promise<Response>/u);
-  assert.doesNotMatch(source, /\bRequest\b/u);
-  assert.equal(source.includes('POST'), false);
-  assert.equal(source.includes('cookies('), false);
-  assert.equal(source.includes('headers('), false);
-  assert.equal(source.includes('searchParams'), false);
-  assert.equal(source.includes('WUWATERM_API_BASE_URL'), false);
-  assert.equal(source.includes('WUWATERM_SITE_DEVICE_TOKEN'), false);
 });

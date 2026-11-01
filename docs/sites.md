@@ -199,10 +199,9 @@ default to Chinese and any missing translation falls back to Chinese copy.
 Switching languages re-renders copy only: it never rewrites the manuscript,
 user input, terms, proper nouns, source evidence or the translation
 direction, keeps the active finding, expansions and report currency, and
-sends no translation, review or meta request. The no-client-secret scan
-permits exactly one content-pinned `wuwaterm-lang` cookie write and rejects
-every other browser-storage use; no input is ever written to browser
-storage.
+sends no translation, review or meta request. Browser tests check that the
+language choice is the only cookie and that exercised workbench state is not
+written to browser storage. The client-secret scan checks emitted artifacts.
 
 Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`), the
 result JSON (`wuwaterm-result-v2`), the translation TXT, and a readable

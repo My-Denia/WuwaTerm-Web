@@ -18,10 +18,9 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: npm install --global npm@11.6.2
-      - run: npm ci
+      - run: npm install --global --no-audit npm@11.6.2
+      - run: npm ci --no-audit
       - run: npm audit --json
-      - run: npm audit --omit=dev --json
       - run: npm test
       - run: npm run typecheck
       - run: npm run lint

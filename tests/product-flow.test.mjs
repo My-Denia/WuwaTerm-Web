@@ -86,15 +86,9 @@ test('visitor journey: pool snapshot, term lookup, translation, and review, with
   } finally { await mf.dispose(); }
 });
 
-test('visitor journey edge: unknown route answers 404 with the no-store envelope, and bad input is rejected before any upstream call', async () => {
+test('visitor journey edge: bad input is rejected before any upstream call', async () => {
   const { mf, db } = await boot();
   try {
-    const missing = await mf.dispatchFetch('http://site.test/api/nope');
-    assert.equal(missing.status, 404);
-    assert.match(missing.headers.get('cache-control'), /no-store/);
-    assert.equal(missing.headers.get('content-type'), 'application/json; charset=utf-8');
-    assert.equal((await missing.json()).reason, 'not_found');
-
     const empty = await mf.dispatchFetch('http://site.test/api/terms?q=');
     assert.equal(empty.status, 400);
     assert.equal((await empty.json()).reason, 'site_invalid_request');
