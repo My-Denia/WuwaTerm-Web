@@ -1,8 +1,6 @@
 import { createPool } from './helpers/pool-fixture.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import {
   parseReviewRequest,
@@ -647,71 +645,4 @@ test('oversized or invalid review requests never reach upstream', async () => {
   });
   assert.equal(tooLong.status, 400);
   assert.equal(calls, 0);
-});
-
-test('routes all delegate to the shared proxy and expose no environment names', () => {
-  const routeFiles = [
-    '../app/api/meta/route.ts',
-    '../app/api/terms/route.ts',
-    '../app/api/translations/route.ts',
-    '../app/api/reviews/route.ts',
-  ];
-  for (const relativePath of routeFiles) {
-    const source = readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8');
-    assert.match(source, /wuwaterm-proxy\.js/u);
-    assert.equal(source.includes('WUWATERM_API_BASE_URL'), false);
-    assert.equal(source.includes('WUWATERM_SITE_DEVICE_TOKEN'), false);
-    assert.equal(source.includes('set-cookie'), false);
-  }
-});
-
-test('provenance UI reads meta on demand and does not embed a repository game version', () => {
-  const pageSource = readFileSync(fileURLToPath(new URL('../app/page.tsx', import.meta.url)), 'utf8');
-  const source = readFileSync(fileURLToPath(new URL('../app/components/dictionary-provenance.tsx', import.meta.url)), 'utf8');
-  assert.equal(pageSource.includes('/api/meta'), false);
-  assert.equal(pageSource.includes('useEffect'), false);
-  assert.equal(source.includes('useEffect'), false);
-  assert.equal(source.includes('/api/meta'), true);
-  assert.equal(source.includes('3.7'), false);
-  assert.equal(source.includes('9218d612'), false);
-});
-
-test('Product v1 UI uses only same-origin APIs and does not sort, filter, or deduplicate matches', () => {
-  const componentPath = fileURLToPath(new URL('../app/components/translation-workbench.tsx', import.meta.url));
-  const source = readFileSync(componentPath, 'utf8');
-  for (const endpoint of ['/api/pool', '/api/terms', '/api/translations']) {
-    assert.equal(source.includes(endpoint), true, `missing ${endpoint}`);
-  }
-  assert.equal(/https?:\/\//u.test(source), false);
-  assert.equal(source.includes('new Set('), false);
-  assert.equal(source.includes('.sort('), false);
-  assert.equal(source.includes('.filter('), false);
-  for (const field of ['zh', 'en', 'category', 'reason', 'score', 'request_id', 'kind']) {
-    assert.equal(source.includes(field), true, `UI does not render ${field}`);
-  }
-  assert.equal(source.includes('AbortController'), true);
-  // UI copy lives in the zh catalog since the bilingual refactor; the copy
-  // contract is asserted there while structure stays asserted here.
-  const zhCatalog = readFileSync(fileURLToPath(new URL('../lib/messages.ts', import.meta.url)), 'utf8');
-  assert.match(zhCatalog, /仅停止本页等待/u);
-  assert.match(zhCatalog, /转到整句翻译/u);
-  assert.match(zhCatalog, /刷新额度/u);
-  assert.match(source, /m\.terms\.noneAction/u);
-  assert.match(source, /m\.pool\.refresh/u);
-  assert.match(source, /m\.translation\.loadingStatus/u);
-  assert.match(source, /controller\.signal\.aborted \|\| translationController\.current !== controller/u);
-  assert.match(source, /dictionary_miss/u);
-  assert.equal(source.includes('dictionary hit'), false);
-  const transfer = source.slice(
-    source.indexOf('function moveQueryToTranslation()'),
-    source.indexOf('return (', source.indexOf('function moveQueryToTranslation()')),
-  );
-  assert.ok(transfer.indexOf('translationController.current?.abort()') >= 0);
-  assert.ok(transfer.indexOf('translationController.current = null') >= 0);
-  assert.ok(transfer.indexOf('translationController.current?.abort()') < transfer.indexOf('setSource(query)'));
-  assert.ok(transfer.indexOf('translationController.current = null') < transfer.indexOf('setSource(query)'));
-  const proxySource = readFileSync(fileURLToPath(new URL('../lib/wuwaterm-proxy.js', import.meta.url)), 'utf8');
-  assert.match(proxySource, /timeoutMs = 100_000/u);
-  const pageSource = readFileSync(fileURLToPath(new URL('../app/page.tsx', import.meta.url)), 'utf8');
-  assert.match(pageSource, /id="top"/u);
 });

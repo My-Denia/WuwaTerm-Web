@@ -11,7 +11,7 @@ confirmed in-scope findings; record pre-existing or unrelated findings separatel
 Clean merged local branches and worktrees after recording restore SHAs and
 confirming ancestry or patch equivalence. Preserve unrelated dirty files.
 
-Validation: Node 24, npm 11.6.2; npm ci; both npm audit modes; npm test;
+Validation: Node 24, npm 11.6.2; npm ci --no-audit; npm audit --json; npm test;
 npm run typecheck; npm run lint; npm run build; npm run verify:no-client-secret;
 npm run test:built; WUWATERM_BROWSER_BUILT=1 npm run test:browser.
 The contract job also installs the pinned backend and runs real API-to-BFF and

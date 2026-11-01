@@ -12,8 +12,12 @@ const POOL = {
   reviews: { used: 0, limit: 60, remaining: 60 },
   reset_at: '2099-01-01T00:00:00Z',
 };
+const DEFAULT_MATCHES = [
+  { zh: '今汐', en: 'Jinhsi', category: 'character', reason: 'exact', score: 100 },
+  { zh: '今汐（白夜）', en: 'Jinhsi', category: 'character', reason: 'fuzzy', score: 85 },
+];
 
-async function open(page, query = '') {
+async function open(page, query = '', matches = DEFAULT_MATCHES) {
   const requests = { terms: 0, reviews: 0 };
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
@@ -22,10 +26,7 @@ async function open(page, query = '') {
       requests.terms += 1;
       return route.fulfill({ json: {
         request_id: 'terms-test-req',
-        matches: [
-          { zh: '今汐', en: 'Jinhsi', category: 'character', reason: 'exact', score: 100 },
-          { zh: '今汐（白夜）', en: 'Jinhsi', category: 'character', reason: 'fuzzy', score: 85 },
-        ],
+        matches,
       } });
     }
     if (path === '/api/reviews') {
@@ -39,6 +40,64 @@ async function open(page, query = '') {
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
   return requests;
 }
+
+test('term results retain the response order and duplicate rows', async ({ page }) => {
+  const matches = [
+    { zh: '声骸', en: 'Echo', category: 'item', reason: 'fuzzy', score: 40 },
+    { zh: '今汐', en: 'Jinhsi', category: 'character', reason: 'exact', score: 100 },
+    { zh: '声骸', en: 'Echo', category: 'item', reason: 'fuzzy', score: 40 },
+    { zh: '穗波', en: 'Baizhi', category: 'character', reason: 'fuzzy', score: 72 },
+  ];
+  const requests = await open(page, '', matches);
+  await page.locator('#term-query').fill('候选');
+  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  const rows = page.locator('.terms-results .term-result');
+  await expect(rows).toHaveCount(matches.length);
+  await expect(rows.locator('.term-pair strong')).toHaveText(matches.map(match => match.zh));
+  await expect(rows.locator('.term-pair span')).toHaveText(matches.map(match => match.en));
+  await expect(rows.locator('dl > div:nth-child(3) dd')).toHaveText(matches.map(match => String(match.score)));
+  expect(requests.terms).toBe(1);
+});
+
+test('moving a no-match query stops the old translation and ignores a late result', async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    window.fetch = (input, init) => {
+      if (new URL(String(input), location.href).pathname === '/api/translations') {
+        window.oldTranslationSignal = init.signal;
+        return originalFetch(input, { ...init, signal: undefined });
+      }
+      return originalFetch(input, init);
+    };
+  });
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await open(page, '', []);
+  await page.route('**/api/translations', async route => {
+    await held;
+    await route.fulfill({ json: {
+      kind: 'llm', text: 'Old result', direction: 'en', dictionary_miss: true, request_id: 'old-translation',
+    } });
+  });
+  try {
+    await page.locator('#translation-source').fill('旧输入');
+    await page.getByRole('button', { name: '翻译整句', exact: true }).click();
+    await expect(page.getByRole('button', { name: '翻译中…', exact: true })).toBeVisible();
+    await page.locator('#term-query').fill('新查询');
+    await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+    await page.getByRole('button', { name: '转到整句翻译', exact: true }).click();
+    expect(await page.evaluate(() => window.oldTranslationSignal.aborted)).toBe(true);
+    await expect(page.locator('#translation-source')).toHaveValue('新查询');
+    const response = page.waitForResponse('**/api/translations');
+    release();
+    await (await response).finished();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(page.locator('#translation-source')).toHaveValue('新查询');
+    await expect(page.locator('.translated-text')).toHaveCount(0);
+  } finally {
+    release();
+  }
+});
 
 test('term match actions: copy, insert to translation, and send to review', async ({ page }) => {
   await open(page);

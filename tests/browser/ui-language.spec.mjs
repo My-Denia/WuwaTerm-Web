@@ -4,6 +4,7 @@ import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const SOURCE = '今汐。\n声骸。';
 const TARGET = 'Jinhsi.\nEcho.';
+const CREDENTIAL_CANARY = 'SYNTHETIC_DEVICE_SENTINEL_74A1C9';
 
 async function open(page) {
   const reviews = [];
@@ -62,6 +63,7 @@ test('first visit defaults to Chinese with server-rendered lang and metadata', a
 test('toggling language switches copy in place, keeps workbench state, and sends no requests', async ({ page }) => {
   const { reviews } = await open(page);
   await prepare(page);
+  await page.locator('#translation-source').fill(CREDENTIAL_CANARY);
   await page.getByRole('button', { name: '采用此官方词对', exact: true }).first().click();
   await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
   // The staged-choice notice stays visible and re-localizes when the language
@@ -84,6 +86,7 @@ test('toggling language switches copy in place, keeps workbench state, and sends
   // Workbench state survives: manuscript, currency semantics, choice, filter, active finding, expansion.
   await expect(page.locator('#review-source')).toHaveValue(SOURCE);
   await expect(page.locator('#review-target')).toHaveValue(TARGET);
+  await expect(page.locator('#translation-source')).toHaveValue(CREDENTIAL_CANARY);
   // The staged choice reset the phase, so the honest state is "stale / re-check";
   // that semantics must survive the language switch unchanged.
   await expect(page.locator('.review-summary .review-stale')).toContainText('please check again');
@@ -92,6 +95,15 @@ test('toggling language switches copy in place, keeps workbench state, and sends
   await expect(page.locator('.candidate-sources').first()).toHaveAttribute('open', '');
   await expect(page.locator('.notice-state')).toContainText('Choice staged here');
   expect(await page.evaluate(() => window.__survivesToggle)).toBe('marker');
+  const cookies = await page.context().cookies();
+  expect(cookies.map(({ name, value, path, sameSite }) => ({ name, value, path, sameSite })))
+    .toEqual([{ name: 'wuwaterm-lang', value: 'en', path: '/', sameSite: 'Lax' }]);
+  expect(await page.evaluate(async () => ({
+    local: Object.fromEntries(Object.entries(localStorage)),
+    session: Object.fromEntries(Object.entries(sessionStorage)),
+    databases: await indexedDB.databases(),
+    caches: await caches.keys(),
+  }))).toEqual({ local: {}, session: {}, databases: [], caches: [] });
   await switchTo(page, '中文');
   await expect(page.getByRole('button', { name: '核对术语', exact: true })).toBeVisible();
   expect(apiRequests).toHaveLength(0);
