@@ -25,8 +25,10 @@ release a backward-compatible API first, then the Web. Roll back in reverse orde
 only while the paired versions remain compatible. Do not assume these two cases
 have the same deployment order.
 
-Keep `/v1`, report `schema_version`, `matcher_basis` and
-`wuwaterm-manuscript-v1` distinct. Their actual validators and fixtures are the
+Keep the `/v1` API path, report `rule_version`, dictionary `schema_version`,
+opt-in `matcher_revision` hash and `wuwaterm-manuscript-v1` format distinct.
+The matcher hash is requested with `X-WuwaTerm-Matcher-Basis: 1`; it is not
+a report field named `matcher_basis`. Their actual validators and fixtures are the
 contracts; a manuscript import is not fresh certification against the live DB.
 
 ## Deployment receipt
