@@ -4,12 +4,10 @@ This is the public Web workbench repository. Python core, API, Bot, dictionary
 builder, Windows client and VPS deployment tools belong to My-Denia/WuwaTerm.
 Keep the existing Linear WuwaTerm Project as the shared task authority.
 
-Use conventional work-based branches and signed commits. Changes go through
+Use conventional work-based branches and prefer signed commits. Changes go through
 pull requests, current-head CI and review, then squash merge. Do not push normal
 changes directly to main, force-push, or add AI co-author trailers. Resolve only
 confirmed in-scope findings; record pre-existing or unrelated findings separately.
-Clean merged local branches and worktrees after recording restore SHAs and
-confirming ancestry or patch equivalence. Preserve unrelated dirty files.
 
 Validation: Node 24, npm 11.6.2; npm ci --no-audit; npm audit --json; npm test;
 npm run typecheck; npm run lint; npm run build; npm run verify:no-client-secret;
@@ -22,3 +20,16 @@ Do not commit credentials, private endpoints, identifiable logs, generated
 term databases or upstream game data. Inspect every outgoing diff.
 Repository work does not authorize production deployment, resource rebinding,
 credential changes or database migrations. Preserve the existing hosting binding.
+
+## Review guidelines
+
+Flag only what breaks real behaviour, data or secrets. Do not ask for extra
+tests, process or defensive code.
+
+- A secret, private endpoint or user text reaching the client bundle, logs or an
+  outgoing request it should not.
+- The same-origin proxy (BFF) breaking against the real backend: a `/v1` response
+  shape or dictionary label key that the strict filtering now drops or passes unfiltered.
+- Silent loss or corruption of user work: manuscripts, imports, exports, or
+  translations that ignore locked official terms or report success on a failed upstream call.
+- Tests or scripts that consume live production quota or send Telegram messages.
