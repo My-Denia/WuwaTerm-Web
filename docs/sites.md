@@ -61,8 +61,10 @@ There are no accounts, cloud manuscripts, automatic uploads or browser-storage
 history. The user must download and later import the file to resume. The page
 can show whether current work still matches the latest manuscript download or
 the file imported in this visit, but it cannot confirm that download reached
-disk. Ordinary leave and refresh ask first when the work cannot be restored
-from that imported file. A crash or forced quit can still discard the page.
+disk. Link departures ask first when the work cannot be restored from that
+imported file; full-page reloads request the browser's own warning. Client-side
+history navigation, such as browser Back, is not covered and can discard unsaved
+work without prompting. A crash or forced quit can still discard the page.
 
 Import selection ownership follows a strict latest-selection policy: the latest chosen
 file immediately supersedes any prior pending file read regardless of completion order.

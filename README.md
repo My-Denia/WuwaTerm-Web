@@ -8,9 +8,11 @@ in the [Python backend](https://github.com/My-Denia/WuwaTerm).
 Public beta: <https://wuwaterm.denia-official.chatgpt.site>. This is a shared,
 best-effort pool with no SLA or per-visitor fairness guarantee.
 
-The workbench cannot confirm the download reached disk. Ordinary navigation
-and refresh ask first when work cannot be restored from the imported manuscript;
-a crash or forced quit can still discard the page. See the
+The workbench cannot confirm the download reached disk. Link departures ask first
+when work cannot be restored from the imported manuscript; full-page reloads
+request the browser's own warning. Client-side history navigation, such as the
+browser Back button, is not covered and can discard unsaved work without a prompt.
+A crash or forced quit can also discard the page. See the
 [privacy boundary](docs/privacy-and-llm.md) and [product guide](docs/sites.md).
 
 ## Development and verification

@@ -17,8 +17,10 @@ not read, parse, store or infer visitor IP addresses. Its shared-pool row stores
 aggregate time windows, admitted request counts and translation input-character
 totals — not input, output, request IDs, browser identifiers or per-person
 allowances. Results remain in the current page. The review workbench asks before
-an ordinary leave or refresh when that page cannot restore the work from the
-manuscript imported in the visit. The site cannot confirm a manuscript
+link navigation when that page cannot restore the work from the manuscript
+imported in the visit. Full-page reloads request the browser's own warning.
+Client-side history navigation, such as browser Back, is not covered and can
+discard unsaved work without prompting. The site cannot confirm a manuscript
 download reached disk, and a crash or forced quit can still discard the page.
 
 That application boundary is not a promise that every infrastructure layer has
