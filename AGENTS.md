@@ -26,15 +26,10 @@ credential changes or database migrations. Preserve the existing hosting binding
 Flag only what breaks real behaviour, data or secrets. Do not ask for extra
 tests, process or defensive code.
 
-- A change that makes a production secret, private endpoint or user text reach
-  the client bundle, logs or an outgoing request it should not.
-- The same-origin proxy (BFF) breaking against the real backend: a `/v1`
-  response shape or dictionary label key that the strict response filtering
-  now drops, rejects or passes through unfiltered.
-- Silent loss of user work: manuscripts, imports, exports or term-locked
-  translations that are corrupted, truncated or discarded without the existing
-  unsaved-work prompts.
-- Review or translation output that ignores locked official terms or reports
-  success on a failed upstream call.
-- Tests or scripts that start consuming live production quota or send Telegram
-  messages.
+- A secret, private endpoint or user text reaching the client bundle, logs or an
+  outgoing request it should not.
+- The same-origin proxy (BFF) breaking against the real backend: a `/v1` response
+  shape or dictionary label key that the strict filtering now drops or passes unfiltered.
+- Silent loss or corruption of user work: manuscripts, imports, exports, or
+  translations that ignore locked official terms or report success on a failed upstream call.
+- Tests or scripts that consume live production quota or send Telegram messages.
