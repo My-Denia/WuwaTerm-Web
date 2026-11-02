@@ -7,6 +7,15 @@ const clean = s => { const { source, target, direction, alignments, report, reso
 const fileFor = s => ({ ...clean(s), choices: s.report.findings.map((_, i) => choiceFor(s, i)), history: [clean(s)] });
 const save = s => { const x = fileFor(s); delete x.report; return serializeWorkfile(x); };
 
+test('a long translation can be saved and reopened intact before being split for review', () => {
+  const draft = { source: '文'.repeat(1200), target: '😀'.repeat(4200), direction: 'en', alignments: null, choices: [], history: [] };
+  const restored = parseWorkfile(serializeWorkfile(draft));
+  assert.equal(restored.source, draft.source);
+  assert.equal(restored.target, draft.target);
+  assert.deepEqual(restored.history, []);
+  assert.throws(() => serializeWorkfile({ ...draft, target: 'a'.repeat(MAX_WORKFILE_BYTES) }), { code: 'workfile_too_large' });
+});
+
 test('local workfile roundtrip preserves Unicode, direction, per-occurrence decisions and history without trusted status', () => {
   const s = fixture('😀今汐。\n今汐。', '😀Jinhsi.\nJinhsi.');
   const restored = parseWorkfile(save(s));

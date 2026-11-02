@@ -18,10 +18,10 @@ aggregate time windows, admitted request counts and translation input-character
 totals — not input, output, request IDs, browser identifiers or per-person
 allowances. Results remain in the current page. The review workbench asks before
 link navigation when that page cannot restore the work from the manuscript
-imported in the visit. Full-page reloads request the browser's own warning.
-Client-side history navigation, such as browser Back, is not covered and can
-discard unsaved work without prompting. The site cannot confirm a manuscript
-download reached disk, and a crash or forced quit can still discard the page.
+imported in the visit. Cross-page links load full documents, so Back, Forward
+and reload request the browser's own warning; cancelling keeps the current work.
+The site cannot confirm a manuscript download reached disk, and a crash or
+forced quit can still discard the page.
 
 That application boundary is not a promise that every infrastructure layer has
 zero logs or retention. Hosting, network transport and the configured model

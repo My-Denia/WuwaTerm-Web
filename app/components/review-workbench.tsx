@@ -307,6 +307,12 @@ export function ReviewWorkbench() {
     return () => document.removeEventListener('click', onClick, true);
   }, [guard]);
   useEffect(() => {
+    // A document restored by the browser must protect subsequent departures.
+    function onPageShow() { leaveBypass.current = false; setPendingLeaveUrl(null); }
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
+  useEffect(() => {
     if (!guard) return;
     function onBeforeUnload(event: BeforeUnloadEvent) {
       if (leaveBypass.current) return;
@@ -399,7 +405,9 @@ export function ReviewWorkbench() {
     const parts = highlightSegments(target, finding.target_span);
     const forms = finding.candidates.flatMap(c => [c.zh, c.en]);
     if (!parts || !forms.includes(finding.target_span.text)) return;
-    editText('target', parts.before + (direction === 'en' ? candidate.en : candidate.zh) + parts.after);
+    const result = spliceOccurrence(target, finding.target_span.text, finding.target_span, direction === 'en' ? candidate.en : candidate.zh);
+    if (result.error === 'revisionTooLong') setNotice('revisionTooLong');
+    if (result.target !== undefined) editText('target', result.target);
   }
   function selectedSpan(box: HTMLTextAreaElement | null, text: string): Span | null {
     if (!box || box.selectionStart === box.selectionEnd) return null;
@@ -588,6 +596,7 @@ export function ReviewWorkbench() {
       <label htmlFor="review-target">{m.review.targetLabel}</label>
       <textarea ref={targetBox} id="review-target" value={target} onChange={e => editText('target', e.target.value)} rows={5} placeholder={m.review.targetPlaceholder} />
       <div className="field-hint"><span>{m.review.hintSafety}</span><span>{fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span></div>
+      {(sourceLength > 2000 || targetLength > 2000) && <p role="status">{m.review.longManuscript}</p>}
       <details className="alignment-panel"><summary>{alignments === null ? m.review.alignmentSummaryNone : fill(m.review.alignmentSummaryCount, { n: alignments.length })}</summary>
         <p>{m.review.alignmentIntro}</p>
         <div className="actions">
