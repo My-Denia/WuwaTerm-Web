@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { categoryLabel, reasonLabel } from '../../lib/dictionary-labels';
 import { fill, msg } from '../../lib/messages';
@@ -158,7 +157,7 @@ export function TranslationWorkbench() {
     <aside className="pool-notice" aria-label={m.pool.noticeAria}>
       <span className="notice-symbol" aria-hidden="true">↗</span>
       <div><strong>{m.pool.noticeTitle}</strong><p>{m.pool.noticeBody}</p></div>
-      <Link href={withQuery('/limits', termQuery)}>{m.pool.noticeLink} <span aria-hidden="true">↗</span></Link>
+      <a href={withQuery('/limits', termQuery)}>{m.pool.noticeLink} <span aria-hidden="true">↗</span></a>
     </aside>
     <section className="pool-strip" aria-live="polite" aria-label={m.pool.stripAria}>
       {pool.kind === 'success' ? <>

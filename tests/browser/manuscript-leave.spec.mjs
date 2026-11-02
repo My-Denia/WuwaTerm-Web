@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { makeChoice, serializeWorkfile } from '../../lib/manuscript.js';
-import { candidate, fixture } from '../fixtures/manuscript.mjs';
+import { candidate, fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const POOL = {
@@ -179,6 +179,57 @@ test('reload asks before discarding typed work and staying keeps it', async ({ p
   await reloading;
   await expect(page.locator('#review-source')).toHaveValue('刷新前的原文。');
 });
+
+for (const direction of ['Back', 'Forward']) {
+  test(`browser ${direction} asks before discarding the manuscript, choices and report`, async ({ page }) => {
+    await open(page, route => {
+      const body = route.request().postDataJSON();
+      return route.fulfill({ json: freshApiReport(fixture(body.source, body.target, body.direction).report) });
+    });
+    await page.getByRole('link', { name: '隐私说明' }).first().click();
+    await page.getByRole('link', { name: /返回 WuwaTerm/ }).click();
+    await expect(page.locator('.review-quota')).toContainText('60', { timeout: 30_000 });
+    if (direction === 'Forward') {
+      await page.getByRole('link', { name: '使用与限额', exact: true }).click();
+      await page.goBack();
+      await expect(page.locator('.review-quota')).toContainText('60', { timeout: 30_000 });
+    }
+    await page.locator('#review-source').fill('今汐。');
+    await page.locator('#review-target').fill('Jinhsi.');
+    await page.getByRole('button', { name: '核对术语', exact: true }).click();
+    await expect(page.locator('.review-current')).toBeVisible();
+    await page.getByRole('button', { name: '采用此官方词对', exact: true }).click();
+    const before = await download(page, '保存稿件');
+    const parts = [];
+    for await (const part of await before.createReadStream()) parts.push(part);
+    const original = JSON.parse(Buffer.concat(parts).toString());
+    const historyLength = await page.evaluate(() => history.length);
+    for (const accept of [false, false, true]) {
+      const waiting = page.waitForEvent('dialog', { timeout: 5_000 });
+      const navigating = page.evaluate(direction => {
+        if (direction === 'Back') history.back(); else history.forward();
+      }, direction).catch(error => {
+        if (!accept || !error.message.includes('Execution context was destroyed')) throw error;
+      });
+      const prompt = await waiting;
+      expect(prompt.type()).toBe('beforeunload');
+      if (accept) await prompt.accept(); else await prompt.dismiss();
+      await navigating;
+      if (!accept) {
+        await expect(page).toHaveURL(/\/$/);
+        await expect(page.locator('#review-source')).toHaveValue(original.source);
+        await expect(page.locator('#review-target')).toHaveValue(original.target);
+        await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
+        await expect(page.locator('.review-summary')).toBeVisible();
+        expect(await page.evaluate(() => history.length)).toBe(historyLength);
+      }
+    }
+    await expect(page).toHaveURL(direction === 'Back' ? /\/privacy$/ : /\/limits$/);
+    await page.getByRole('link', { name: /返回 WuwaTerm/ }).click();
+    await expect(page.locator('#review-source')).toHaveValue('');
+    await expect(page.locator('#review-target')).toHaveValue('');
+  });
+}
 
 test('a running check is named in the leave dialog and is not released', async ({ page }) => {
   let reviews = 0;

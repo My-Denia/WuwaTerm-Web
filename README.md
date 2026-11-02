@@ -9,9 +9,9 @@ Public beta: <https://wuwaterm.denia-official.chatgpt.site>. This is a shared,
 best-effort pool with no SLA or per-visitor fairness guarantee.
 
 The workbench cannot confirm the download reached disk. Link departures ask first
-when work cannot be restored from the imported manuscript; full-page reloads
-request the browser's own warning. Client-side history navigation, such as the
-browser Back button, is not covered and can discard unsaved work without a prompt.
+when work cannot be restored from the imported manuscript. Cross-page links load
+a full document, so Back, Forward and reload use the browser's own warning.
+Cancelling leaves the current manuscript, decisions and reports in place.
 A crash or forced quit can also discard the page. See the
 [privacy boundary](docs/privacy-and-llm.md) and [product guide](docs/sites.md).
 

@@ -52,6 +52,25 @@ async function select(page, text, index = 0) {
   for (const radio of await radios.all()) await expect(radio).not.toBeChecked();
   await radios.nth(index).check();
 }
+
+for (const padding of [1998, 1994]) {
+  test(`located replacement preserves the review boundary with ${padding} Unicode scalars`, async ({ page }) => {
+    const target = '😀'.repeat(padding) + '今汐';
+    const draft = fixture('今汐。', target);
+    const report = freshApiReport(draft.report);
+    report.findings[0].target_span = { start: padding, end: padding + 2, text: '今汐' };
+    const requests = await open(page, { before_request: draft, before_report: report });
+    await page.getByRole('button', { name: '替换已定位词语', exact: true }).click();
+    const expected = padding === 1998 ? target : '😀'.repeat(padding) + 'Jinhsi';
+    await expect(page.locator('#review-target')).toHaveValue(expected);
+    if (padding === 1998) {
+      await expect(page.locator('.notice-state')).toContainText('替换后超过 2,000 字符');
+      await expect(page.locator('.review-current')).toBeVisible();
+    }
+    expect(JSON.parse(await download(page, '保存稿件')).target).toBe(expected);
+    expect(requests).toHaveLength(1);
+  });
+}
 for (const [caseIndex, fragment] of [[0, 'sound shell'], [1, 'Jinxi'], [2, '回音'], [3, 'sound shell']]) {
   test(`real-engine ${engine.cases[caseIndex].name}: explicit occurrence edit and explicit request/receipt`, async ({ page }, info) => {
     const data = engine.cases[caseIndex];

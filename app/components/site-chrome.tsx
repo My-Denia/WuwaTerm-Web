@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect } from 'react';
 import { msg } from '../../lib/messages';
 import { useTermQuery, withQuery } from '../query-state';
@@ -8,6 +7,8 @@ import { useUiLanguage } from './ui-language-context';
 import { LanguageToggle } from './language-toggle';
 
 export function SiteChrome({ children }: { children: React.ReactNode }) {
+  // Cross-page links load a document so beforeunload also protects Back/Forward.
+  // Keep section anchors as same-document navigation.
   const { lang } = useUiLanguage();
   const m = msg(lang);
   const termQuery = useTermQuery();
@@ -27,10 +28,10 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
           <a href="#review-title" className="section-pill">{m.terms.jumpReview}</a>
           <a href="#provenance-section" className="section-pill">{m.terms.jumpProvenance}</a>
         </div>
-        <div className="nav-links"><Link href={withQuery('/limits', termQuery)}>{m.nav.limits}</Link><Link href={withQuery('/privacy', termQuery)}>{m.nav.privacy}</Link><span className="beta-badge">{m.nav.betaBadge}</span><LanguageToggle /></div>
+        <div className="nav-links"><a href={withQuery('/limits', termQuery)}>{m.nav.limits}</a><a href={withQuery('/privacy', termQuery)}>{m.nav.privacy}</a><span className="beta-badge">{m.nav.betaBadge}</span><LanguageToggle /></div>
       </nav>
       {children}
-      <footer><p>{m.nav.footerTagline}</p><div><Link href={withQuery('/limits', termQuery)}>{m.nav.footerLimits}</Link><Link href={withQuery('/privacy', termQuery)}>{m.nav.footerPrivacy}</Link></div></footer>
+      <footer><p>{m.nav.footerTagline}</p><div><a href={withQuery('/limits', termQuery)}>{m.nav.footerLimits}</a><a href={withQuery('/privacy', termQuery)}>{m.nav.footerPrivacy}</a></div></footer>
     </>
   );
 }

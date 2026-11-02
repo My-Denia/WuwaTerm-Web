@@ -62,9 +62,15 @@ history. The user must download and later import the file to resume. The page
 can show whether current work still matches the latest manuscript download or
 the file imported in this visit, but it cannot confirm that download reached
 disk. Link departures ask first when the work cannot be restored from that
-imported file; full-page reloads request the browser's own warning. Client-side
-history navigation, such as browser Back, is not covered and can discard unsaved
-work without prompting. A crash or forced quit can still discard the page.
+imported file. Cross-page links use full document navigation so browser Back,
+Forward and reload request the browser's own warning. Cancelling retains the
+manuscript, decisions and reports. A crash or forced quit can still discard the page.
+
+The 2,000-character review request limit does not restrict manuscript storage:
+long translations can be saved and reopened intact within the 1 MiB file cap.
+The workbench asks users to review longer texts in smaller sections and keeps
+the check action unavailable until both texts fit. Both replacement actions
+refuse edits that would exceed the review limit without changing the draft.
 
 Import selection ownership follows a strict latest-selection policy: the latest chosen
 file immediately supersedes any prior pending file read regardless of completion order.

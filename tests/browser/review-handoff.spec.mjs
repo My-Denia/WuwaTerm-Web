@@ -6,7 +6,7 @@ const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const A = { source: '今汐。', target: 'Jinhsi.', direction: 'en' };
 const B = { source: '声骸。', target: 'Echo.', direction: 'en' };
 
-async function open(page) {
+async function open(page, translatedText) {
   const reviews = [];
   const gate = { next: null };
   await page.route('**/api/**', async route => {
@@ -21,7 +21,7 @@ async function open(page) {
     } });
     if (path === '/api/translations') {
       const body = route.request().postDataJSON();
-      return route.fulfill({ json: { kind: 'exact', text: body.text === A.source ? A.target : B.target,
+      return route.fulfill({ json: { kind: 'exact', text: translatedText ?? (body.text === A.source ? A.target : B.target),
         direction: body.to ?? 'en', dictionary_miss: false, request_id: 'synthetic-translation' } });
     }
     if (path === '/api/reviews') {
@@ -60,6 +60,26 @@ async function downloadText(page, button) {
 async function workfile(page, button = '保存稿件') {
   return JSON.parse(await downloadText(page, button));
 }
+
+test('long translation handoff can be saved, reopened and shortened for review without truncation', async ({ page }) => {
+  const target = '文'.repeat(4200);
+  const { reviews } = await open(page, target);
+  await translate(page, { ...B, target });
+  await page.getByRole('button', { name: '送去审校', exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue(target);
+  await expect(page.getByRole('button', { name: '核对术语', exact: true })).toBeDisabled();
+  await expect(page.locator('.review-card')).toContainText('完整稿件仍可保存');
+  const saved = await workfile(page);
+  expect(saved.target).toBe(target);
+  expect(reviews).toHaveLength(0);
+  await page.locator('#review-target').fill('temporary edit');
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'long-manuscript.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(saved)) });
+  await expect(page.locator('#review-target')).toHaveValue(target);
+  await page.locator('#review-target').fill(B.target);
+  await page.getByRole('button', { name: '核对术语', exact: true }).click();
+  await expect(page.locator('.review-current')).toBeVisible();
+  expect(reviews).toHaveLength(1);
+});
 
 async function prepare(page) {
   await page.locator('#review-source').fill(A.source);
