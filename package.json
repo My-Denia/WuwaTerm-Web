@@ -9,8 +9,10 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "build:selfhost": "WUWATERM_BUILD_TARGET=selfhost next build --webpack && node scripts/package-selfhost.mjs",
+    "start:selfhost": "node scripts/start-selfhost.mjs",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .next-selfhost --ignore-pattern .wrangler",
     "typecheck": "tsc --noEmit",
     "test:feasibility": "node --test tests/feasibility.test.mjs",
     "test:product": "node --test tests/product-v1.test.mjs",

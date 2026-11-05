@@ -8,6 +8,10 @@ in the [Python backend](https://github.com/My-Denia/WuwaTerm).
 Public beta: <https://wuwaterm.denia-official.chatgpt.site>. This is a shared,
 best-effort pool with no SLA or per-visitor fairness guarantee.
 
+The same workbench can also run privately on your own host with a configured
+Core API and an authenticated HTTPS reverse proxy. See the
+[self-hosting guide](docs/self-hosting.md) for the standalone and Docker paths.
+
 The workbench cannot confirm the download reached disk. Link departures ask first
 when work cannot be restored from the imported manuscript. Cross-page links load
 a full document, so Back, Forward and reload use the browser's own warning.

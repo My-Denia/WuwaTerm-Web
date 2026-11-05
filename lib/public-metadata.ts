@@ -1,9 +1,11 @@
 import { runtimeEnvironment } from './wuwaterm-proxy.js';
 import type { Metadata } from 'next';
+import { isSelfHosted } from './ui-runtime';
 
 // This value is set only after the separately authorized public access gate.
 // Never derive an SEO origin from visitor-controlled request headers.
 export async function publicOrigin(): Promise<string | null> {
+  if (isSelfHosted()) return null;
   const env = await runtimeEnvironment();
   const value = env.WUWATERM_PUBLIC_ORIGIN;
   if (typeof value !== 'string') return null;

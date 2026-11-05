@@ -1,11 +1,13 @@
 export type Allowance = { used: number; limit: number; remaining: number };
 export type Pool = {
   status: 'available';
+  shared?: boolean;
   translation_enabled: boolean;
   terms: Allowance;
   translations: Allowance;
   characters: Allowance;
   reviews: Allowance;
+  upstream?: { used: number; limit: number };
   reset_at: string;
 };
 

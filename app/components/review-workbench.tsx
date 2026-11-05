@@ -16,6 +16,7 @@ import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { fill, msg, summarySentence } from '../../lib/messages';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
+import { workbenchPath } from '../../lib/ui-runtime';
 import { renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
 import { useUiLanguage } from './ui-language-context';
 
@@ -262,7 +263,7 @@ export function ReviewWorkbench() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch('/api/pool', { cache: 'no-store', signal: controller.signal });
+        const response = await fetch(workbenchPath('/api/pool'), { cache: 'no-store', signal: controller.signal });
         const value = await poolPayload(response);
         if (!controller.signal.aborted) setPool(response.ok && isPool(value) ? { kind: 'success', data: value } : { kind: 'error' });
       } catch { if (!controller.signal.aborted) setPool({ kind: 'error' }); }
@@ -341,7 +342,7 @@ export function ReviewWorkbench() {
       controller.current = null; setPhase('error'); setError({ code: 'bodyTooLarge' }); return;
     }
     try {
-      const response = await fetch('/api/reviews', { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(body), signal: abort.signal });
+      const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(body), signal: abort.signal });
       const value = await response.json();
       if (abort.signal.aborted || generation.current !== mine) return;
       if (!response.ok) {

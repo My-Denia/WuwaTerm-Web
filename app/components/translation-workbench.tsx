@@ -5,6 +5,7 @@ import { categoryLabel, reasonLabel } from '../../lib/dictionary-labels';
 import { fill, msg } from '../../lib/messages';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
+import { workbenchPath } from '../../lib/ui-runtime';
 import { setBrowserQuery, useTermQuery, withQuery } from '../query-state';
 import { useUiLanguage } from './ui-language-context';
 
@@ -39,7 +40,7 @@ export function TranslationWorkbench() {
     const controller = new AbortController();
     void (async () => {
       try {
-        const r = await fetch('/api/pool', { cache: 'no-store', signal: controller.signal });
+        const r = await fetch(workbenchPath('/api/pool'), { cache: 'no-store', signal: controller.signal });
         const v = await payload(r);
         if (!controller.signal.aborted) setPool(r.ok && isPool(v) ? { kind: 'success', data: v } : { kind: 'error', error: failure(v) ? v : FALLBACK });
       } catch { if (!controller.signal.aborted) setPool({ kind: 'error', error: FALLBACK }); }
@@ -73,7 +74,7 @@ export function TranslationWorkbench() {
     const controller = new AbortController(); termsController.current = controller;
     setTerms({ kind: 'loading' });
     try {
-      const r = await fetch('/api/terms?q=' + encodeURIComponent(trimmed), { cache: 'no-store', signal: controller.signal });
+      const r = await fetch(workbenchPath('/api/terms') + '?q=' + encodeURIComponent(trimmed), { cache: 'no-store', signal: controller.signal });
       const v = await payload(r);
       if (controller.signal.aborted || termsController.current !== controller) return;
       setTerms(r.ok && isTerms(v) ? { kind: 'success', data: v } : { kind: 'error', error: failure(v) ? v : FALLBACK });
@@ -122,7 +123,7 @@ export function TranslationWorkbench() {
     const controller = new AbortController(); translationController.current = controller;
     setCopied(false); setCopyFailed(false); setTranslation({ kind: 'loading' });
     try {
-      const r = await fetch('/api/translations', { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(target === 'auto' ? { text: source } : { text: source, to: target }), signal: controller.signal });
+      const r = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(target === 'auto' ? { text: source } : { text: source, to: target }), signal: controller.signal });
       const v = await payload(r);
       if (controller.signal.aborted || translationController.current !== controller) return;
       setTranslation(r.ok && isTranslation(v) ? { kind: 'success', data: v } : { kind: 'error', error: failure(v) ? v : FALLBACK });
