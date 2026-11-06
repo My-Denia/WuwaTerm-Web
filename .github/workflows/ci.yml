@@ -58,16 +58,35 @@ jobs:
           repository: My-Denia/WuwaTerm
           ref: ${{ steps.backend.outputs.revision }}
           path: backend
+      - name: Read immutable Windows revision
+        id: windows
+        run: |
+          set -euo pipefail
+          revision=$(cat contracts/windows-ref.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          repository: My-Denia/WuwaTerm-Windows
+          ref: ${{ steps.windows.outputs.revision }}
+          path: windows
+      - name: Verify Windows source revision
+        run: |
+          set -euo pipefail
+          actual=$(git -C windows rev-parse HEAD)
+          echo "Windows source: $actual"
+          test "$actual" = '${{ steps.windows.outputs.revision }}'
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - run: python -m pip install -e './backend[dev]'
       - run: npm run test:contract
         env:
           WUWATERM_BACKEND_ROOT: ${{ github.workspace }}/backend
+          WUWATERM_WINDOWS_ROOT: ${{ github.workspace }}/windows
       - run: python -m pytest -m cross_component tests/test_meta_site_contract.py
         working-directory: backend
         env:
