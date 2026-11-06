@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { workbenchPath } from '../lib/ui-runtime';
 
 export const QUERY_CHANGE_EVENT = 'wuwaterm-query-change';
 
@@ -46,6 +47,6 @@ export function setBrowserQuery(target: string | null) {
 export function withQuery(href: string, q?: string): string {
   const query = (q !== undefined ? q : (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') || '' : '')).trim();
   const [base] = href.split('?');
-  if (!query) return base;
-  return `${base}?q=${encodeURIComponent(query)}`;
+  if (!query) return workbenchPath(base);
+  return `${workbenchPath(base)}?q=${encodeURIComponent(query)}`;
 }

@@ -1,4 +1,5 @@
 import type { UiLanguage } from './ui-language';
+import { isSelfHosted } from './ui-runtime.ts';
 
 // Interface copy for both languages. The zh entries are the original wording;
 // en mirrors the exact key structure (compile-checked, plus a runtime parity
@@ -1019,8 +1020,118 @@ const en: typeof zh = {
 
 export type Messages = typeof zh;
 
+// The workbench is shared by both deployments. These overrides describe the
+// private instance without changing the public trial's established copy.
+const selfhostZh: Messages = {
+  ...zh,
+  meta: { ...zh.meta, description: '查找鸣潮官方中英术语，并使用字典优先、保留术语的整句翻译。此工作台由实例管理员自行托管。' },
+  nav: { ...zh.nav, limits: '实例额度', betaBadge: '自托管' },
+  pool: {
+    ...zh.pool, noticeAria: '实例额度说明', noticeTitle: '本实例额度',
+    noticeBody: '额度由实例管理员配置，本实例的请求共同计数；后端也可能有独立限制。',
+    stripAria: '实例额度', loading: '正在读取实例额度…',
+  },
+  productNotes: [
+    zh.productNotes[0],
+    { title: '本地稿件', body: '工作台不保存稿件历史。刷新会按网址中的查询词重新查询；翻译与审校结果会清空。后端和运营方可能保留技术记录。' },
+    zh.productNotes[2],
+  ],
+  tMsg: {
+    ...zh.tMsg,
+    translation_pool_exhausted: '本实例今日整句翻译额度已用完。术语查询有独立额度，仍受服务状态限制。',
+    terms_pool_exhausted: '本实例今日术语查询额度已用完，将于 UTC 00:00 重置。',
+    shared_pool_busy: '本实例的请求窗口已满，请稍后再试。',
+    shared_pool_unavailable: '暂时无法确认实例额度，服务已暂停接收请求。',
+  },
+  review: { ...zh.review, intro: '保存稿件文件，下次导入继续修改。只有主动核对时才提交两框文本；工作台不保存稿件历史，审校不调用整句模型。', quotaSnapshot: '本实例今日审校还剩 {n} / {limit} 次。这是实例快照，提交时重新核对。' },
+  rMsg: {
+    ...zh.rMsg, reviews_pool_exhausted: '本实例今日审校额度已用完，将于 UTC 00:00 重置。',
+    shared_pool_busy: '本实例的请求窗口已满，请稍后再试。',
+    shared_pool_unavailable: '暂时无法确认实例额度，已暂停接收请求。',
+  },
+  provenance: { ...zh.provenance, quotaNote: '第一次打开和每次重新读取各计入一次本实例的词典信息额度。收起后再打开不会重新请求。' },
+  limits: {
+    ...zh.limits, title: '实例额度 · WuwaTerm', description: '此自托管实例的额度、重置和故障处理。',
+    eyebrow: 'SELF-HOSTED', h1: '本实例的使用额度。',
+    lead: '管理员可配置实例额度；所有通过此实例的请求共同计数。后端还可能设置独立限制。',
+    s1h: '当前实例额度', tableCeiling: '实例上限', rowWindowCeiling: '由实例管理员配置',
+    s1p: '每日额度于 UTC 00:00 重置。术语输入最多 200 字符，整句和审校原文/译文各最多 2,000 字符。整句翻译是否开放以首页状态为准。',
+    s2p: '查询、翻译和审校各有每日额度，也受本实例的共同短窗口和后端可用性限制。首页显示的是快照，提交时重新核对。',
+    s5p2: '实例额度不限制到达反向代理的流量，也不能保证服务可用或控制后端全部费用。它不是单用户或单 IP 的公平配额。',
+    footerUpdated: '自托管实例',
+  },
+  privacy: {
+    ...zh.privacy, description: '此自托管工作台的输入、会话与数据处理说明。',
+    lead: '此实例由管理员自行运行，访问由其反向代理保护。请确认运营方和模型服务的数据处理方式后再提交内容。',
+    s2p1: '“保存稿件”将原文、译文、方向、选择依据、分段对应及最近两份报告交给浏览器下载。“导入稿件”只在当前浏览器解析，不会自动上传或核对。页面不能确认文件已写入磁盘；再次编辑时请主动导入。工作台不维护稿件历史。',
+    s2p3: '界面语言偏好保存在 wuwaterm-lang cookie 中（最长一年）。私有访问还使用一个不透明的安全会话 cookie；它在会话到期或服务重启后失效。两者均按实例路径限定。',
+    s3h: '实例额度记录什么',
+    s3p1: '本地额度数据库保存时间窗口、获准请求数和翻译输入字符总数，不保存输入或译文。额度针对整个实例，而非个人。',
+    s3p2: '反向代理和 Core API 可有各自的认证、限流及技术记录；其配置由实例管理员决定。',
+    s4p1: '工作台不维护查询、翻译或稿件历史，也不将输入写入持久浏览器存储。当前标签中的查询词会出现在网址参数里。普通离开时，如果审校内容无法从本次导入的稿件恢复，页面会先询问；确认离开、崩溃或强制退出仍可能丢失页面内容。请自行保存稿件文件。',
+    s4p2: '实例运营方、反向代理、Core API 和模型服务可能处理或记录技术数据及提交内容。请向实例管理员了解实际配置和保留期限。',
+    s5h: '私有访问',
+    s5p1: '此工作台依赖管理员配置的受保护反向代理和服务端设备凭据；它不提供独立的账户管理。',
+    s5p2Before: '关于实例额度、重置与中断，请阅读', footerUpdated: '自托管实例',
+  },
+};
+
+const selfhostEn: Messages = {
+  ...en,
+  meta: { ...en.meta, description: 'Look up official Wuthering Waves terms and translate sentences with dictionary terms preserved. This workbench is self-hosted.' },
+  nav: { ...en.nav, limits: 'Instance quota', betaBadge: 'Self-hosted' },
+  pool: {
+    ...en.pool, noticeAria: 'Instance quota note', noticeTitle: 'This instance’s quota',
+    noticeBody: 'The administrator configures this instance’s aggregate limits. The backend may apply additional limits.',
+    stripAria: 'Instance quota', loading: 'Reading instance quota…',
+  },
+  productNotes: [
+    en.productNotes[0],
+    { title: 'Local manuscripts', body: 'The workbench keeps no manuscript history. Refreshing re-runs the query in the URL and clears translation and review results. The backend and operator may retain technical records.' },
+    en.productNotes[2],
+  ],
+  tMsg: {
+    ...en.tMsg, translation_pool_exhausted: 'This instance’s sentence-translation quota is used up today. Term lookup has a separate quota and remains subject to service availability.',
+    terms_pool_exhausted: 'This instance’s term-lookup quota is used up today; it resets at 00:00 UTC.',
+    shared_pool_busy: 'This instance’s request window is full. Please try again shortly.',
+    shared_pool_unavailable: 'The instance quota cannot be confirmed, so requests are paused.',
+  },
+  review: { ...en.review, intro: 'Save a manuscript file and import it next time to continue. Both texts are submitted only when you run a check; the workbench keeps no manuscript history and review makes no sentence-model calls.', quotaSnapshot: 'Reviews left today for this instance: {n} / {limit}. This snapshot is rechecked when you submit.' },
+  rMsg: {
+    ...en.rMsg, reviews_pool_exhausted: 'This instance’s review quota is used up today; it resets at 00:00 UTC.',
+    shared_pool_busy: 'This instance’s request window is full. Please try again shortly.',
+    shared_pool_unavailable: 'The instance quota cannot be confirmed; requests are paused.',
+  },
+  provenance: { ...en.provenance, quotaNote: 'The first open and each re-read count once against this instance’s dictionary-info quota. Collapsing and reopening does not request again.' },
+  limits: {
+    ...en.limits, title: 'Instance quota · WuwaTerm', description: 'Quota, resets and outages for this self-hosted instance.',
+    eyebrow: 'SELF-HOSTED', h1: 'This instance’s usage quota.',
+    lead: 'The administrator configures aggregate limits for this instance. The backend may impose additional limits.',
+    s1h: 'Current instance limits', tableCeiling: 'Instance limit', rowWindowCeiling: 'Configured by the instance administrator',
+    s1p: 'Daily quotas reset at 00:00 UTC. Term input is capped at 200 characters; sentences and review source/translation at 2,000 characters each. The home page shows whether sentence translation is enabled.',
+    s2p: 'Lookup, translation and review have separate daily counts, and also share this instance’s short request window and backend availability. The home page is a snapshot, rechecked on submission.',
+    s5p2: 'Instance limits do not cap traffic reaching the reverse proxy, guarantee availability, or control all backend costs. They are not per-user or per-IP fairness quotas.',
+    footerUpdated: 'Self-hosted instance',
+  },
+  privacy: {
+    ...en.privacy, description: 'How this self-hosted workbench handles input, sessions and data.',
+    lead: 'An administrator runs this instance and protects access through a reverse proxy. Check the operator’s and model provider’s data practices before submitting content.',
+    s2p1: '“Save manuscript” hands the source, translation, direction, choice bases, segment alignments and two most recent reports to the browser for download. “Import manuscript” parses only in the current browser and never uploads or checks automatically. The page cannot confirm the file reached disk; import it yourself to resume. The workbench keeps no manuscript history.',
+    s2p3: 'The wuwaterm-lang cookie stores the interface language for up to one year. Private access also uses an opaque secure session cookie, which expires or becomes invalid when the server restarts. Both are scoped to the instance path.',
+    s3h: 'What the instance quota records',
+    s3p1: 'The local quota database keeps time windows, admitted request counts and total translation input characters; it does not store input or translations. Quota is for the whole instance, not a person.',
+    s3p2: 'The reverse proxy and Core API can have their own authentication, rate limits and technical logs, as configured by the administrator.',
+    s4p1: 'The workbench keeps no lookup, translation or manuscript history and does not write input to persistent browser storage. The current tab carries lookup queries in the URL. On an ordinary leave, the page asks first if review work cannot be restored from the manuscript imported this visit; confirming leave, a crash or a force quit can still discard the page. Keep your manuscript file yourself.',
+    s4p2: 'The instance operator, reverse proxy, Core API and model provider may process or log technical data and submitted content. Ask the administrator about the actual configuration and retention.',
+    s5h: 'Private access',
+    s5p1: 'This workbench relies on an administrator-configured protected reverse proxy and server-side device credential; it does not provide separate account management.',
+    s5p2Before: 'For this instance’s quota, resets and outages, read the ', footerUpdated: 'Self-hosted instance',
+  },
+};
+
 /** Unknown languages and missing keys fall back to Chinese. */
 export function msg(lang: UiLanguage): Messages {
+  if (isSelfHosted()) return lang === 'en' ? selfhostEn : selfhostZh;
   return lang === 'en' ? en : zh;
 }
 

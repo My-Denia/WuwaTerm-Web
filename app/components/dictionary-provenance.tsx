@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { msg } from '../../lib/messages';
 import { numberLocale } from '../../lib/ui-language';
+import { workbenchPath } from '../../lib/ui-runtime';
 import { useUiLanguage } from './ui-language-context';
 
 type Provenance = {
@@ -70,7 +71,7 @@ export function DictionaryProvenance() {
     setBusy(true);
     setView({ kind: 'loading' });
     try {
-      const response = await fetch('/api/meta', { cache: 'no-store' });
+      const response = await fetch(workbenchPath('/api/meta'), { cache: 'no-store' });
       const body: unknown = await response.json().catch(() => null);
       const next: Snapshot = response.ok && isProvenance(body)
         ? { kind: 'success', data: body }

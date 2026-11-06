@@ -8,6 +8,10 @@ in the [Python backend](https://github.com/My-Denia/WuwaTerm).
 Public beta: <https://wuwaterm.denia-official.chatgpt.site>. This is a shared,
 best-effort pool with no SLA or per-visitor fairness guarantee.
 
+The same workbench can also run privately on your own host with a configured
+Core API and an authenticated HTTPS reverse proxy. See the
+[self-hosting guide](docs/self-hosting.md) for the standalone and Docker paths.
+
 The workbench cannot confirm the download reached disk. Link departures ask first
 when work cannot be restored from the imported manuscript. Cross-page links load
 a full document, so Back, Forward and reload use the browser's own warning.
@@ -54,9 +58,16 @@ Changes to strict response shapes require coordinated consumer/producer PRs;
 adding a `/v1` field is not automatically compatible with the strict BFF.
 See [cross-repository delivery](docs/cross-repository-delivery.md).
 
-Work remains coordinated through the existing Linear WuwaTerm Project. Do not
-create a parallel authoritative backlog. Python core, API, Bot, dictionary
-builder and VPS tools stay in the backend repository; Windows stays there too.
+Work remains coordinated through the existing WuwaTerm Project and its
+[unified GitHub entry](https://github.com/users/My-Denia/projects/1). Do not
+create a parallel authoritative backlog. The Core repository owns authoritative
+translation, terminology review, HTTP API, dictionary construction/validation
+and common deployment/recovery tools. [Telegram](https://github.com/My-Denia/WuwaTerm-Telegram)
+and [Windows](https://github.com/My-Denia/WuwaTerm-Windows) own their product
+source and delivery, reusing the pinned Core package and protected HTTP API
+respectively. Public and self-hosted Web use this same workbench; Sites is its
+hosting target. Repository and release status is recorded separately from
+production adoption.
 
 ## Source and hosting
 

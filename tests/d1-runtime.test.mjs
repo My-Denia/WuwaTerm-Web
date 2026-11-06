@@ -38,15 +38,32 @@ test('0000 then 0001 D1 admits mixed traffic, keeps review off the translation c
   // within a window the burst provably did not leave.
   const clockBefore = await db.prepare('SELECT unixepoch() AS clock').first();
   const results = await Promise.all(Array.from({ length: 40 }, async (_, i) => {
+    const started = performance.now();
     const response = await (i % 2 ? other.fetch.bind(other) : mf.dispatchFetch)('http://site.test/api/' + (i % 2 ? 'terms?q=今汐' : 'meta'));
-    return { status: response.status, body: await response.text() };
+    const body = await response.text();
+    return { index: i, status: response.status, elapsedMs: Math.round(performance.now() - started), body };
   }));
   const clockAfter = await db.prepare('SELECT unixepoch() AS clock').first();
   const minuteFlipped = Math.floor(clockBefore.clock / 60) !== Math.floor(clockAfter.clock / 60);
   const dayFlipped = Math.floor(clockBefore.clock / 86400) !== Math.floor(clockAfter.clock / 86400);
   const admitted = results.filter(r => r.status === 200).length;
+  // Report fixed error codes only: this synthetic fixture must never print a
+  // raw response body, even when checking an unexpected response.
+  const knownReasons = new Set([
+    'shared_pool_unavailable', 'site_not_configured', 'site_invalid_request', 'site_request_too_large',
+    'upstream_timeout', 'upstream_unauthorized', 'upstream_forbidden', 'upstream_not_found',
+    'upstream_unavailable', 'upstream_redirect', 'upstream_invalid_content_type', 'upstream_response_too_large',
+    'upstream_invalid_json', 'upstream_schema_mismatch', 'upstream_network_error',
+    'invalid_request', 'payload_too_large', 'input_too_long', 'llm_unavailable', 'llm_budget_exhausted',
+  ]);
+  const unexpected = results.filter(r => ![200, 429].includes(r.status));
+  assert.deepEqual(unexpected.map(r => {
+    try {
+      const reason = JSON.parse(r.body)?.reason;
+      return { index: r.index, status: r.status, elapsedMs: r.elapsedMs, reason: knownReasons.has(reason) ? reason : 'unknown' };
+    } catch { return { index: r.index, status: r.status, elapsedMs: r.elapsedMs, reason: 'invalid_json' }; }
+  }), [], 'unexpected synthetic responses');
   assert.ok(admitted >= 1 && admitted <= 6);
-  assert.ok(results.every(r => [200, 429].includes(r.status)));
   // Cross-worker D1 reads can settle just after the responses under CI
   // scheduling; poll briefly for the counters to match the admissions
   // instead of racing one immediate read. A genuinely lost update still

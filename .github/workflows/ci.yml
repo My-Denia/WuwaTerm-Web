@@ -31,6 +31,15 @@ jobs:
       - run: npm run test:browser
         env:
           WUWATERM_BROWSER_BUILT: '1'
+      - run: npm run build:selfhost
+        env:
+          NEXT_PUBLIC_WUWATERM_BASE_PATH: /private
+      - run: node tests/helpers/private-standalone-smoke.mjs /private
+        env:
+          TASK_STATE_ROOT: ${{ runner.temp }}
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run typecheck
   contract:
     runs-on: ubuntu-latest
     steps:
