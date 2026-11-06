@@ -69,6 +69,50 @@ respectively. Public and self-hosted Web use this same workbench; Sites is its
 hosting target. Repository and release status is recorded separately from
 production adoption.
 
+## Publishing a self-host release
+
+The **Self-host release candidate** workflow builds one Linux x64 variant per
+run as described in the self-hosting guide. Keep the root and non-root candidate
+run IDs, attempt numbers and artifact IDs. Before publication, replay both
+downloaded candidates against the intended stable Core release and API, and
+verify their standalone startup. An Actions artifact is not a release.
+
+Run **Self-host release publication** from `main` in `validate` mode. Provide
+the same full source SHA and package-version tag for both candidates, the two
+run/attempt/artifact triples, and the non-root prefix (for example `/private`).
+The read-only job verifies the main ancestry, source CI, candidate runs and
+downloads, archive and manifest checksums, embedded build information, and any
+existing tag or release assets. A different prefix or source requires matching
+new candidates and their replay.
+
+After the validation and Core replay succeed, set `SOURCE_SHA` to the validated
+full source SHA. Create the tag at that commit if it does not already exist,
+and push it to the repository:
+
+```sh
+git tag v0.1.0 "$SOURCE_SHA"
+git push origin refs/tags/v0.1.0
+```
+
+Run the publication workflow again with the same inputs in `publish` mode. It
+repeats the checks, requires the existing tag to resolve to the source, uploads
+the original archives and manifests to a draft, verifies the assets, and
+publishes the draft. A matching rerun keeps the existing assets; a conflicting
+tag, release, or asset stops the run for maintainer inspection. If `main`
+advances while a run is in progress, start the workflow again on the new main.
+The release description identifies the verified tag and source. The unmodified
+candidate manifests and `BUILD-INFO.json` still describe the tag as proposed,
+because that was its status when the bundles were built.
+
+Release assets use `manifest-root.json` and `SHA256SUMS-root` for the root
+bundle, and `manifest-prefix.json` and `SHA256SUMS-prefix` for the prefix bundle.
+The checksums refer to those manifest names; the manifest and archive bytes are
+unchanged from the candidate. Download each variant's three assets from the same
+release, verify with `sha256sum -c SHA256SUMS-root` or
+`sha256sum -c SHA256SUMS-prefix`, and then follow the self-hosting guide. After
+publication, independently download the release assets anonymously, verify the
+tag and hashes, and repeat the Node-only startup checks.
+
 ## Source and hosting
 
 This repository starts from the tracked `site/` tree at backend commit
