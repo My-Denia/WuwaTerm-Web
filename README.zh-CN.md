@@ -14,8 +14,13 @@ WuwaTerm 公共工作台：查词、术语锁定翻译、审校已有译文，�
 
 开发使用 Node 24、npm 11.6.2。安装、测试、构建与浏览器验证命令见 [README](README.md)。
 跨仓契约由 `contracts/backend-ref.txt` 固定后端提交，继续验证真实 API 响应和标签一致性。
-严格响应字段校验继续保留，跨仓变更使用关联 PR；项目工作仍由现有 Linear WuwaTerm Project 统一管理。
+严格响应字段校验继续保留，跨仓变更使用关联 PR；项目工作沿用现有 WuwaTerm Project，
+跨仓入口见[统一 GitHub Project](https://github.com/users/My-Denia/projects/1)，不另建权威待办。
 
 本次从主仓 `3c51ca3` 的 `site/` 导入，原始源码 blob 记录于 `migration/source.json`。
 旧历史保留在主仓。建仓不等于部署，现网站点资源绑定保持不变。
-Python 核心、API、Bot、词库构建、VPS 工具和暂停开发的 Windows 客户端继续留在主仓。
+主仓负责权威翻译、术语审校、HTTP API、词库构建校验与通用部署恢复；
+[Telegram](https://github.com/My-Denia/WuwaTerm-Telegram) 和
+[Windows](https://github.com/My-Denia/WuwaTerm-Windows) 独立维护产品源码与交付，
+分别复用固定 Core 包和受保护 HTTP API。公开与自托管 Web 共用本仓工作台，Sites 是托管目标。
+源码、正式发布和生产采用分别记录。

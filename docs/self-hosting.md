@@ -19,6 +19,13 @@ minute by default) and share its authentication concurrency limit. They do not
 spend the Core business request allowance. An older Core API without this status
 endpoint cannot serve the private workbench; access remains closed.
 
+During this integration, a compatible reviewed Core source is
+[`64e293cf53ba9106a4a67639fd5c6b0857e6c384`](https://github.com/My-Denia/WuwaTerm/tree/64e293cf53ba9106a4a67639fd5c6b0857e6c384).
+The older stable v0.6.1 tag does not include the status endpoint. Until a
+compatible stable Core release is published, use that source with the Core
+repository's API setup instructions. This is source compatibility, not a new
+backend release or production deployment.
+
 ## Build and configure
 
 Install the locked dependencies, then build. The prefix is fixed into the
