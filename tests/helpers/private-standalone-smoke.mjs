@@ -49,7 +49,7 @@ try {
     WUWATERM_WEB_ORIGIN: origin, WUWATERM_WEB_EDGE_SECRET: edge, WUWATERM_WEB_BASE_PATH: prefix,
   };
   // Exercise the documented launcher, which imports the packaged server.
-  const command = join(process.cwd(), 'scripts/start-selfhost.mjs');
+  const command = process.env.WUWATERM_STANDALONE_LAUNCHER || join(process.cwd(), 'scripts/start-selfhost.mjs');
   const invalid = spawn(process.execPath, [command], {
     cwd: process.cwd(), env: { PATH: env.PATH, HOME: env.HOME, PORT: String(port), HOSTNAME: '127.0.0.1', NODE_ENV: 'production' },
     detached: true, stdio: 'ignore',

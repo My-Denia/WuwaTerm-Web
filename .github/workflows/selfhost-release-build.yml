@@ -1,0 +1,111 @@
+name: Self-host release candidate
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full SHA of the main commit to build
+        required: true
+        type: string
+      tag:
+        description: Proposed version tag, matching package.json (for example v0.1.0)
+        required: true
+        type: string
+      base_path:
+        description: Build-time path prefix, or empty for the origin root
+        required: false
+        default: ''
+        type: string
+permissions: {}
+jobs:
+  provenance:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      source_sha: ${{ steps.check.outputs.source_sha }}
+      ci_run_id: ${{ steps.check.outputs.ci_run_id }}
+    steps:
+      - name: Verify main source and successful Web CI
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = My-Denia/WuwaTerm-Web
+          test "$GITHUB_REF" = refs/heads/main
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          runs=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f "head_sha=$SOURCE_SHA" -f branch=main -f event=push -f status=success -F per_page=100)
+          ci_run_id=$(jq -r --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success" and .head_repository.full_name == $repo)][0].id // empty' <<<"$runs")
+          [[ "$ci_run_id" =~ ^[1-9][0-9]*$ ]]
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
+  build:
+    needs: provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm install --global --no-audit --no-fund npm@11.6.2
+      - name: Export the verified source
+        env:
+          SOURCE_SHA: ${{ needs.provenance.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/build-home"
+          git archive "$SOURCE_SHA" | tar -x -C "$RUNNER_TEMP/source" \
+            --exclude='.openai' --exclude='.openai/*' --exclude='.env' --exclude='.env*' --exclude='*/.env*' \
+            --exclude='.dev.vars*' --exclude='*/.dev.vars*'
+          test ! -e "$RUNNER_TEMP/source/.openai"
+          echo "SOURCE_TREE=$(git rev-parse HEAD^{tree})" >> "$GITHUB_ENV"
+      - name: Build and package in a clean environment
+        env:
+          SOURCE_SHA: ${{ needs.provenance.outputs.source_sha }}
+          CI_RUN_ID: ${{ needs.provenance.outputs.ci_run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          BASE_PATH: ${{ inputs.base_path }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/build-home" CI=1 npm ci --no-audit --no-fund
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/build-home" CI=1 NEXT_TELEMETRY_DISABLED=1 \
+            NEXT_PUBLIC_WUWATERM_BASE_PATH="$BASE_PATH" npm run build:selfhost
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/build-home" \
+            WUWATERM_RELEASE_SOURCE_SHA="$SOURCE_SHA" WUWATERM_RELEASE_SOURCE_TREE="$SOURCE_TREE" \
+            WUWATERM_RELEASE_CI_RUN_ID="$CI_RUN_ID" WUWATERM_RELEASE_TAG="$RELEASE_TAG" \
+            WUWATERM_RELEASE_OUTPUT="$RUNNER_TEMP/release" NEXT_PUBLIC_WUWATERM_BASE_PATH="$BASE_PATH" \
+            npm run package:selfhost-release
+      - name: Verify and start the extracted bundle
+        env:
+          BASE_PATH: ${{ inputs.base_path }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release"
+          sha256sum -c SHA256SUMS
+          archive=$(node -p 'JSON.parse(require("node:fs").readFileSync("manifest.json", "utf8")).archive.name')
+          mkdir -p "$RUNNER_TEMP/extracted" "$RUNNER_TEMP/runtime"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/extracted"
+          cd "$RUNNER_TEMP/extracted/bundle"
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/build-home" TASK_STATE_ROOT="$RUNNER_TEMP/runtime" \
+            WUWATERM_STANDALONE_LAUNCHER="$PWD/start.mjs" \
+            node "$RUNNER_TEMP/source/tests/helpers/private-standalone-smoke.mjs" "$BASE_PATH"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: selfhost-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release/*.tar.gz
+            ${{ runner.temp }}/release/manifest.json
+            ${{ runner.temp }}/release/SHA256SUMS
+          if-no-files-found: error

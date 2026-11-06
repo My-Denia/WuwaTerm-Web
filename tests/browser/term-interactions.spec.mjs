@@ -271,8 +271,8 @@ test('document return link preserves query parameter across navigation', async (
 
   // Privacy document links to limits also carry ?q=
   const limitsLinks = page.locator('main a[href*="/limits"]');
+  await expect(limitsLinks).not.toHaveCount(0);
   const count = await limitsLinks.count();
-  expect(count).toBeGreaterThan(0);
   for (let i = 0; i < count; i += 1) {
     await expect(limitsLinks.nth(i)).toHaveAttribute('href', '/limits?q=%E4%BB%8A%E6%B1%90');
   }
