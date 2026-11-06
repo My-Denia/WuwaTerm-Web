@@ -1,0 +1,101 @@
+name: Self-host release publication
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validate first, then publish after the tag exists
+        required: true
+        type: choice
+        options: [validate, publish]
+      source_sha:
+        description: Full main-ancestor source SHA used for both candidates
+        required: true
+        type: string
+      tag:
+        description: Version tag matching the source package.json
+        required: true
+        type: string
+      root_run_id:
+        description: Root candidate workflow run ID
+        required: true
+        type: string
+      root_attempt:
+        description: Root candidate run attempt
+        required: true
+        type: string
+      root_artifact_id:
+        description: Root candidate artifact ID
+        required: true
+        type: string
+      prefix_run_id:
+        description: Prefix candidate workflow run ID
+        required: true
+        type: string
+      prefix_attempt:
+        description: Prefix candidate run attempt
+        required: true
+        type: string
+      prefix_artifact_id:
+        description: Prefix candidate artifact ID
+        required: true
+        type: string
+      prefix_path:
+        description: Non-root build-time path, for example /private
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: selfhost-release-publication
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  RELEASE_TAG: ${{ inputs.tag }}
+  ROOT_RUN_ID: ${{ inputs.root_run_id }}
+  ROOT_ATTEMPT: ${{ inputs.root_attempt }}
+  ROOT_ARTIFACT_ID: ${{ inputs.root_artifact_id }}
+  PREFIX_RUN_ID: ${{ inputs.prefix_run_id }}
+  PREFIX_ATTEMPT: ${{ inputs.prefix_attempt }}
+  PREFIX_ARTIFACT_ID: ${{ inputs.prefix_artifact_id }}
+  PREFIX_PATH: ${{ inputs.prefix_path }}
+jobs:
+  validate:
+    if: github.repository == 'My-Denia/WuwaTerm-Web' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Validate source, candidates and existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-selfhost-release.mjs --check
+  publish:
+    if: inputs.mode == 'publish' && github.repository == 'My-Denia/WuwaTerm-Web' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Revalidate and publish the existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/publish-selfhost-release.mjs
