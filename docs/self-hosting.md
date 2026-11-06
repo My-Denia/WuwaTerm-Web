@@ -1,8 +1,8 @@
 # Self-host WuwaTerm Web
 
 The private runtime serves the same lookup, translation, review and manuscript
-workbench as the public site. It requires Node 24.22.1, npm 11.6.2, a compatible
-WuwaTerm Core HTTP API with an issued device token and `GET /v1/auth/status`
+workbench as the public site. It requires Node 24, a compatible WuwaTerm Core
+HTTP API with an issued device token and `GET /v1/auth/status`
 support, and an HTTPS reverse proxy that authenticates visitors. The API and
 its dictionary are installed and managed separately; this repository does not
 include a dictionary or an API service. The device needs both `meta` and
@@ -26,9 +26,37 @@ compatible stable Core release is published, use that source with the Core
 repository's API setup instructions. This is source compatibility, not a new
 backend release or production deployment.
 
-## Build and configure
+## Download the Linux x64 bundle
 
-Install the locked dependencies, then build. The prefix is fixed into the
+The standalone release candidate contains the server, browser assets and
+dependency notices. It runs with Node 24 on Linux x64 without npm or a build
+step. The API, its dictionary and the authenticated HTTPS proxy are separate
+requirements described above. Choose a bundle built for the desired path prefix:
+the root and `/private` builds are different artifacts. The prefix is recorded
+in `manifest.json` and `bundle/BUILD-INFO.json`.
+
+Download the archive, `manifest.json` and `SHA256SUMS` from the same trusted
+release or Actions run. Compare the archive digest and source identity with the
+trusted publication or run, then verify and extract the files. For the root
+v0.1.0 bundle, for example:
+
+```sh
+sha256sum -c SHA256SUMS
+tar -xzf wuwaterm-web-v0.1.0-linux-x64-root.tar.gz
+cd bundle
+```
+
+The checksums detect changes to these files; they are not a signature. After
+loading the private environment below, run `node start.mjs` in the extracted
+directory. `PORT` defaults to 3000 and `WUWATERM_WEB_BIND` defaults to
+`127.0.0.1`. Set `WUWATERM_WEB_BASE_PATH` to the bundle's recorded prefix, or
+leave it empty for a root build. The bundle includes `LICENSE` and the upstream
+dependency license and notice files in `third-party-notices/`.
+
+## Build from source and configure
+
+To build from source, install Node 24 and npm 11.6.2 and then the locked
+dependencies. The prefix is fixed into the
 browser bundle at build time; leave it empty for the origin root. Rebuild when
 changing it. It must be empty or a leading slash followed by one or more
 slash-separated letters, digits, underscores or hyphens, with no trailing slash.
@@ -40,8 +68,17 @@ NEXT_PUBLIC_WUWATERM_BASE_PATH=/private npm run build:selfhost
 
 The command produces `.next-selfhost/standalone/`, including the browser assets
 and `public/`. The regular `npm run build` remains the public Sites build and
-has separate output. The standalone directory can be copied to another machine
-with the same supported Node runtime. Keep its files together.
+has separate output.
+
+Maintainers can run **Self-host release candidate** from `main` in GitHub
+Actions. Supply the full current `main` SHA, a `v` tag matching the package
+version, and the desired prefix. The workflow requires a successful main-push
+Web CI run for that exact SHA, builds an isolated source export, checks and
+starts the extracted archive, and uploads the archive, manifest and checksums
+as an Actions artifact. The manifest records the source commit and tree, build
+Node version, platform, prefix and CI run. The export excludes the Sites hosting
+binding and environment files. The workflow creates no Git tag or
+GitHub Release; an Actions artifact is a candidate and may expire.
 
 Create a private environment file outside the repository with permissions that
 allow only the service account to read it. Replace every placeholder; use the
@@ -60,7 +97,8 @@ WUWATERM_TRANSLATION_ENABLED=true
 WUWATERM_LOCAL_DB_PATH=/var/lib/wuwaterm-web/pool.sqlite3
 ```
 
-`WUWATERM_WEB_ORIGIN` is the external HTTPS origin only, without the prefix or
+The example is for a `/private` build. For a root build leave
+`WUWATERM_WEB_BASE_PATH` empty. `WUWATERM_WEB_ORIGIN` is the external HTTPS origin only, without the prefix or
 trailing slash. `WUWATERM_WEB_BASE_PATH`, if set, must equal the build prefix.
 The example API uses same-host loopback HTTP. For a protected HTTPS API, set
 `WUWATERM_API_BASE_URL` to its exact base URL and
@@ -75,16 +113,15 @@ previously initialized database. It refuses unrelated databases. Do not point
 it at the Core dictionary or device store. Startup fails when configuration or
 the admission database is invalid.
 
-After loading the environment into the service process, start it on loopback:
+After loading the environment into the service process, start a source build on loopback:
 
 ```sh
 npm run start:selfhost
 ```
 
 `PORT` defaults to 3000. `WUWATERM_WEB_BIND` defaults to `127.0.0.1`; use a
-different bind only with equivalent network isolation. The copied standalone
-directory may instead be started there with `HOSTNAME=127.0.0.1 PORT=3000 node
-server.js` after loading the same environment.
+different bind only with equivalent network isolation. For a downloaded bundle,
+use the `node start.mjs` command above.
 
 ## Docker on the API host
 
