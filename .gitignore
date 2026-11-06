@@ -40,4 +40,6 @@ next-env.d.ts
 
 # Pinned backend checkout used only by contract CI
 /backend/
+# Pinned Windows checkout used only by contract CI
+/windows/
 /goal-runs/
