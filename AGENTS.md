@@ -1,7 +1,9 @@
 # WuwaTerm Web project rules
 
-This is the public Web workbench repository. Python core, API, Bot, dictionary
-builder, Windows client and VPS deployment tools belong to My-Denia/WuwaTerm.
+This is the public Web workbench repository. Python core, HTTP API, dictionary
+builder, and common deployment/recovery tools belong to My-Denia/WuwaTerm; the
+Telegram bot belongs to My-Denia/WuwaTerm-Telegram; and the Windows desktop
+client belongs to My-Denia/WuwaTerm-Windows.
 Keep the existing Linear WuwaTerm Project as the shared task authority.
 
 Use conventional work-based branches and prefer signed commits. Changes go through
