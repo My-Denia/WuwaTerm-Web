@@ -32,19 +32,30 @@ The standalone release candidate contains the server, browser assets and
 dependency notices. It runs with Node 24 on Linux x64 without npm or a build
 step. The API, its dictionary and the authenticated HTTPS proxy are separate
 requirements described above. Choose a bundle built for the desired path prefix:
-the root and `/private` builds are different artifacts. The prefix is recorded
-in `manifest.json` and `bundle/BUILD-INFO.json`.
+the root and `/private` builds are different artifacts. The prefix is recorded in
+the bundle manifest and `bundle/BUILD-INFO.json`. A published GitHub Release
+names that manifest `manifest-root.json` for the root bundle or
+`manifest-prefix.json` for the prefix bundle; a local build output directory or
+an Actions artifact keeps the name `manifest.json`.
 
-Download the archive, `manifest.json` and `SHA256SUMS` from the same trusted
-release or Actions run. Compare the archive digest and source identity with the
-trusted publication or run, then verify and extract the files. For the root
-v0.1.0 bundle, for example:
+Download the archive, manifest and checksums from the same trusted GitHub
+Release, or the archive, `manifest.json` and `SHA256SUMS` from an Actions run or
+a local build output directory. For a GitHub Release, the published asset names
+are `manifest-root.json` with `SHA256SUMS-root` for the root bundle and
+`manifest-prefix.json` with `SHA256SUMS-prefix` for the prefix bundle. Compare
+the archive digest and source identity with the trusted publication or run, then
+verify and extract the files. For the root v0.1.0 release bundle, for example:
 
 ```sh
-sha256sum -c SHA256SUMS
+sha256sum -c SHA256SUMS-root
 tar -xzf wuwaterm-web-v0.1.0-linux-x64-root.tar.gz
 cd bundle
 ```
+
+For a prefix release bundle, run `sha256sum -c SHA256SUMS-prefix` instead. In a
+local build output directory or an Actions artifact directory, the same three
+files keep the names `manifest.json` and `SHA256SUMS`, so verify there with
+`sha256sum -c SHA256SUMS`.
 
 The checksums detect changes to these files; they are not a signature. After
 loading the private environment below, run `node start.mjs` in the extracted
@@ -74,8 +85,9 @@ Maintainers can run **Self-host release candidate** from `main` in GitHub
 Actions. Supply the full current `main` SHA, a `v` tag matching the package
 version, and the desired prefix. The workflow requires a successful main-push
 Web CI run for that exact SHA, builds an isolated source export, checks and
-starts the extracted archive, and uploads the archive, manifest and checksums
-as an Actions artifact. The manifest records the source commit and tree, build
+starts the extracted archive, and uploads the archive, manifest (`manifest.json`)
+and checksums (`SHA256SUMS`) as an Actions artifact. The manifest records the
+source commit and tree, build
 Node version, platform, prefix and CI run. The export excludes the Sites hosting
 binding and environment files. The workflow creates no Git tag or
 GitHub Release; an Actions artifact is a candidate and may expire.
