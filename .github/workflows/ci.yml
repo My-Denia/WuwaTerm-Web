@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -10,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   web:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -20,7 +24,6 @@ jobs:
           cache: npm
       - run: npm install --global --no-audit npm@11.6.2
       - run: npm ci --no-audit
-      - run: npm audit --json
       - run: npm test
       - run: npm run typecheck
       - run: npm run lint
@@ -41,6 +44,7 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
   contract:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -91,3 +95,16 @@ jobs:
         working-directory: backend
         env:
           WUWATERM_WEB_ROOT: ${{ github.workspace }}
+  audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && startsWith(github.head_ref, 'dependabot/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm install --global --no-audit npm@11.6.2
+      - run: npm ci --no-audit
+      - run: npm audit --json
