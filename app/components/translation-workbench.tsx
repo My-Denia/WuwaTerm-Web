@@ -14,6 +14,7 @@ type TermMatch = { zh: string; en: string; category: string; reason: string; sco
 type TermsResult = { query: string; matches: TermMatch[]; request_id: string };
 type TranslationResult = { kind: 'noop' | 'exact' | 'fuzzy' | 'llm'; text: string; direction: 'en' | 'zh'; dictionary_miss: boolean; request_id: string };
 type State<T> = { kind: 'idle' | 'loading' | 'cancelled' } | { kind: 'success'; data: T } | { kind: 'error'; error: Failure };
+type SourceFileStatus = { kind: 'notice' | 'error'; code: 'sourceFileImported' | 'sourceFileTooLarge' | 'sourceFileInvalid' } | null;
 const FALLBACK: Failure = { status: 'unavailable', reason: 'site_response_invalid' };
 function failure(value: unknown): value is Failure { return !!value && typeof value === 'object' && (value as Failure).status === 'unavailable' && typeof (value as Failure).reason === 'string'; }
 async function payload(r: Response): Promise<unknown> { try { return await r.json(); } catch { return FALLBACK; } }
@@ -32,9 +33,12 @@ export function TranslationWorkbench() {
   const [translation, setTranslation] = useState<State<TranslationResult>>({ kind: 'idle' });
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const [sourceFileStatus, setSourceFileStatus] = useState<SourceFileStatus>(null);
   const termsController = useRef<AbortController | null>(null);
   const translationController = useRef<AbortController | null>(null);
   const translationInput = useRef<HTMLTextAreaElement>(null);
+  const sourceFileInput = useRef<HTMLInputElement>(null);
+  const sourceFileAttempt = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,7 +116,30 @@ export function TranslationWorkbench() {
     setSource(prev => prev ? prev + ' ' + text : text);
     setTranslation({ kind: 'idle' });
     setCopied(false);
+    setSourceFileStatus(null);
     translationInput.current?.focus();
+  }
+  async function importSourceFile(file?: File) {
+    if (!file) return;
+    const attempt = ++sourceFileAttempt.current;
+    if (file.size > 1_048_576) {
+      if (sourceFileAttempt.current === attempt) setSourceFileStatus({ kind: 'error', code: 'sourceFileTooLarge' });
+      return;
+    }
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+      if (sourceFileAttempt.current !== attempt) return;
+      translationController.current?.abort();
+      translationController.current = null;
+      setSource(text);
+      setTranslation({ kind: 'idle' });
+      setCopied(false);
+      setCopyFailed(false);
+      setSourceFileStatus({ kind: 'notice', code: 'sourceFileImported' });
+      translationInput.current?.focus();
+    } catch {
+      if (sourceFileAttempt.current === attempt) setSourceFileStatus({ kind: 'error', code: 'sourceFileInvalid' });
+    }
   }
   function sendTermToReview(zh: string, en: string) {
     window.dispatchEvent(new CustomEvent('wuwaterm-send-review', { detail: { source: zh, target: en, direction: 'en' } }));
@@ -121,7 +148,7 @@ export function TranslationWorkbench() {
     event.preventDefault(); if (!source.trim()) return;
     translationController.current?.abort();
     const controller = new AbortController(); translationController.current = controller;
-    setCopied(false); setCopyFailed(false); setTranslation({ kind: 'loading' });
+    setCopied(false); setCopyFailed(false); setSourceFileStatus(null); setTranslation({ kind: 'loading' });
     try {
       const r = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(target === 'auto' ? { text: source } : { text: source, to: target }), signal: controller.signal });
       const v = await payload(r);
@@ -133,7 +160,7 @@ export function TranslationWorkbench() {
   }
   function moveQueryToTranslation() {
     translationController.current?.abort(); translationController.current = null;
-    setSource(query); setTranslation({ kind: 'idle' }); setCopied(false);
+    setSource(query); setTranslation({ kind: 'idle' }); setCopied(false); setSourceFileStatus(null);
     translationInput.current?.focus();
   }
   function cancelTranslation() {
@@ -193,9 +220,11 @@ export function TranslationWorkbench() {
         {translationClosed && <p className="notice-state">{pool.kind === 'success' && !pool.data.translation_enabled ? m.tMsg.translation_disabled : m.tMsg.translation_pool_exhausted}</p>}
         <form onSubmit={translate}>
           <div className="label-row"><label htmlFor="translation-source">{m.translation.label}</label><select aria-label={m.translation.directionAria} value={target} disabled={translation.kind === 'loading'} onChange={e => setTarget(e.target.value as 'auto' | 'en' | 'zh')}><option value="auto">{m.translation.directionAuto}</option><option value="en">{m.translation.directionToEn}</option><option value="zh">{m.translation.directionToZh}</option></select></div>
-          <textarea ref={translationInput} id="translation-source" value={source} disabled={translation.kind === 'loading'} onChange={e => { setSource(e.target.value); setTranslation({ kind: 'idle' }); setCopied(false); }} placeholder={m.translation.placeholder} rows={5} />
+          <textarea ref={translationInput} id="translation-source" value={source} disabled={translation.kind === 'loading'} onChange={e => { setSource(e.target.value); setTranslation({ kind: 'idle' }); setCopied(false); setSourceFileStatus(null); }} placeholder={m.translation.placeholder} rows={5} />
           <div className="field-hint"><span>{m.translation.hintSafety}</span><span aria-live="polite">{fill(m.translation.charCount, { n: sourceLength.toLocaleString(locale) })}</span></div>
-          <div className="actions"><button type="submit" disabled={!source.trim() || sourceLength > 2000 || translation.kind === 'loading' || translationClosed}>{translation.kind === 'loading' ? m.translation.submitLoading : m.translation.submitIdle}</button>{translation.kind === 'loading' && <button className="secondary-button" type="button" onClick={cancelTranslation}>{m.translation.cancelWait}</button>}</div>
+          {sourceLength > 2000 && <p className="translation-file-status" role="status">{m.translation.longSource}</p>}
+          {sourceFileStatus && <p className="translation-file-status" role={sourceFileStatus.kind === 'error' ? 'alert' : 'status'}>{m.translation[sourceFileStatus.code]}</p>}
+          <div className="actions"><button type="submit" disabled={!source.trim() || sourceLength > 2000 || translation.kind === 'loading' || translationClosed}>{translation.kind === 'loading' ? m.translation.submitLoading : m.translation.submitIdle}</button><button className="secondary-button" type="button" disabled={translation.kind === 'loading'} onClick={() => sourceFileInput.current?.click()}>{m.translation.importFile}</button><input ref={sourceFileInput} className="visually-hidden" type="file" accept=".txt,.md,text/plain,text/markdown" aria-label={m.translation.importFileAria} onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; void importSourceFile(file); }} />{translation.kind === 'loading' && <button className="secondary-button" type="button" onClick={cancelTranslation}>{m.translation.cancelWait}</button>}</div>
         </form>
         <TranslationView state={translation} copied={copied} copyFailed={copyFailed} onCopy={copyTranslation} source={source} />
       </section>

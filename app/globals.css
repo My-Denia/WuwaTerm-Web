@@ -74,8 +74,8 @@ form button:not(.secondary-button):not(.clear-input):hover:not(:disabled) { back
 .empty-state p { margin:7px 0; }
 .empty-state small { font-size:11px; color:#89a0a5; }
 .translation-placeholder { color:#8aa1a6; border-top:1px dashed var(--line); margin:22px 0 0; padding-top:20px; font-size:12px; }
-.notice-state,.error-panel { background:#33281f; border:1px solid #67503b; color:#f2d1b2; padding:13px; border-radius:8px; font-size:12px; line-height:1.75; margin-top:16px; }
-.error-panel p { margin:0 0 5px; }
+.notice-state,.error-panel,.translation-file-status,.alignment-recovery { background:#33281f; border:1px solid #67503b; color:#f2d1b2; padding:13px; border-radius:8px; font-size:12px; line-height:1.75; margin-top:16px; }
+.error-panel p,.alignment-recovery p { margin:0 0 5px; }
 .result-summary { color:var(--muted); font-size:11px; margin:20px 0 10px; }
 .term-result { border-top:1px solid var(--line); padding:14px 0; }
 .term-pair { display:flex; justify-content:space-between; gap:14px; align-items:baseline; overflow-wrap:anywhere; }

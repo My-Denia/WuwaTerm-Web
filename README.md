@@ -25,7 +25,6 @@ Use Node 24 and npm 11.6.2, then run:
 
 ```sh
 npm ci --no-audit
-npm audit --json
 npm test
 npm run typecheck
 npm run lint
@@ -36,9 +35,11 @@ npx playwright install chromium
 WUWATERM_BROWSER_BUILT=1 npm run test:browser
 ```
 
-`npm run dev` starts local development. Tests use synthetic upstream responses
-and local D1 storage; they do not consume production quota. Details and limits
-of the evidence are in [tests/README.md](tests/README.md).
+`npm audit --json` runs in the scheduled, manual, and Dependabot `audit` CI job
+and can also be run locally when updating dependencies. `npm run dev` starts
+local development. Tests use synthetic upstream responses and local D1 storage;
+they do not consume production quota. Details and limits of the evidence are in
+[tests/README.md](tests/README.md).
 
 ## Backend compatibility and delivery
 

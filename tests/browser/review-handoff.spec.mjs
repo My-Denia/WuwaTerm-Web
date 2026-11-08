@@ -439,3 +439,57 @@ test('a narrow keyboard resume fetches fresh basis before explicitly reconfirmin
   expect(result.verified_stamp.valid).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('plain-text import, clear-then-handoff, in-review translation, alignment recovery, and choice-record confirmation', async ({ page }) => {
+  const { reviews } = await open(page);
+  await page.getByLabel('选择原稿文本文件').setInputFiles({ name: 'gbk.txt', mimeType: 'text/plain', buffer: Buffer.from([0xc4, 0xe3]) });
+  await expect(page.locator('#translation-source')).toHaveValue('');
+  await expect(page.locator('.translation-file-status')).toContainText('请确认文件为 UTF-8 编码');
+
+  await page.getByLabel('选择原稿文本文件').setInputFiles({ name: 'long.txt', mimeType: 'text/plain', buffer: Buffer.from('今'.repeat(2005)) });
+  await expect(page.locator('.translation-file-status').first()).toContainText('单次整句翻译限 2,000 字符');
+  await expect(page.getByRole('button', { name: '翻译整句', exact: true })).toBeDisabled();
+
+  await page.getByLabel('选择原稿文本文件').setInputFiles({ name: 'source.md', mimeType: 'text/markdown', buffer: Buffer.from(A.source) });
+  await expect(page.locator('#translation-source')).toHaveValue(A.source);
+  await page.getByRole('button', { name: '翻译整句', exact: true }).click();
+  await expect(page.locator('.translated-text')).toHaveText(A.target);
+
+  await page.locator('#review-source').fill('临时草稿。');
+  await page.getByRole('button', { name: '清空稿件', exact: true }).click();
+  await page.getByRole('button', { name: '送去审校', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: '替换审校稿件？' })).toBeHidden();
+  await expect(page.locator('#review-source')).toHaveValue(A.source);
+  await expect(page.locator('#review-target')).toHaveValue(A.target);
+
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'gbk.txt', mimeType: 'text/plain', buffer: Buffer.from([0xc4, 0xe3]) });
+  await expect(page.locator('.review-card .error-panel')).toContainText('文件无效；当前稿件未被替换。');
+  await expect(page.locator('#review-source')).toHaveValue(A.source);
+  await expect(page.locator('#review-target')).toHaveValue(A.target);
+
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'raw-source.txt', mimeType: 'text/plain', buffer: Buffer.from(B.source) });
+  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expect(page.locator('#review-target')).toHaveValue('');
+  await page.getByRole('button', { name: '生成译文', exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue(B.target);
+
+  await page.locator('.alignment-panel > summary').click();
+  await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
+  await page.locator('#review-target').fill(B.target + '!');
+  await expect(page.locator('.alignment-recovery')).toBeVisible();
+  await page.getByRole('button', { name: '重新确认全文对应', exact: true }).click();
+  await expect(page.locator('.alignment-recovery')).toHaveCount(0);
+  await expect(page.locator('.alignment-row')).toHaveCount(1);
+
+  const saved = fixture(A.source, A.target, A.direction);
+  const choice = makeChoice({ ...saved, finding: saved.report.findings[0], candidate: null });
+  await importManuscript(page, serializeWorkfile({ ...A, alignments: null, choices: [choice], history: [{ ...A, alignments: null, report: saved.report, resolutions: [] }] }));
+  await page.getByRole('button', { name: '仅获取新依据', exact: true }).click();
+  await expect(page.locator('.review-current')).toBeVisible();
+  await page.locator('.choice-records').getByRole('button', { name: '确认此历史选择', exact: true }).click();
+  await expect(page.locator('.choice-records')).toContainText('1 处适用 / 0 处待确认');
+  await page.getByRole('button', { name: '核对术语', exact: true }).click();
+  await expect.poll(() => reviews.length).toBe(2);
+  expect(reviews[1].resolutions).toEqual([{ mention_id: '0:2:今汐', choice: 'not_a_term' }]);
+});
+

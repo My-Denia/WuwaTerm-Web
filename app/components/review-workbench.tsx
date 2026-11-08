@@ -86,6 +86,8 @@ export function ReviewWorkbench() {
   const [reports, setReports] = useState<Snapshot[]>([]);
   const [history, setHistory] = useState<Undo[]>([]);
   const [phase, setPhase] = useState<'idle' | 'loading' | 'success' | 'error' | 'cancelled'>('idle');
+  const [translating, setTranslating] = useState(false);
+  const [sourceDirtyForTranslation, setSourceDirtyForTranslation] = useState(false);
   const [notice, setNotice] = useState<NoticeState>(null);
   const [error, setError] = useState<ErrorState>(null);
   const [pendingDraft, setPendingDraft] = useState<Draft | null>(null);
@@ -131,13 +133,14 @@ export function ReviewWorkbench() {
   const sourceLength = Array.from(source).length; const targetLength = Array.from(target).length;
   const validInput = !!source.trim() && !!target.trim() && sourceLength <= 2000 && targetLength <= 2000;
   const reviewsClosed = pool.kind === 'success' && pool.data.reviews.remaining === 0;
+  const translationClosed = pool.kind === 'success' && (!pool.data.translation_enabled || pool.data.translations.remaining === 0 || pool.data.characters.remaining === 0);
   const sourceCompatible = !!latest?.trusted && latest.source === source && latest.direction === direction;
   const comparison = latest && previous ? compareReports(previous, latest) : null;
   const basisChanged = !!latest?.trusted && choices.some(choice => !sameBasis(choice.basis, basisOf(latest.report)));
   const canonical = canonicalManuscript(manuscriptBody(draft, choices, reports));
   const holdsWork = recoverableWorkPresent({ source, target, choices, alignments, reports });
   const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
-  const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' });
+  const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating });
   const m = msg(lang);
   const saveStateText = {
     empty: m.review.saveStateEmpty,
@@ -154,7 +157,7 @@ export function ReviewWorkbench() {
   const errorTextValue = !error ? ''
     // Nullish (not falsy) check: an empty reason string from a reason-less
     // error body must still land on the localized fallback, not a blank alert.
-    : error.reason !== undefined && error.reason !== null ? ((m.rMsg as Record<string, string>)[error.reason] ?? m.rMsg.fallback)
+    : error.reason !== undefined && error.reason !== null ? ((m.rMsg as Record<string, string>)[error.reason] ?? (m.tMsg as Record<string, string>)[error.reason] ?? m.rMsg.fallback)
     : error.code && (m.errors as Record<string, string>)[error.code] ? (m.errors as Record<string, string>)[error.code]!
     : error.text ?? '';
   // Library throws (parse/serialize) always carry stable codes; an uncoded
@@ -215,7 +218,7 @@ export function ReviewWorkbench() {
   }
   const discardInFlight = useCallback(() => {
     cancelRevision(revisionRef.current ? 'revisionStale' : '');
-    controller.current?.abort(); controller.current = null; generation.current += 1; setPhase('idle'); setError(null);
+    controller.current?.abort(); controller.current = null; generation.current += 1; setPhase('idle'); setTranslating(false); setError(null);
   }, [cancelRevision]);
   const receiveDraft = useCallback((next: Draft) => {
     handoffDialog.current?.close(); setPendingDraft(null);
@@ -226,7 +229,7 @@ export function ReviewWorkbench() {
     // Update synchronously as well so successive events in one turn cannot
     // mistake an already received manuscript for an empty workbench.
     work.current = { draft: next, choices: [], imported: [], reports: [], history: nextHistory };
-    setHistory(nextHistory); discardInFlight(); setChoices([]); setImported([]); setReports([]); setDraft(next);
+    setHistory(nextHistory); discardInFlight(); setChoices([]); setImported([]); setReports([]); setDraft(next); setSourceDirtyForTranslation(false);
     setNotice('receivedDraft');
     sourceBox.current?.focus();
     if (typeof document !== 'undefined') { document.getElementById('review-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -236,6 +239,8 @@ export function ReviewWorkbench() {
     remember(); discardInFlight(); setDraft(next); setNotice(message);
   }
   function editText(side: 'source' | 'target', value: string) {
+    if (side === 'source') setSourceDirtyForTranslation(Boolean(value.trim() && target.trim()));
+    else setSourceDirtyForTranslation(false);
     edit({ ...draft, [side]: value, alignments: alignments === null ? null : [] },
       alignments !== null ? 'editedAlignments' : latest ? 'editedText' : '');
   }
@@ -247,8 +252,7 @@ export function ReviewWorkbench() {
       if (before.draft.source === detail.source && before.draft.target === detail.target && before.draft.direction === detail.direction) return;
       cancelRevision(revisionRef.current ? 'revisionStale' : '');
       const next: Draft = { source: detail.source, target: detail.target, direction: detail.direction, alignments: null };
-      const empty = before.draft.source === '' && before.draft.target === '' && before.draft.alignments === null
-        && !before.choices.length && !before.imported.length && !before.reports.length && !before.history.length;
+      const empty = !recoverableWorkPresent({ ...before.draft, choices: before.choices, reports: before.reports });
       if (empty) receiveDraft(next);
       else {
         setPendingDraft(next);
@@ -373,6 +377,58 @@ export function ReviewWorkbench() {
     } finally { if (controller.current === abort) controller.current = null; }
   }
   async function submit(event: FormEvent) { event.preventDefault(); await check(); }
+  async function translateInReview() {
+    if (!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed) return;
+    discardInFlight();
+    const mine = generation.current;
+    const abort = new AbortController();
+    controller.current = abort;
+    setTranslating(true);
+    setNotice(null);
+    try {
+      const response = await fetch(workbenchPath('/api/translations'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ text: source, to: direction }),
+        signal: abort.signal,
+      });
+      const value = await response.json();
+      if (abort.signal.aborted || generation.current !== mine) return;
+      if (!response.ok || !value || typeof value !== 'object' || typeof (value as { text?: unknown }).text !== 'string') {
+        const reason = value && typeof value === 'object' && 'reason' in value && typeof (value as { reason?: unknown }).reason === 'string' ? String((value as { reason: string }).reason) : '';
+        throw Object.assign(new Error(), { gahReason: reason });
+      }
+      const translated = (value as { text: string }).text;
+      remember();
+      setTranslating(false);
+      setSourceDirtyForTranslation(false);
+      setDraft({ ...draft, target: translated, alignments: alignments === null ? null : [] });
+      setNotice(alignments !== null ? 'editedAlignments' : 'translatedInReview');
+      requestPoolRefresh();
+    } catch (cause) {
+      if (!abort.signal.aborted && generation.current === mine) {
+        setTranslating(false);
+        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason) } : { code: 'requestFailed' });
+        requestPoolRefresh();
+      }
+    } finally {
+      if (controller.current === abort) controller.current = null;
+    }
+  }
+  function confirmableChoice(choice: Choice): { finding: Finding; candidate: Candidate | null } | null {
+    if (!sourceCompatible || !latest || latest.report.truncated) return null;
+    const span = recoverSpan(choice.source, choice.source_span, source);
+    if (!span) return null;
+    const finding = latest.report.findings.find(f => f.id === mentionId(span));
+    if (!finding) return null;
+    if (choice.choice === 'not_a_term') return { finding, candidate: null };
+    const candidate = choice.candidate
+      ? finding.candidates.find(c => c.candidate_id === choice.candidate!.candidate_id
+          && c.zh === choice.candidate!.zh && c.en === choice.candidate!.en && c.category === choice.candidate!.category) ?? null
+      : null;
+    return candidate ? { finding, candidate } : null;
+  }
   function choose(finding: Finding, candidate: Candidate | null) {
     if (!sourceCompatible || !latest) return;
     const span = recoverSpan(latest.source, finding.source_span, source);
@@ -435,7 +491,7 @@ export function ReviewWorkbench() {
   }
   function undo() {
     const last = history.at(-1); if (!last) return;
-    discardInFlight(); setDraft(last.draft); setChoices(last.choices); setImported(last.imported); setHistory(stack => stack.slice(0, -1));
+    discardInFlight(); setSourceDirtyForTranslation(false); setDraft(last.draft); setChoices(last.choices); setImported(last.imported); setHistory(stack => stack.slice(0, -1));
     if (last.reports) setReports(last.reports);
     setNotice(last.reports ? 'undoWithReports' : 'undoLocal');
   }
@@ -449,6 +505,21 @@ export function ReviewWorkbench() {
     }
     const mine = generation.current;
     try {
+      if (/\.(txt|md)$/iu.test(file.name)) {
+        const bytes = await file.arrayBuffer();
+        if (importAttempt.current !== attempt) return;
+        if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        const before = work.current;
+        const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
+        setHistory([...before.history.slice(-19), saved]);
+        discardInFlight();
+        setSourceDirtyForTranslation(false);
+        setDraft({ source: text, target: '', direction: before.draft.direction, alignments: null });
+        setChoices([]); setImported([]); setReports([]); setImportedCanonical(null);
+        setNotice('importedSourceText');
+        return;
+      }
       const text = await file.text();
       if (importAttempt.current !== attempt) return;
       if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
@@ -463,6 +534,7 @@ export function ReviewWorkbench() {
       const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
       setHistory([...before.history.slice(-19), saved]);
       discardInFlight();
+      setSourceDirtyForTranslation(false);
       setDraft(nextDraft); setChoices(nextChoices); setImported(nextChoices); setReports(nextReports);
       if (importedBody) setImportedCanonical(importedBody);
       setNotice('imported');
@@ -478,6 +550,7 @@ export function ReviewWorkbench() {
     const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
     setHistory(stack => [...stack.slice(-19), saved]);
     discardInFlight();
+    setSourceDirtyForTranslation(false);
     setDraft(EMPTY);
     setChoices([]);
     setImported([]);
@@ -565,7 +638,7 @@ export function ReviewWorkbench() {
     <dialog className="handoff-dialog" ref={leaveDialog} aria-labelledby="leave-title" aria-describedby="leave-description" onCancel={() => setPendingLeaveUrl(null)}>
       <h3 id="leave-title">{m.review.leaveTitle}</h3>
       <div id="leave-description">
-        {phase === 'loading' && <p>{m.review.leaveInFlight}</p>}
+        {(phase === 'loading' || translating) && <p>{m.review.leaveInFlight}</p>}
         <p>{saveView === 'matches-download' ? m.review.leaveDownload : m.review.leaveUnsaved}</p>
       </div>
       {error && <p role="alert">{errorTextValue}</p>}
@@ -616,9 +689,10 @@ export function ReviewWorkbench() {
         </> : <p>{pool.kind === 'loading' ? m.pool.loading : m.pool.unavailable}</p>}
       </div>
       <div className="actions">
-        <button type="submit" disabled={!validInput || phase === 'loading' || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
-        <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
-        {phase === 'loading' && <button className="secondary-button" type="button" onClick={() => { discardInFlight(); setPhase('cancelled'); setNotice('cancelledWait'); requestPoolRefresh(); }}>{m.review.cancelWait}</button>}
+        <button type="submit" disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
+        <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
+        {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className="secondary-button" type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
+        {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => { discardInFlight(); setPhase('cancelled'); setNotice('cancelledWait'); requestPoolRefresh(); }}>{m.review.cancelWait}</button>}
         <button className="secondary-button" type="button" onClick={undo} disabled={!history.length}>{m.review.undo}</button>
       </div>
     </form>
@@ -626,7 +700,7 @@ export function ReviewWorkbench() {
       <button type="button" className="secondary-button" onClick={clearDraft} disabled={!holdsWork}>{m.review.clearDraft}</button>
       <button type="button" className="secondary-button" onClick={save}>{m.review.save}</button>
       <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>{m.review.import}</button>
-      <input ref={fileBox} className="visually-hidden" type="file" accept=".json,application/json" aria-label={m.review.importFileAria} onChange={e => {
+      <input ref={fileBox} className="visually-hidden" type="file" accept=".json,.txt,.md,application/json,text/plain,text/markdown" aria-label={m.review.importFileAria} onChange={e => {
         const file = e.target.files?.[0];
         e.target.value = '';
         void importFile(file);
@@ -636,11 +710,21 @@ export function ReviewWorkbench() {
       <button type="button" className="secondary-button" onClick={exportMarkdown}>{m.review.exportMarkdown}</button>
     </div>
     {notice && <p className="notice-state" role="status">{noticeText}</p>}
+    {alignments !== null && alignments.length === 0 && <div className="alignment-recovery" role="region" aria-label={m.review.alignmentRecoveryAria}>
+      <p>{m.review.alignmentEmptyPrompt}</p>
+      <div className="actions">
+        <button type="button" className="secondary-button" disabled={!validInput || phase === 'loading'} onClick={() => addAlignment(false, true)}>{m.review.alignmentReconfirmWhole}</button>
+        <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={() => edit({ ...draft, alignments: null }, 'alignmentsReset')}>{m.review.alignmentFallbackReset}</button>
+      </div>
+    </div>}
     {error && <p className="error-panel" role="alert">{errorTextValue}</p>}
     {phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
     {basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
     {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
-      {choices.map((choice, i) => <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><button type="button" className="text-button" onClick={() => { remember(); discardInFlight(); setChoices(old => old.filter((_, j) => i !== j)); }}>{m.review.choiceRemove}</button></div>)}
+      {choices.map((choice, i) => {
+        const confirmTarget = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' ? confirmableChoice(choice) : null;
+        return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{confirmTarget && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => choose(confirmTarget.finding, confirmTarget.candidate)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => { remember(); discardInFlight(); setChoices(old => old.filter((_, j) => i !== j)); setImported(old => old.filter(c => c !== choice)); }}>{m.review.choiceRemove}</button></div></div>;
+      })}
     </div>}
     {latest ? <>
       <div className="review-summary" aria-live="polite">

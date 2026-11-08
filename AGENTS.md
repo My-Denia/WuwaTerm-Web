@@ -11,9 +11,11 @@ pull requests, current-head CI and review, then squash merge. Do not push normal
 changes directly to main, force-push, or add AI co-author trailers. Resolve only
 confirmed in-scope findings; record pre-existing or unrelated findings separately.
 
-Validation: Node 24, npm 11.6.2; npm ci --no-audit; npm audit --json; npm test;
+Validation: Node 24, npm 11.6.2; npm ci --no-audit; npm test;
 npm run typecheck; npm run lint; npm run build; npm run verify:no-client-secret;
 npm run test:built; WUWATERM_BROWSER_BUILT=1 npm run test:browser.
+Registry advisory checks (`npm audit --json`) run in the scheduled, manual, and
+Dependabot `audit` CI job.
 The contract job also installs the pinned backend and runs real API-to-BFF and
 label checks. Keep strict response filtering and record both repository SHAs.
 

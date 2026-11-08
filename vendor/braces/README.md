@@ -5,7 +5,8 @@ source-vendored fork of `braces@3.0.3`, installed under the `braces` import name
 with npm's direct dependency override. Both locked `fast-glob` versions still
 use their original `micromatch` implementation and resolve this patched copy.
 No third-party fork, postinstall patch, downloaded patch or audit exception is
-used. The full and production-only audit commands in CI are unchanged.
+used. `npm test` runs behavioral security checks on every CI run, while
+`npm audit --json` runs in the scheduled, manual, and Dependabot `audit` job.
 
 ## Provenance and maintenance responsibility
 
