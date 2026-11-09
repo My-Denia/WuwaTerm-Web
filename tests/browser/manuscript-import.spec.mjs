@@ -53,9 +53,9 @@ async function open(page) {
 
 async function setupFileReadInterception(page) {
   await page.addInitScript(() => {
-    const original = File.prototype.text;
+    const original = File.prototype.arrayBuffer;
     window.__fileReads = [];
-    File.prototype.text = function () {
+    File.prototype.arrayBuffer = function () {
       const name = this.name;
       return new Promise((resolve, reject) => {
         window.__fileReads.push({

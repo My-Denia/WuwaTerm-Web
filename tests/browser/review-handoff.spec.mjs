@@ -377,8 +377,8 @@ test('import undo clears imported reports when the previous manuscript had none'
 
 test('import undo snapshots reports completed during the pending file read', async ({ page }) => {
   await page.addInitScript(() => {
-    const original = File.prototype.text;
-    File.prototype.text = function () {
+    const original = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = function () {
       const read = () => original.call(this);
       window.importReadStarted = true;
       return new Promise(resolve => { window.finishImportRead = async () => resolve(await read()); });
@@ -493,3 +493,25 @@ test('plain-text import, clear-then-handoff, in-review translation, alignment re
   expect(reviews[1].resolutions).toEqual([{ mention_id: '0:2:今汐', choice: 'not_a_term' }]);
 });
 
+test('workfile import rejects valid JSON wrapper containing invalid or truncated UTF-8 bytes without U+FFFD replacement', async ({ page }) => {
+  const { reviews } = await open(page);
+  const validJson = serializeWorkfile({ ...B, alignments: null, choices: [], history: [] });
+  const [prefix, suffix] = validJson.split(B.source);
+  for (const [index, [name, badBytes]] of [
+    ['gbk-workfile.json', [0xc4, 0xe3]],
+    ['truncated-utf8-workfile.json', [0xe4, 0xbb]],
+  ].entries()) {
+    const currentSource = `${A.source}${index}`;
+    await page.locator('#review-source').fill(currentSource);
+    await page.locator('#review-target').fill(A.target);
+    await expect(page.locator('.review-card .error-panel')).toHaveCount(0);
+    const buffer = Buffer.concat([Buffer.from(prefix, 'utf8'), Buffer.from(badBytes), Buffer.from(suffix, 'utf8')]);
+    await page.getByLabel('选择稿件文件').setInputFiles({ name, mimeType: 'application/json', buffer });
+    await expect(page.locator('.review-card .error-panel')).toHaveText('文件无效；当前稿件未被替换。');
+    await expect(page.locator('#review-source')).toHaveValue(currentSource);
+    await expect(page.locator('#review-target')).toHaveValue(A.target);
+    expect(await page.locator('#review-source').inputValue()).not.toContain('\uFFFD');
+    expect(await page.locator('#review-target').inputValue()).not.toContain('\uFFFD');
+  }
+  expect(reviews).toHaveLength(0);
+});

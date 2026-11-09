@@ -505,11 +505,11 @@ export function ReviewWorkbench() {
     }
     const mine = generation.current;
     try {
+      const bytes = await file.arrayBuffer();
+      if (importAttempt.current !== attempt) return;
+      if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       if (/\.(txt|md)$/iu.test(file.name)) {
-        const bytes = await file.arrayBuffer();
-        if (importAttempt.current !== attempt) return;
-        if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         const before = work.current;
         const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
         setHistory([...before.history.slice(-19), saved]);
@@ -520,9 +520,6 @@ export function ReviewWorkbench() {
         setNotice('importedSourceText');
         return;
       }
-      const text = await file.text();
-      if (importAttempt.current !== attempt) return;
-      if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
       const value = parseWorkfile(text);
       const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
       const nextChoices = value.choices as Choice[];
