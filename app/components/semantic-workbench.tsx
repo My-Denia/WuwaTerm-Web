@@ -60,7 +60,7 @@ export type Placed = {
   live: { source_span: Span | null; target_span: Span | null; suggestion_span: Span | null };
 };
 type TermFinding = { id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: { candidate_id: string; zh: string; en: string; category: string }[] };
-export type TermResult = { id: string; segmentKey: string; report: { findings: TermFinding[] }; sourceOffset: number; targetOffset: number; region: { source: Region; target: Region } };
+export type TermResult = { id: string; segmentKey: string; index: number; report: { findings: TermFinding[] }; sourceOffset: number; targetOffset: number; region: { source: Region; target: Region } };
 export type Decision = {
   issue_id: string; fingerprint: string; category: string; segment_index: number; source_revision: string; target_revision: string;
   source_span: Span | null; target_span: Span | null; decision: 'accepted' | 'adjusted' | 'ignored'; applied_text: string | null;
@@ -348,7 +348,7 @@ export function SemanticWorkbench(props: Props) {
       if (slice(chars(current.source), region.source.start, region.source.end) !== found.sCore || slice(chars(current.target), region.target.start, region.target.end) !== found.tCore) {
         dispatch({ type: 'skip', key: item.key }); return;
       }
-      const result: TermResult = { id: uid(), segmentKey: found.key, report: body as unknown as TermResult['report'], sourceOffset: found.pair.source.core_start, targetOffset: found.pair.target.core_start, region };
+      const result: TermResult = { id: uid(), segmentKey: found.key, index: found.pair.index, report: body as unknown as TermResult['report'], sourceOffset: found.pair.source.core_start, targetOffset: found.pair.target.core_start, region };
       setSemantic(state => addTermResult(state, result) as SemanticState);
       dispatch({ type: 'done', key: item.key });
     } catch {
@@ -1044,7 +1044,19 @@ export function semanticWorkfileParts<T extends { source: string; target: string
 export function segmentTermsOf(draft: Draft, semantic: SemanticState) {
   if (!semantic.terms.length) return [];
   const sc = chars(draft.source); const tc = chars(draft.target);
-  return [...semantic.terms].sort((a, b) => a.region.source.start - b.region.source.start).map((t, index) => {
+  const pairs = safePairs(draft.source, draft.target, draft.alignments);
+  // The manuscript's own segment number: the current pair this result covers, else
+  // the number it had when checked. Never a position in the list of finished results.
+  const numberOf = (t: TermResult) => {
+    let best: Pair | null = null; let most = 0;
+    for (const p of pairs) {
+      const shared = Math.min(p.source.core_end, t.region.source.end) - Math.max(p.source.core_start, t.region.source.start);
+      if (shared > most) { most = shared; best = p; }
+    }
+    return best ? best.index : t.index;
+  };
+  return [...semantic.terms].sort((a, b) => a.region.source.start - b.region.source.start).map(t => {
+    const index = numberOf(t);
     const stale = segmentKey(draft.direction, slice(sc, t.region.source.start, t.region.source.end), slice(tc, t.region.target.start, t.region.target.end)) !== t.segmentKey;
     const shift = (span: Span | null, offset: number) => span === null ? null : { start: span.start + offset, end: span.end + offset, text: span.text };
     return {
@@ -1064,9 +1076,14 @@ export function semanticExport(draft: Draft, semantic: SemanticState) {
   } : {};
   const markdownTerms = segments.length ? segments.map(({ index, stale, findings }) => ({ index, stale, findings })) : null;
   if (!semantic.placed.length && !semantic.decisions.length) return { result: terms, markdown: null, segmentTerms: markdownTerms };
+  // Keyed by occurrence (the placed issue), not by issue id: two identical
+  // segments report the same id for different places with different statuses.
   const statuses = new Map<string, string>();
-  const issues = semantic.placed.map(p => { statuses.set(p.issue.id, (issueStatus(semantic, p) as { status: string }).status); return { ...p.issue, stale: p.stale }; });
-  const items = semanticExportItems({ issues, statuses });
+  const items = semantic.placed.map(p => {
+    const status = (issueStatus(semantic, p) as { status: string }).status;
+    statuses.set(p.id, status);
+    return semanticExportItems({ issues: [{ ...p.issue, stale: p.stale }], statuses: new Map([[p.issue.id, status]]) })[0];
+  });
   const resolved = semanticIssuesResolved(statuses) as number;
   const readyPairs = safePairs(draft.source, draft.target, draft.alignments).filter(p => p.status === 'ready');
   const reviewed = readyPairs.filter(p => semantic.results.some(r => r.region.source.start === p.source.core_start && r.region.target.start === p.target.core_start

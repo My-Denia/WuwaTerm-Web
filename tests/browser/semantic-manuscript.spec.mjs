@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
-import { S, openWorkbench, fillPair, downloadFrom, TRIO, trioResponse } from '../helpers/semantic-routes.mjs';
+import { S, openWorkbench, fillPair, downloadFrom, TRIO, trioResponse, zhParagraph, enParagraph, failure } from '../helpers/semantic-routes.mjs';
 
 const card = page => page.locator('.semantic-card');
 const act = (page, name) => card(page).getByRole('button', { name, exact: true });
@@ -99,4 +99,36 @@ test('a page without semantic review keeps the decisions of an imported v2 manus
   expect(resaved.semantic_decisions).toEqual(original.semantic_decisions);
   expect(resaved.semantic_texts).toEqual(original.semantic_texts);
   expect(resaved.semantic_history).toEqual(original.semantic_history);
+});
+
+test('two identical segments export their issues by place, each with its own status', async ({ page }) => {
+  await openWorkbench(page);
+  const source = [zhParagraph(1), zhParagraph(1), zhParagraph(3)].join('\n\n');
+  const target = [enParagraph(1), enParagraph(1), enParagraph(3)].join('\n\n');
+  await fillPair(page, source, target);
+  await page.getByRole('button', { name: S.start, exact: true }).click();
+  await expect(page.locator('.segment-head p')).toContainText('已审 3/3 段', { timeout: 30_000 });
+  // The first issue of segment 1 is ignored; the identical issue in segment 2 stays open.
+  await page.locator('.semantic-card').getByRole('button', { name: S.ignore, exact: true }).click();
+  const result = JSON.parse((await downloadFrom(page, '导出当前结果')).text);
+  const items = result.semantic_review.items;
+  expect(items).toHaveLength(6);
+  const twins = items.filter(item => item.issue_id === items[0].issue_id);
+  expect(twins.map(item => [item.segment_index, item.status])).toEqual([[0, 'ignored'], [1, 'pending']]);
+  expect(result.semantic_issues_resolved).toBe(1);
+});
+
+test('a partial term run exports the manuscript segment numbers, not positions in the result list', async ({ page }) => {
+  await openWorkbench(page, { capabilities: ['translation-context-v1'], reviewFailures: { 2: failure(502, 'upstream_network_error') } });
+  const source = [1, 2, 3].map(i => zhParagraph(i)).join('\n\n');
+  const target = [1, 2, 3].map(i => enParagraph(i)).join('\n\n');
+  await fillPair(page, source, target);
+  await page.getByRole('button', { name: S.runTerm, exact: true }).click();
+  await expect(page.locator('.segment-head p')).toContainText('术语已核 2/3 段', { timeout: 30_000 });
+  const result = JSON.parse((await downloadFrom(page, '导出当前结果')).text);
+  expect(result.segment_term_reports.map(r => r.segment)).toEqual([1, 3]);
+  const markdown = (await downloadFrom(page, '导出 Markdown 报告')).text;
+  expect(markdown).toContain('### 第 1 段');
+  expect(markdown).toContain('### 第 3 段');
+  expect(markdown).not.toContain('### 第 2 段');
 });
