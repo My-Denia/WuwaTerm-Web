@@ -35,7 +35,7 @@ export const busy = () => failure(429, 'shared_pool_busy', { retry_after_seconds
  * gate(n) -> {release} holding semantic call n open until released.
  */
 export async function installRoutes(page, options = {}) {
-  const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate } = options;
+  const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate, translateFailures = {} } = options;
   const rec = { semantic: [], translations: [], reviews: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map() };
   rec.gate = n => {
     let release;
@@ -74,6 +74,8 @@ export async function installRoutes(page, options = {}) {
     if (path === '/api/translations') {
       const body = route.request().postDataJSON();
       rec.translations.push(body);
+      const failed = translateFailures[rec.translations.length];
+      if (failed) return route.fulfill({ status: failed.status, json: failed.body });
       const text = translate ? translate(body, rec.translations.length) : `Translated ${rec.translations.length}.`;
       return route.fulfill({ json: { kind: 'exact', text, direction: body.to ?? 'en', dictionary_miss: false, request_id: 'synthetic-translation' } });
     }

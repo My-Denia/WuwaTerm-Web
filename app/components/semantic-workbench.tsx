@@ -353,6 +353,11 @@ export function SemanticWorkbench(props: Props) {
     }
   };
 
+  // The translation is assembled in order, so a failed segment is never skipped:
+  // anything but a wait or a quota pause stops the run with that segment queued,
+  // and continuing sends it first.
+  const inOrder = (failure: ReturnType<typeof failureOf>) => (['wait', 'pause_quota'].includes((failure.classification as { action: string }).action)
+    ? failure : { ...failure, classification: { action: 'stop' } });
   const sendTranslate = async (item: RunItem, signal: AbortSignal, generation: number) => {
     const live = () => runGeneration.current === generation;
     const plan = translateRun.current;
@@ -369,13 +374,14 @@ export function SemanticWorkbench(props: Props) {
     const previousPiece = item.index > 0 ? plan.pieces[item.index - 1] : '';
     const before = prev ? { source: chars(slice(sc, prev.core_start, prev.core_end)).slice(-400).join(''), target: chars(previousPiece.trim()).slice(-400).join('') } : null;
     const fitted = fitRequestBody({ text: core, to: d.direction, ...(contextOn && before ? { context: { before } } : {}) });
+    if (!fitted.fits) { failRun({ type: 'failed', key: item.key, code: 'bodyTooLarge', classification: { action: 'stop' }, now: Date.now() }); return; }
     try {
       const response = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(fitted.body), signal });
       const body = await responseBody(response);
       if (!live()) return;
       requestPoolRefresh();
       if (!response.ok || typeof body?.text !== 'string') {
-        failRun({ type: 'failed', key: item.key, ...(response.ok ? { code: 'responseInvalid', classification: { action: 'stop' } } : failureOf(response, body)), now: Date.now() });
+        failRun({ type: 'failed', key: item.key, ...(response.ok ? { code: 'responseInvalid', classification: { action: 'stop' } } : inOrder(failureOf(response, body))), now: Date.now() });
         return;
       }
       const latest = work.current.draft;
@@ -390,7 +396,7 @@ export function SemanticWorkbench(props: Props) {
       commit({ draft: { ...latest, target: plan.base + plan.pieces.join(''), alignments: latest.alignments === null ? null : [] }, remember: false, notice: done ? 'sem:translateRunDone' : null });
       dispatch({ type: 'done', key: item.key });
     } catch {
-      if (live() && !signal.aborted) failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'segment_failed' }, now: Date.now() });
+      if (live() && !signal.aborted) failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'stop' }, now: Date.now() });
     }
   };
 
@@ -404,7 +410,10 @@ export function SemanticWorkbench(props: Props) {
     const abort = new AbortController(); runAbort.current = abort;
     const generation = runGeneration.current;
     const runner = runners.current[run.kind ?? 'semantic'];
-    void runner(item, abort.signal, generation).finally(() => {
+    void runner(item, abort.signal, generation).catch(() => {
+      // A runner that throws must not leave its item sending forever.
+      if (runGeneration.current === generation) failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'stop' }, now: Date.now() });
+    }).finally(() => {
       if (runGeneration.current === generation) inflight.current = null;
       if (runAbort.current === abort) runAbort.current = null;
     });
@@ -435,6 +444,7 @@ export function SemanticWorkbench(props: Props) {
     const precedents = usePrecedents ? selectPrecedents({ items: precedentItems(d, work.current.semantic), source: d.source, pairs: list, segmentIndex: view.pair.index }) : [];
     const context = contextOn && (before || precedents.length) ? { context: { ...(before ? { before } : {}), ...(precedents.length ? { precedents } : {}) } } : {};
     const fitted = fitRequestBody({ text: view.sCore, to: d.direction, ...context });
+    if (!fitted.fits) return;
     setPairTranslating(view.pair.index);
     try {
       const response = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(fitted.body) });
@@ -651,6 +661,7 @@ export function SemanticWorkbench(props: Props) {
     if (!code) return s.stopGeneric;
     if (['llm_unavailable', 'semantic_review_unavailable', 'site_not_configured'].includes(code)) return s.stopUnavailable;
     if (code === 'translateTargetChanged') return s.notices.translateTargetChanged;
+    if (run.kind === 'translate') return `${(m.tMsg as Record<string, string>)[code] ?? s.stopGeneric} ${s.translateStopped}`;
     if ((classifyFailure({ reason: code }) as { action: string }).action === 'stop') return (m.tMsg as Record<string, string>)[code] ?? (m.rMsg as Record<string, string>)[code] ?? s.stopGeneric;
     // Anything else stopped the run by failing twice in a row.
     return code === 'upstream_timeout' ? `${s.stopRepeated} ${s.phaseTimeout}` : s.stopRepeated;

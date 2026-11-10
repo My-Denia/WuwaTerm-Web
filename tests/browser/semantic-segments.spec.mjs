@@ -93,6 +93,22 @@ test('a long source without a translation is translated segment by segment, each
   });
 });
 
+test('a failed segment stops the segment translation in order and continuing resends it first', async ({ page }) => {
+  const { source } = longPair(3);
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateFailures: { 2: { status: 502, body: { status: 'unavailable', reason: 'upstream_network_error' } } },
+    translate: body => `T:${Array.from(body.text).slice(0, 3).join('')}` });
+  await page.locator('#review-source').fill(source);
+  await page.getByRole('button', { name: S.translateLong, exact: true }).click();
+  await expect(page.locator('.run-phase')).toContainText(S.translateStopped, { timeout: 30_000 });
+  // Only the first segment is in the translation: nothing after the failed one was appended.
+  await expect(page.locator('#review-target')).toHaveValue(`T:${Array.from(zhParagraph(1)).slice(0, 3).join('')}\n\n`);
+  expect(rec.translations).toHaveLength(2);
+  await page.getByRole('button', { name: S.resume, exact: true }).click();
+  const expected = [1, 2, 3].map(i => `T:${Array.from(zhParagraph(i)).slice(0, 3).join('')}`).join('\n\n');
+  await expect(page.locator('#review-target')).toHaveValue(expected, { timeout: 30_000 });
+  expect(rec.translations.map(body => body.text)).toEqual([zhParagraph(1), zhParagraph(2), zhParagraph(2), zhParagraph(3)]);
+});
+
 test('without the context capability the segment translation sends no context', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: [] });
   await page.locator('#review-source').fill(longPair(2).source);
