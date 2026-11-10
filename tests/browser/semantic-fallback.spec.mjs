@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { S, openWorkbench, fillPair, longPair, TRIO, trioResponse } from '../helpers/semantic-routes.mjs';
+import { S, openWorkbench, fillPair, longPair, TRIO, trioResponse, downloadFrom } from '../helpers/semantic-routes.mjs';
 
 const WITHOUT = [
   ['an empty capability list', []],
@@ -40,6 +40,13 @@ test('a long manuscript keeps its segment panel, per-segment term check and manu
   await expect(page.locator('.segment-chip').first()).toContainText(S.segTermChecked);
   expect(rec.reviews).toHaveLength(4);
   expect(rec.semantic).toHaveLength(0);
+  // The finished per-segment term reports are exported, and the page says they are not in the manuscript file.
+  await expect(page.locator('.manuscript-save-state').filter({ hasText: S.segmentTermsNotSaved })).toBeVisible();
+  const result = JSON.parse((await downloadFrom(page, '导出当前结果')).text);
+  expect(result.segment_term_reports.map(r => [r.segment, r.stale])).toEqual([[1, false], [2, false], [3, false], [4, false]]);
+  expect(result.segment_term_reports.every(r => r.report.rule_version === 'review-v2')).toBe(true);
+  const markdown = (await downloadFrom(page, '导出 Markdown 报告')).text;
+  expect(markdown).toContain('逐段术语核对（4 段）');
   // The precedent option applies to translation too, so it shows with the context capability.
   await expect(page.getByLabel(S.precedents)).toBeVisible();
   // Manual splitting stays available.

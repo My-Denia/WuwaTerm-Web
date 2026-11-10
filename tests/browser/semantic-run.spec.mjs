@@ -88,6 +88,21 @@ test('a rate-limited public site makes the run wait and then continue on its own
   expect(rec.maxInflight).toBe(1);
 });
 
+test('an upstream rate limit was already charged: the run stops there and nothing is resent until the user continues', async ({ page }) => {
+  const { source, target } = longPair(3);
+  const rec = await openWorkbench(page, { failures: { 2: failure(429, 'upstream_rate_limited') } });
+  await fillPair(page, source, target);
+  await start(page).click();
+  await expect(status(page)).toContainText(fill(S.phaseStopped, { reason: '' }).trim());
+  // No timer resends it: the count stays at the charged request.
+  await page.waitForTimeout(2_500);
+  expect(rec.semantic).toHaveLength(2);
+  await page.getByRole('button', { name: S.resume, exact: true }).click();
+  await expect(progress(page)).toContainText(fill(S.progress, { done: 3, total: 3 }), { timeout: 30_000 });
+  expect(rec.semantic).toHaveLength(4);
+  expect(rec.semantic[2].source).toBe(rec.semantic[1].source);
+});
+
 // Product bug: `now` is set once at mount and only refreshed by the 1s timer, so the
 // first rendering of the wait line counts down from the page's mount time, not from now.
 test('the wait line never shows more seconds than retry_after_seconds', async ({ page }) => {

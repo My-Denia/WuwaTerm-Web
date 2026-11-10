@@ -109,6 +109,21 @@ test('a failed segment stops the segment translation in order and continuing res
   expect(rec.translations.map(body => body.text)).toEqual([zhParagraph(1), zhParagraph(2), zhParagraph(2), zhParagraph(3)]);
 });
 
+test('changing the direction during segment translation stops it and drops the reply for the old direction', async ({ page }) => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateHold: { 1: held } });
+  await page.locator('#review-source').fill(longPair(3).source);
+  await page.getByRole('button', { name: S.translateLong, exact: true }).click();
+  await expect.poll(() => rec.translations.length).toBe(1);
+  await page.locator('select[aria-label="译文语言"]').selectOption('zh');
+  release();
+  await expect(page.locator('.run-phase')).toContainText(S.notices.translateTargetChanged);
+  await page.waitForTimeout(1_000);
+  expect(rec.translations.map(body => body.to)).toEqual(['en']);
+  await expect(page.locator('#review-target')).toHaveValue('');
+});
+
 test('without the context capability the segment translation sends no context', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: [] });
   await page.locator('#review-source').fill(longPair(2).source);

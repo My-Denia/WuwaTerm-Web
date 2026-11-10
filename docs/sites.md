@@ -112,10 +112,20 @@ checks that the complete range still reads the same. `J`/`K` move between issues
 and `Enter` selects the issue in the text box. Every handling step can be undone.
 
 Segments are sent one at a time. A run can be paused and continued; a failed
-segment can be retried on its own; `shared_pool_busy` or an upstream rate limit
-waits for the stated time and then continues; a used-up daily quota pauses the run
-with finished segments kept; two consecutive identical failures stop it; a timed-out
-segment is never retried automatically because its quota is not refunded. Edits
+segment can be retried on its own. Only `shared_pool_busy`, which the Site returns
+before admitting (and charging) a request, waits for the stated time and then
+continues by itself. Every failure after admission was already charged and is never
+resent automatically: an upstream rate limit stops the run at that segment until the
+user continues, a timeout or server error marks the segment failed for a manual
+retry, and two consecutive identical failures stop the run. A used-up daily quota
+pauses the run with finished segments kept. Segment translation assembles the text
+in order, so it stops at any failed segment instead of skipping it. Every run keeps
+the direction it started with: a reply for another direction is not used.
+
+Per-segment term results of a long manuscript are not written to the manuscript
+file: the format's report history holds two reports of at most 2,000 characters,
+and changing it would break the current WuwaTerm-Windows reader. The page says so;
+the results are in the current-result and Markdown exports. Edits
 during a run never abort a request that is already charged; a result whose segment
 text changed meanwhile is not used.
 

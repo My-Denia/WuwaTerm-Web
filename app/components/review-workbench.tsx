@@ -678,6 +678,7 @@ export function ReviewWorkbench() {
       reconciled,
       comparison,
       semantic: semanticExport(draft, semantic).markdown,
+      segmentTerms: semanticExport(draft, semantic).segmentTerms,
     }, lang), 'text/markdown;charset=utf-8');
     setNotice('exportMarkdown');
   }
@@ -798,6 +799,7 @@ export function ReviewWorkbench() {
       </ol>
     )}
     <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
+    {semantic.terms.length > 0 && <p className="manuscript-save-state">{sm.segmentTermsNotSaved}</p>}
     <form onSubmit={submit}>
       <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => edit({ ...draft, direction: e.target.value as 'en' | 'zh', alignments: alignments === null ? null : [] }, 'directionChanged')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
       <textarea ref={sourceBox} id="review-source" value={source} onChange={e => editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />

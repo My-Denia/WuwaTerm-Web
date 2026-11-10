@@ -160,7 +160,7 @@ export function SemanticWorkbench(props: Props) {
   const runGeneration = useRef(0);
   const runAbort = useRef<AbortController | null>(null);
   const inflight = useRef<string | null>(null);
-  const translateRun = useRef<{ source: string; segments: { start: number; end: number; core_start: number; core_end: number }[]; pieces: string[]; base: string } | null>(null);
+  const translateRun = useRef<{ source: string; direction: 'en' | 'zh'; segments: { start: number; end: number; core_start: number; core_end: number }[]; pieces: string[]; base: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [usePrecedents, setUsePrecedents] = useState(PRECEDENTS_DEFAULT_ON);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'handled' | 'reconfirm' | 'all'>('pending');
@@ -261,6 +261,8 @@ export function SemanticWorkbench(props: Props) {
   const place = async (sentDoc: Draft, pair: Pair, sentSource: string, sentTarget: string, report: SemanticReport, key: string, imported = false) => {
     const [sourceRevision, targetRevision] = await Promise.all([revisionOf(sentDoc.source), revisionOf(sentDoc.target)]);
     const current = work.current.draft;
+    // A report is only about the direction it was asked in.
+    if (current.direction !== sentDoc.direction) return false;
     const ss = diffSplice(sentDoc.source, current.source); const ts = diffSplice(sentDoc.target, current.target);
     const region = {
       source: ss ? mapRegion({ start: pair.source.core_start, end: pair.source.core_end }, ss) : { start: pair.source.core_start, end: pair.source.core_end },
@@ -337,6 +339,7 @@ export function SemanticWorkbench(props: Props) {
         return;
       }
       const current = work.current.draft;
+      if (current.direction !== d.direction) { dispatch({ type: 'skip', key: item.key }); return; }
       const ss = diffSplice(d.source, current.source); const ts = diffSplice(d.target, current.target);
       const region = {
         source: ss ? mapRegion({ start: found.pair.source.core_start, end: found.pair.source.core_end }, ss) : { start: found.pair.source.core_start, end: found.pair.source.core_end },
@@ -362,7 +365,8 @@ export function SemanticWorkbench(props: Props) {
     const live = () => runGeneration.current === generation;
     const plan = translateRun.current;
     const d = work.current.draft;
-    if (!plan || d.source !== plan.source || d.target !== plan.base + plan.pieces.join('')) {
+    // The run translates one source in one direction; any change stops it before sending.
+    if (!plan || d.source !== plan.source || d.direction !== plan.direction || d.target !== plan.base + plan.pieces.join('')) {
       failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: Date.now() });
       commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
       return;
@@ -373,7 +377,7 @@ export function SemanticWorkbench(props: Props) {
     const prev = item.index > 0 ? plan.segments[item.index - 1] : null;
     const previousPiece = item.index > 0 ? plan.pieces[item.index - 1] : '';
     const before = prev ? { source: chars(slice(sc, prev.core_start, prev.core_end)).slice(-400).join(''), target: chars(previousPiece.trim()).slice(-400).join('') } : null;
-    const fitted = fitRequestBody({ text: core, to: d.direction, ...(contextOn && before ? { context: { before } } : {}) });
+    const fitted = fitRequestBody({ text: core, to: plan.direction, ...(contextOn && before ? { context: { before } } : {}) });
     if (!fitted.fits) { failRun({ type: 'failed', key: item.key, code: 'bodyTooLarge', classification: { action: 'stop' }, now: Date.now() }); return; }
     try {
       const response = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(fitted.body), signal });
@@ -385,7 +389,7 @@ export function SemanticWorkbench(props: Props) {
         return;
       }
       const latest = work.current.draft;
-      if (latest.source !== plan.source || latest.target !== plan.base + plan.pieces.join('')) {
+      if (latest.source !== plan.source || latest.direction !== plan.direction || latest.target !== plan.base + plan.pieces.join('')) {
         failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: Date.now() });
         commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
         return;
@@ -430,7 +434,7 @@ export function SemanticWorkbench(props: Props) {
     if (!d.source.trim() || d.target.trim()) return;
     const segments = segmentText(d.source) as { start: number; end: number; core_start: number; core_end: number }[];
     runGeneration.current += 1; runAbort.current?.abort(); inflight.current = null;
-    translateRun.current = { source: d.source, segments, pieces: [], base: '' };
+    translateRun.current = { source: d.source, direction: d.direction, segments, pieces: [], base: '' };
     // One undo step for the whole generated translation: the blank target before it.
     commit({ draft: { ...d, target: '' }, remember: true, notice: null });
     dispatch({ type: 'start', kind: 'translate', items: segments.map((_, index) => ({ key: `tr#${index}`, index })) });
@@ -454,7 +458,7 @@ export function SemanticWorkbench(props: Props) {
       const latest = work.current.draft;
       const tc = chars(latest.target);
       const region = view.pair.target;
-      if (latest.source !== d.source || latest.target !== d.target) { commit({ semantic: x => x, notice: 'sem:segmentChanged', remember: false }); return; }
+      if (latest.source !== d.source || latest.target !== d.target || latest.direction !== d.direction) { commit({ semantic: x => x, notice: 'sem:segmentChanged', remember: false }); return; }
       const head = slice(tc, 0, region.start); const ws = slice(tc, region.start, region.end); const tail = slice(tc, region.end, tc.length);
       const lead = head && !/\n[ \t\r]*\n[ \t\r]*$/u.test(head + ws) ? '\n\n' : '';
       const trail = tail && !/^[ \t\r]*\n[ \t\r]*\n/u.test(tail) ? '\n\n' : '';
@@ -662,6 +666,7 @@ export function SemanticWorkbench(props: Props) {
     if (['llm_unavailable', 'semantic_review_unavailable', 'site_not_configured'].includes(code)) return s.stopUnavailable;
     if (code === 'translateTargetChanged') return s.notices.translateTargetChanged;
     if (run.kind === 'translate') return `${(m.tMsg as Record<string, string>)[code] ?? s.stopGeneric} ${s.translateStopped}`;
+    if (['upstream_rate_limited', 'rate_limited'].includes(code)) return `${(m.tMsg as Record<string, string>)[code] ?? s.stopGeneric} ${s.chargedNoResend}`;
     if ((classifyFailure({ reason: code }) as { action: string }).action === 'stop') return (m.tMsg as Record<string, string>)[code] ?? (m.rMsg as Record<string, string>)[code] ?? s.stopGeneric;
     // Anything else stopped the run by failing twice in a row.
     return code === 'upstream_timeout' ? `${s.stopRepeated} ${s.phaseTimeout}` : s.stopRepeated;
@@ -1035,9 +1040,30 @@ export function semanticWorkfileParts<T extends { source: string; target: string
   } catch { return payload; }
 }
 
+/** Per-segment term reports of a long manuscript in whole-text positions; `stale` when the segment changed since. */
+export function segmentTermsOf(draft: Draft, semantic: SemanticState) {
+  if (!semantic.terms.length) return [];
+  const sc = chars(draft.source); const tc = chars(draft.target);
+  return [...semantic.terms].sort((a, b) => a.region.source.start - b.region.source.start).map((t, index) => {
+    const stale = segmentKey(draft.direction, slice(sc, t.region.source.start, t.region.source.end), slice(tc, t.region.target.start, t.region.target.end)) !== t.segmentKey;
+    const shift = (span: Span | null, offset: number) => span === null ? null : { start: span.start + offset, end: span.end + offset, text: span.text };
+    return {
+      index, stale,
+      source_start: t.region.source.start, source_end: t.region.source.end, target_start: t.region.target.start, target_end: t.region.target.end,
+      report: t.report,
+      findings: t.report.findings.map(f => ({ verdict: f.verdict, source_span: shift(f.source_span, t.region.source.start)!, target_span: shift(f.target_span, t.region.target.start), candidates: f.candidates.map(c => ({ zh: c.zh, en: c.en })) })),
+    };
+  });
+}
+
 /** Export parts: issue rows with their handling status; never a sentence-meaning certification. */
 export function semanticExport(draft: Draft, semantic: SemanticState) {
-  if (!semantic.placed.length && !semantic.decisions.length) return { result: {}, markdown: null };
+  const segments = segmentTermsOf(draft, semantic);
+  const terms = segments.length ? {
+    segment_term_reports: segments.map(({ index, stale, source_start, source_end, target_start, target_end, report }) => ({ segment: index + 1, stale, source_start, source_end, target_start, target_end, report })),
+  } : {};
+  const markdownTerms = segments.length ? segments.map(({ index, stale, findings }) => ({ index, stale, findings })) : null;
+  if (!semantic.placed.length && !semantic.decisions.length) return { result: terms, markdown: null, segmentTerms: markdownTerms };
   const statuses = new Map<string, string>();
   const issues = semantic.placed.map(p => { statuses.set(p.issue.id, (issueStatus(semantic, p) as { status: string }).status); return { ...p.issue, stale: p.stale }; });
   const items = semanticExportItems({ issues, statuses });
@@ -1046,7 +1072,8 @@ export function semanticExport(draft: Draft, semantic: SemanticState) {
   const reviewed = readyPairs.filter(p => semantic.results.some(r => r.region.source.start === p.source.core_start && r.region.target.start === p.target.core_start
     && r.region.source.end === p.source.core_end && r.region.target.end === p.target.core_end)).length;
   return {
-    result: { semantic_review: { review_version: SEMANTIC_REVIEW_VERSION, origin: 'model', items }, semantic_issues_resolved: resolved },
+    result: { ...terms, semantic_review: { review_version: SEMANTIC_REVIEW_VERSION, origin: 'model', items }, semantic_issues_resolved: resolved },
     markdown: { items, resolved, segments: { total: readyPairs.length, reviewed } },
+    segmentTerms: markdownTerms,
   };
 }

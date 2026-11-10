@@ -30,6 +30,7 @@ export type MarkdownSemanticItem = {
   suggestion: string | null; suggestion_withheld: string | null; status: string;
 };
 export type MarkdownSemantic = { items: MarkdownSemanticItem[]; resolved: number; segments: { total: number; reviewed: number } };
+export type MarkdownSegmentTerms = { index: number; stale: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[] }[] };
 export type MarkdownCurrency = 'current' | 'stale' | 'imported' | 'none';
 
 export type MarkdownReportInput = {
@@ -41,6 +42,7 @@ export type MarkdownReportInput = {
   reconciled: MarkdownReconciled[];
   comparison: MarkdownComparison | null;
   semantic?: MarkdownSemantic | null;
+  segmentTerms?: MarkdownSegmentTerms[] | null;
 };
 
 function backtickRun(text: string): number {
@@ -245,6 +247,18 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
     paragraph(md.comparisonNote);
   }
 
+  if (input.segmentTerms && input.segmentTerms.length) {
+    heading(2, fill(md.segmentTermsHeading, { n: input.segmentTerms.length }));
+    paragraph(md.segmentTermsNote);
+    for (const segment of input.segmentTerms) {
+      out.push('### ' + fill(md.segmentTermsLabel, { n: segment.index + 1 }) + (segment.stale ? ' · ' + md.segmentTermsStale : ''), '');
+      if (!segment.findings.length) { paragraph(md.segmentTermsNone); continue; }
+      out.push(...bullets(segment.findings.map(finding => ((msg(lang).review.verdicts as Record<string, string>)[finding.verdict] ?? finding.verdict)
+        + ' · ' + inline(finding.source_span.text) + ' · ' + fill(md.spanLabel, { start: finding.source_span.start + 1, end: finding.source_span.end })
+        + (finding.target_span ? ' · ' + fill(md.targetSpanLabel, { start: finding.target_span.start + 1, end: finding.target_span.end }) + colon(lang) + inline(finding.target_span.text) : ' · ' + md.noTargetSpan)
+        + (finding.candidates.length ? ' · ' + finding.candidates.map(c => inline(c.zh) + ' / ' + inline(c.en)).join(semicolon(lang)) : ''))), '');
+    }
+  }
   if (input.semantic) {
     const semantic = input.semantic;
     heading(2, md.semanticHeading);

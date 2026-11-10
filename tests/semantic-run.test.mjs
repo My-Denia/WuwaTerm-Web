@@ -172,9 +172,12 @@ test('fitRequestBody drops the furthest precedents, then halves the context, wit
 
 test('classifyFailure maps reasons to run actions', () => {
   assert.deepEqual(classifyFailure({ reason: 'shared_pool_busy' }), { action: 'wait', seconds: 30 });
-  assert.deepEqual(classifyFailure({ reason: 'rate_limited', retryAfterSeconds: 1 }), { action: 'wait', seconds: 5 });
-  assert.deepEqual(classifyFailure({ reason: 'upstream_rate_limited', retryAfterSeconds: 9999 }), { action: 'wait', seconds: 600 });
-  assert.deepEqual(classifyFailure({ reason: 'upstream_rate_limited', retryAfterSeconds: 42 }), { action: 'wait', seconds: 42 });
+  assert.deepEqual(classifyFailure({ reason: 'shared_pool_busy', retryAfterSeconds: 1 }), { action: 'wait', seconds: 5 });
+  assert.deepEqual(classifyFailure({ reason: 'shared_pool_busy', retryAfterSeconds: 9999 }), { action: 'wait', seconds: 600 });
+  assert.deepEqual(classifyFailure({ reason: 'shared_pool_busy', retryAfterSeconds: 42 }), { action: 'wait', seconds: 42 });
+  // An upstream rate limit came after admission: charged, so never resent automatically.
+  assert.deepEqual(classifyFailure({ reason: 'upstream_rate_limited', retryAfterSeconds: 42 }), { action: 'stop' });
+  assert.deepEqual(classifyFailure({ reason: 'rate_limited' }), { action: 'stop' });
   for (const reason of ['translation_pool_exhausted', 'reviews_pool_exhausted', 'llm_budget_exhausted', 'translation_disabled']) {
     assert.deepEqual(classifyFailure({ reason }), { action: 'pause_quota' }, reason);
   }
@@ -260,7 +263,7 @@ test('pause keeps the in-flight item; skip ends an item without touching streak 
   assert.equal(runReducer(s, { type: 'reset' }).phase, 'idle');
   // a user pause survives a wait classification
   let p = runReducer(runReducer(start(), { type: 'sent', key: 'a' }), { type: 'pause' });
-  p = runReducer(p, { type: 'failed', key: 'a', code: 'rate_limited', classification: { action: 'wait', seconds: 5 }, now: 0 });
+  p = runReducer(p, { type: 'failed', key: 'a', code: 'shared_pool_busy', classification: { action: 'wait', seconds: 5 }, now: 0 });
   assert.deepEqual([p.phase, p.waitUntil, p.items[0].status], ['paused', null, 'queued']);
 });
 

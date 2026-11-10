@@ -37,6 +37,7 @@ const zh = {
   stopRepeated: '连续两段出现同样的失败，已停止发送。',
   stopUnavailable: '服务暂不支持语义审校或未配置模型。',
   stopGeneric: '服务暂时不可用。',
+  chargedNoResend: '这次请求已获准并计入额度，所以不会自动重发；稍后点「继续审校」重试这一段。',
   segmentsTitle: '段落',
   segmentsAria: '段落导航',
   segmentLabel: '第 {n} 段',
@@ -166,6 +167,7 @@ const zh = {
   runTerm: '逐段核对术语',
   runTermHint: '稿件超过单次 2,000 字上限：术语按段核对，每段计 1 次审校额度。长稿的术语结果只读，不能在此做逐处术语选择。',
   termSegmentStale: '此段已修改，需重新核对术语。',
+  segmentTermsNotSaved: '逐段术语核对的结果不写入稿件文件（稿件格式只容纳两份 2,000 字以内的报告），导入后需重新逐段核对；需要留存时请「导出当前结果」或「导出 Markdown 报告」。',
   longTermReadOnly: '长稿按段核对的术语结果只供定位与参考；逐处术语选择请在 2,000 字以内的稿件中进行。',
 };
 
@@ -205,6 +207,7 @@ const en: SemanticMessages = {
   stopRepeated: 'Two segments in a row failed the same way, so sending stopped.',
   stopUnavailable: 'The service does not support semantic review or has no model configured.',
   stopGeneric: 'The service is temporarily unavailable.',
+  chargedNoResend: 'This request was already admitted and charged, so it is not resent automatically. Click Continue review later to retry this segment.',
   segmentsTitle: 'Segments',
   segmentsAria: 'Segment navigation',
   segmentLabel: 'Segment {n}',
@@ -334,6 +337,7 @@ const en: SemanticMessages = {
   runTerm: 'Check terms by segment',
   runTermHint: 'The manuscript is over the 2,000-character limit, so terms are checked per segment; each segment uses one review. Term results of long manuscripts are read-only: per-occurrence term choices need a manuscript within 2,000 characters.',
   termSegmentStale: 'This segment changed; check its terms again.',
+  segmentTermsNotSaved: 'Per-segment term results are not written to the manuscript file (the format holds two reports of up to 2,000 characters), so check the segments again after import. To keep them, use Export current result or Export Markdown report.',
   longTermReadOnly: 'Per-segment term results of a long manuscript are for locating and reference only. Make per-occurrence term choices in manuscripts within 2,000 characters.',
 };
 
