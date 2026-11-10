@@ -1,0 +1,164 @@
+{
+  "format": "wuwaterm-manuscript-v2",
+  "source": "第三天到了。\n它很安静。",
+  "target": "It is the third day.\nIt is quiet.",
+  "direction": "en",
+  "alignments": null,
+  "choices": [],
+  "history": [],
+  "semantic_decisions": [
+    {
+      "issue_id": "75ad03b93b4139768e8d17da168425ef",
+      "fingerprint": "11111111111111111111111111111111",
+      "category": "quantity_change",
+      "segment_index": 0,
+      "source_revision": "C833EE8DD05BF0672925EBDF8A0C6924888315A032392CEA2A85DC082F045D41",
+      "target_revision": "b415eb74bb794a4ee0559e8a626e438e983bfd09a26403d0dd04e8516f386ebb",
+      "source_span": {
+        "start": 0,
+        "end": 3,
+        "text": "第三天"
+      },
+      "target_span": {
+        "start": 7,
+        "end": 17,
+        "text": "he second "
+      },
+      "decision": "accepted",
+      "applied_text": "third",
+      "basis": {
+        "review_version": "semantic-review-v1",
+        "term_basis": {
+          "dictionary_revision": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+          "matcher_revision": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        }
+      }
+    },
+    {
+      "issue_id": "5027046d2d789852ca698afed545300a",
+      "fingerprint": "22222222222222222222222222222222",
+      "category": "omission",
+      "segment_index": 1,
+      "source_revision": "c833ee8dd05bf0672925ebdf8a0c6924888315a032392cea2a85dc082f045d41",
+      "target_revision": "b415eb74bb794a4ee0559e8a626e438e983bfd09a26403d0dd04e8516f386ebb",
+      "source_span": {
+        "start": 7,
+        "end": 11,
+        "text": "它很安静"
+      },
+      "target_span": null,
+      "decision": "ignored",
+      "applied_text": null,
+      "basis": {
+        "review_version": "semantic-review-v1",
+        "term_basis": {
+          "dictionary_revision": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+          "matcher_revision": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        }
+      }
+    },
+    {
+      "issue_id": "e50a52b0421ad95ae844c2c4fa856efc",
+      "fingerprint": "33333333333333333333333333333333",
+      "category": "meaning_shift",
+      "segment_index": 1,
+      "source_revision": "c833ee8dd05bf0672925ebdf8a0c6924888315a032392cea2a85dc082f045d41",
+      "target_revision": "b415eb74bb794a4ee0559e8a626e438e983bfd09a26403d0dd04e8516f386ebb",
+      "source_span": null,
+      "target_span": {
+        "start": 28,
+        "end": 33,
+        "text": "quiet"
+      },
+      "decision": "adjusted",
+      "applied_text": "calm",
+      "basis": {
+        "review_version": "semantic-review-v1",
+        "term_basis": {
+          "dictionary_revision": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+          "matcher_revision": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        }
+      }
+    }
+  ],
+  "semantic_texts": [
+    {
+      "revision": "b415eb74bb794a4ee0559e8a626e438e983bfd09a26403d0dd04e8516f386ebb",
+      "text": "It is the second day.\nIt is quiet."
+    }
+  ],
+  "semantic_history": [
+    {
+      "source": "第三天到了。\n它很安静。",
+      "target": "It is the second day.\nIt is quiet.",
+      "direction": "en",
+      "segments": [
+        {
+          "segment_index": 0,
+          "source_start": 0,
+          "source_end": 5,
+          "target_start": 0,
+          "target_end": 21,
+          "report": {
+            "request_id": "fixture-history",
+            "review_version": "semantic-review-v1",
+            "source_revision": "3e74f803c7ea5f62e0b40d1d96d9ad468b8b438078d5a45f14f046149131c20f",
+            "target_revision": "0cda8adca2e9607dcdc7fed3c5bb79175f1b696a202e3abeeb9a9f32b8c2b605",
+            "term_basis": {
+              "dictionary_revision": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+              "matcher_revision": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+            },
+            "status": "complete",
+            "status_reason": null,
+            "dropped_unanchored": 0,
+            "checked": [
+              "omission",
+              "unsupported_addition",
+              "meaning_shift",
+              "negation_change",
+              "quantity_change",
+              "reference_inconsistency",
+              "term_sense"
+            ],
+            "issues": [
+              {
+                "id": "c60a61181986b32ed096cc9cbc70f925",
+                "fingerprint": "11111111111111111111111111111111",
+                "category": "quantity_change",
+                "origin": "model",
+                "confidence": "high",
+                "source_span": {
+                  "start": 0,
+                  "end": 3,
+                  "text": "第三天"
+                },
+                "target_span": {
+                  "start": 7,
+                  "end": 17,
+                  "text": "he second "
+                },
+                "source_excerpt": "第三天",
+                "target_excerpt": "he second ",
+                "rationale": "Synthetic fixture rationale.",
+                "suggestion": {
+                  "target_span": {
+                    "start": 7,
+                    "end": 13,
+                    "text": "he sec"
+                  },
+                  "replacement": "third",
+                  "term_effect": "none"
+                },
+                "suggestion_withheld": null,
+                "alternatives": []
+              }
+            ],
+            "truncated": false,
+            "truncated_reason": null,
+            "omitted_issues": 0
+          }
+        }
+      ]
+    }
+  ]
+}

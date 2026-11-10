@@ -13,7 +13,8 @@ and there is no SLA.
 
 - **Repository fact:** This repository is a separately built Hosted / Cloudflare Worker
   BFF. The browser calls only same-origin `/api/pool`, `/api/terms`,
-  `/api/translations`, `/api/reviews` and the on-demand `/api/meta`; the server-side proxy holds the device credential and
+  `/api/translations`, `/api/reviews`, `/api/capabilities`, `/api/semantic-reviews`
+  and the on-demand `/api/meta`; the server-side proxy holds the device credential and
   calls the published `/v1` contract. There is no visitor account system in
   this application code.
 - **Hosted platform control:** the hosting platform owns deployment versions,
@@ -36,6 +37,16 @@ and there is no SLA.
   first lookup attempt returned an upstream timeout and later attempts
   succeeded. The same limits apply: this is tested behavior, not an availability
   promise.
+
+`/api/capabilities` reports which optional features the service lists
+(`semantic-review-v1`, `translation-context-v1`). The probe is not charged to
+the shared pool and its result is cached for a few minutes. An old service that
+answers 404 is treated as listing nothing. `/api/semantic-reviews` sends one
+paired segment to the service's model only when the service lists
+`semantic-review-v1`. It is charged as one translation, with characters equal to
+the longer side, and so shares the translation switch and daily allowance. When
+the service does not list it, the Site answers 503 `semantic_review_unavailable`
+without charging anything.
 
 Optional `/api/meta` is not requested when the page loads. Opening 「词典版本」
 asks once for the dictionary the running service reports: database schema

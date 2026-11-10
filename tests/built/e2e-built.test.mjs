@@ -137,6 +137,16 @@ test('built unknown routes expose the observed framework HTML 404, separately fr
   assert.equal(await counters(db), null);
 });
 
+test('built artifact routes capabilities and semantic review; an old service lists nothing and nothing is charged', async t => {
+  const { server, db, upstream } = await boot(t);
+  upstream.reply = () => new Response('not found', { status: 404 });
+  assert.deepEqual(await json(await server.fetch('/api/capabilities'), 200), { capabilities: [], request_id: null });
+  const semantic = { source: '今汐', target: 'Jinhsi', direction: 'en', review_version: 'semantic-review-v1', explain_language: 'zh' };
+  assert.equal((await json(await server.fetch('/api/semantic-reviews', post(semantic)), 503)).reason, 'semantic_review_unavailable');
+  assert.equal(upstream.calls.every(call => call.path === '/wuwaterm-api/v1/capabilities'), true);
+  assert.equal(await counters(db), null);
+});
+
 test('built upstream failures have redacted no-store errors and retain admitted review counts', async t => {
   const { server, db, upstream, tick } = await boot(t);
   for (const [status, code, expected, reason] of [[401, 'unauthorized', 401, 'upstream_unauthorized'], [429, 'rate_limited', 429, 'upstream_rate_limited'], [503, 'internal', 503, 'upstream_unavailable']]) {
