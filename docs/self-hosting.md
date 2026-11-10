@@ -32,7 +32,7 @@ Web 0.2.0 adds the semantic review workbench and opens manuscript v2 files in th
 Semantic review is an experimental Core feature, off by default; the public Site does not
 enable it. The workbench shows it, marked experimental, only when the Core API lists
 `semantic-review-v1`, which a self-hosted Core does after its operator turns the feature on
-(`WUWATERM_SEMANTIC_REVIEW_ENABLED` on the Core side; see the Core self-hosting guide).
+(`WUWATERM_SEMANTIC_REVIEW_ENABLED=1` in the Core's environment; see the Core self-hosting guide).
 Without it (feature off, or an older Core) the semantic panel is hidden and the rest of the
 workbench works as before, including long-manuscript segments, manual splitting and
 translation with context when the Core lists `translation-context-v1`.
