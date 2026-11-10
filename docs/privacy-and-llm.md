@@ -12,6 +12,11 @@ them to the authoritative VPS `/v1` API with a credential that never enters the
 browser. Dictionary-first processing and term locking remain backend behavior,
 not a second implementation in the Site.
 
+Semantic review sends both the source segment and its translation, plus the
+optional previous-segment context and human precedents you chose, to the
+service's model. The Site does not store or log them. Translation may likewise
+send optional context when the service supports it.
+
 The WuwaTerm application does not create visitor profiles or history and does
 not read, parse, store or infer visitor IP addresses. Its shared-pool row stores
 aggregate time windows, admitted request counts and translation input-character

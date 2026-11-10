@@ -1,0 +1,41 @@
+{
+  "valid": [
+    {
+      "file": "valid-all-parts.json",
+      "note": "accepted, ignored and adjusted decisions, one stored old text, one history snapshot"
+    }
+  ],
+  "invalid": [
+    {
+      "file": "invalid-both-spans-null.json",
+      "error": "workfile_invalid_content",
+      "note": "a decision with no source and no target span"
+    },
+    {
+      "file": "invalid-ignored-with-text.json",
+      "error": "workfile_invalid_content",
+      "note": "an ignored decision must have applied_text null"
+    },
+    {
+      "file": "invalid-duplicate-occurrence.json",
+      "error": "workfile_duplicate_choices",
+      "note": "two decisions for the same occurrence key"
+    },
+    {
+      "file": "invalid-129-decisions.json",
+      "error": "workfile_too_many_entries",
+      "note": "more than 128 decisions"
+    },
+    {
+      "file": "invalid-bad-hex.json",
+      "error": "workfile_invalid_content",
+      "note": "an uppercase revision is not lowercase hex"
+    },
+    {
+      "file": "invalid-unknown-key.json",
+      "error": "workfile_invalid_content",
+      "note": "an unknown key inside a decision"
+    }
+  ],
+  "format": "wuwaterm-manuscript-v2"
+}
