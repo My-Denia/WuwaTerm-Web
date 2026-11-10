@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 
@@ -494,4 +495,13 @@ test('import and undo issue zero translation/review POSTs and exports remain his
   expect(resultJson.report_is_current).toBe(false);
   expect(resultJson.sentence_meaning_evaluated).toBe(false);
   expect(resultJson.verified_stamp.valid).toBe(false);
+});
+
+test('a v2 manuscript with semantic records is refused, so saving cannot silently drop its decisions', async ({ page }) => {
+  await open(page);
+  await page.locator('#review-source').fill('当前稿件源文。');
+  const v2 = readFileSync(new URL('../../contracts/manuscript-v2/valid-all-parts.json', import.meta.url));
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'semantic.json', mimeType: 'application/json', buffer: v2 });
+  await expect(page.locator('.error-panel')).toHaveText('此稿件含语义审校记录，当前版本的网页工作台还不能打开；当前稿件未被替换。');
+  await expect(page.locator('#review-source')).toHaveValue('当前稿件源文。');
 });

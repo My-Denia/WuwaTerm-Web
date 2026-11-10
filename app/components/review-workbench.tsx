@@ -8,7 +8,7 @@ import { highlightSegments, revisionOf, scalarToUtf16, summarizeReviewParts } fr
 import {
   MAX_CHOICES, MAX_WORKFILE_BYTES, basisOf, canonicalManuscript, compareReports, leaveGuardActive,
   makeChoice, manuscriptSaveView, mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent,
-  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport,
+  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2,
 } from '../../lib/manuscript.js';
 import { fragmentOccurrences, spliceOccurrence } from '../../lib/target-revision.js';
 import { validSpan } from '../../lib/manuscript.js';
@@ -521,6 +521,9 @@ export function ReviewWorkbench() {
         return;
       }
       const value = parseWorkfile(text);
+      // This workbench cannot hold semantic decisions yet; importing a v2 file
+      // and saving it again would silently drop them, so refuse it untouched.
+      if (value.format === WORKFILE_FORMAT_V2) throw Object.assign(new Error('semantic manuscript'), { code: 'workfile_semantic_unsupported' });
       const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
       const nextChoices = value.choices as Choice[];
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({ ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '' }));

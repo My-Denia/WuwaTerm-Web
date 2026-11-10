@@ -15,6 +15,10 @@ everywhere. `parseWorkfile` accepts both and returns the object as stored; its
 `format` field tells the caller which one. `semanticPartsOf(parsed)` returns the three
 semantic arrays (empty for v1).
 
+Until the workbench holds semantic state (W2), the review workbench refuses to import a
+v2 file (`workfile_semantic_unsupported`) instead of saving it back as v1 without its
+decisions.
+
 ## Fields
 
 Top level (exact keys): the v1 keys (`format`, `source`, `target`, `direction`,
