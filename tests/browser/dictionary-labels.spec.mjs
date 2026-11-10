@@ -28,6 +28,7 @@ async function open(page) {
   const counts = { terms: 0, reviews: 0 };
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: POOL });
     if (path === '/api/terms') {
       counts.terms += 1;

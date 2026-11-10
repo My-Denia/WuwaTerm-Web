@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   FILTERS, filterFindings, findingVerdictCounts, reconcileActiveId, compactScalarContext,
 } from '../../lib/review-navigation.js';
@@ -19,6 +19,9 @@ import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
 import { renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
 import { useUiLanguage } from './ui-language-context';
+import { SemanticWorkbench, semanticFromWorkfile, semanticWorkfileParts, semanticExport, type Commit, type SemanticState } from './semantic-workbench';
+import { emptySemantic, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
+import { semanticMsg } from '../../lib/semantic-messages';
 
 type Span = { start: number; end: number; text: string };
 type Alignment = { source: Span; target: Span | null };
@@ -30,7 +33,7 @@ type Choice = { source: string; direction: string; source_span: Span; scope: str
 type Resolution = { mention_id: string; choice: string; candidate_id?: string };
 type Snapshot = Draft & { report: Report; trusted: boolean; signature: string; resolutions: Resolution[] | null };
 type RevisionIntent = { snapshot: Snapshot; generation: number; draft: Draft; choices: Choice[]; imported: Choice[]; finding: Finding; candidate: Candidate; trigger: HTMLButtonElement; fragment: string; selected: Span | null };
-type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[] };
+type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[]; semantic: SemanticState; serial?: number };
 // Status messages store language-independent codes (catalog notice keys, or
 // structured error identities); the visible text resolves from the catalog on
 // each render, so switching interface language re-localizes a message that is
@@ -64,8 +67,9 @@ function cleanSnapshot(snapshot: Snapshot) {
   const { source, target, direction, alignments, report } = snapshot;
   return { source, target, direction, alignments, report, ...(snapshot.resolutions === null ? {} : { resolutions: snapshot.resolutions }) };
 }
-function manuscriptBody(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[]) {
-  return { ...nextDraft, choices: nextChoices, history: nextReports.map(cleanSnapshot) };
+function manuscriptBody(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState) {
+  const base = { ...nextDraft, choices: nextChoices, history: nextReports.map(cleanSnapshot) };
+  return semanticWorkfileParts(base, semantic);
 }
 function unloadUrl(anchor: HTMLAnchorElement): string | null {
   if (anchor.hasAttribute('download') || anchor.target === '_blank') return null;
@@ -85,6 +89,11 @@ export function ReviewWorkbench() {
   const [imported, setImported] = useState<Choice[]>([]);
   const [reports, setReports] = useState<Snapshot[]>([]);
   const [history, setHistory] = useState<Undo[]>([]);
+  const [semantic, setSemanticState] = useState<SemanticState>(() => emptySemantic() as SemanticState);
+  const [capabilities, setCapabilities] = useState<string[] | null>(null);
+  const [semanticReset, setSemanticReset] = useState(0);
+  const [semanticRunActive, setSemanticRunActive] = useState(false);
+  const historySerial = useRef(0);
   const [phase, setPhase] = useState<'idle' | 'loading' | 'success' | 'error' | 'cancelled'>('idle');
   const [translating, setTranslating] = useState(false);
   const [sourceDirtyForTranslation, setSourceDirtyForTranslation] = useState(false);
@@ -113,10 +122,22 @@ export function ReviewWorkbench() {
   const leaveDialog = useRef<HTMLDialogElement>(null);
   const stayLeaveButton = useRef<HTMLButtonElement>(null);
   const leaveBypass = useRef(false);
-  const work = useRef({ draft, choices, imported, reports, history });
+  const work = useRef({ draft, choices, imported, reports, history, semantic });
   // The window listener must see edits made after mount, including reports
   // arriving while a replacement decision is open.
-  useLayoutEffect(() => { work.current = { draft, choices, imported, reports, history }; }, [draft, choices, imported, reports, history]);
+  useLayoutEffect(() => { work.current = { draft, choices, imported, reports, history, semantic }; }, [draft, choices, imported, reports, history, semantic]);
+  // Semantic writes go through the ref first so a write in the same turn as an
+  // arriving segment result never overwrites it with an older state.
+  const applySemantic = useCallback((update: (state: SemanticState) => SemanticState) => {
+    const next = update(work.current.semantic);
+    work.current = { ...work.current, semantic: next };
+    setSemanticState(next);
+  }, []);
+  const replaceSemantic = useCallback((next: SemanticState) => {
+    work.current = { ...work.current, semantic: next };
+    setSemanticState(next);
+    setSemanticReset(n => n + 1);
+  }, []);
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
   const visibleFindings = latest ? filterFindings(latest.report.findings, verdictFilter) : [];
@@ -137,10 +158,10 @@ export function ReviewWorkbench() {
   const sourceCompatible = !!latest?.trusted && latest.source === source && latest.direction === direction;
   const comparison = latest && previous ? compareReports(previous, latest) : null;
   const basisChanged = !!latest?.trusted && choices.some(choice => !sameBasis(choice.basis, basisOf(latest.report)));
-  const canonical = canonicalManuscript(manuscriptBody(draft, choices, reports));
-  const holdsWork = recoverableWorkPresent({ source, target, choices, alignments, reports });
+  const canonical = useMemo(() => canonicalManuscript(manuscriptBody(draft, choices, reports, semantic)), [draft, choices, reports, semantic]);
+  const holdsWork = recoverableWorkPresent({ source, target, choices, alignments, reports }) || semantic.decisions.length > 0 || semantic.results.length > 0;
   const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
-  const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating });
+  const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating || semanticRunActive });
   const m = msg(lang);
   const saveStateText = {
     empty: m.review.saveStateEmpty,
@@ -153,7 +174,11 @@ export function ReviewWorkbench() {
   const locale = numberLocale(lang);
   const reasonText = (item: { reason: string; code?: string }) =>
     ((m.choiceReasons as Record<string, string>)[item.code ?? ''] ?? item.reason);
-  const noticeText = notice ? ((m.notices as Record<string, string>)[notice] ?? '') : '';
+  const sm = semanticMsg(lang);
+  const noticeText = !notice ? ''
+    : notice.startsWith('sem:') ? (sm.notices[notice.slice(4)] ?? '')
+    : notice.startsWith('t:') ? ((m.tMsg as Record<string, string>)[notice.slice(2)] ?? m.rMsg.fallback)
+    : ((m.notices as Record<string, string>)[notice] ?? '');
   const errorTextValue = !error ? ''
     // Nullish (not falsy) check: an empty reason string from a reason-less
     // error body must still land on the localized fallback, not a blank alert.
@@ -224,20 +249,46 @@ export function ReviewWorkbench() {
     handoffDialog.current?.close(); setPendingDraft(null);
     const before = work.current;
     if (before.draft.source === next.source && before.draft.target === next.target && before.draft.direction === next.direction) return;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
+    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
     const nextHistory = [...before.history.slice(-19), saved];
     // Update synchronously as well so successive events in one turn cannot
     // mistake an already received manuscript for an empty workbench.
-    work.current = { draft: next, choices: [], imported: [], reports: [], history: nextHistory };
+    work.current = { draft: next, choices: [], imported: [], reports: [], history: nextHistory, semantic: before.semantic };
     setHistory(nextHistory); discardInFlight(); setChoices([]); setImported([]); setReports([]); setDraft(next); setSourceDirtyForTranslation(false);
+    replaceSemantic(emptySemantic() as SemanticState);
     setNotice('receivedDraft');
     sourceBox.current?.focus();
     if (typeof document !== 'undefined') { document.getElementById('review-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-  }, [discardInFlight]);
-  function remember() { setHistory(stack => [...stack.slice(-19), { draft, choices, imported }]); }
-  function edit(next: Draft, message = '') {
-    remember(); discardInFlight(); setDraft(next); setNotice(message);
+  }, [discardInFlight, replaceSemantic]);
+  function remember() {
+    const serial = ++historySerial.current;
+    setHistory(stack => [...stack.slice(-19), { draft, choices, imported, semantic: work.current.semantic, serial }]);
+    return serial;
   }
+  function followEdit(next: Draft) {
+    const before = work.current.draft;
+    work.current = { ...work.current, draft: next };
+    applySemantic(state => mapSemanticEdit(state, before, next) as SemanticState);
+  }
+  function edit(next: Draft, message = '') {
+    remember(); discardInFlight(); followEdit(next); setDraft(next); setNotice(message);
+  }
+  const commitSemantic: Commit = ({ draft: next, semantic: update, notice: code, remember: push = true }) => {
+    const before = work.current;
+    let serial: number | null = null;
+    if (push) {
+      serial = ++historySerial.current;
+      const entry: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, semantic: before.semantic, serial };
+      setHistory(stack => [...stack.slice(-19), entry]);
+    }
+    if (next && next !== before.draft) {
+      if (push) discardInFlight();
+      followEdit(next); setDraft(next); setSourceDirtyForTranslation(false);
+    }
+    if (update) applySemantic(update);
+    if (code !== undefined && code !== null) setNotice(code);
+    return serial;
+  };
   function editText(side: 'source' | 'target', value: string) {
     if (side === 'source') setSourceDirtyForTranslation(Boolean(value.trim() && target.trim()));
     else setSourceDirtyForTranslation(false);
@@ -274,6 +325,20 @@ export function ReviewWorkbench() {
     })();
     return () => controller.abort();
   }, [poolAttempt]);
+  useEffect(() => {
+    // An older service answers 404 here and the BFF reports an empty list: the
+    // workbench then behaves as before, with term review only.
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(workbenchPath('/api/capabilities'), { cache: 'no-store', signal: controller.signal });
+        const value = await poolPayload(response) as { capabilities?: unknown } | null;
+        if (controller.signal.aborted) return;
+        setCapabilities(response.ok && Array.isArray(value?.capabilities) ? value.capabilities.filter((x): x is string => typeof x === 'string') : []);
+      } catch { if (!controller.signal.aborted) setCapabilities([]); }
+    })();
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     const onRefresh = () => setPoolAttempt(count => count + 1);
     window.addEventListener(POOL_REFRESH_EVENT, onRefresh);
@@ -403,7 +468,8 @@ export function ReviewWorkbench() {
       remember();
       setTranslating(false);
       setSourceDirtyForTranslation(false);
-      setDraft({ ...draft, target: translated, alignments: alignments === null ? null : [] });
+      const translatedDraft: Draft = { ...draft, target: translated, alignments: alignments === null ? null : [] };
+      followEdit(translatedDraft); setDraft(translatedDraft);
       setNotice(alignments !== null ? 'editedAlignments' : 'translatedInReview');
       requestPoolRefresh();
     } catch (cause) {
@@ -492,6 +558,8 @@ export function ReviewWorkbench() {
   function undo() {
     const last = history.at(-1); if (!last) return;
     discardInFlight(); setSourceDirtyForTranslation(false); setDraft(last.draft); setChoices(last.choices); setImported(last.imported); setHistory(stack => stack.slice(0, -1));
+    work.current = { ...work.current, draft: last.draft, semantic: last.semantic };
+    setSemanticState(last.semantic);
     if (last.reports) setReports(last.reports);
     setNotice(last.reports ? 'undoWithReports' : 'undoLocal');
   }
@@ -511,31 +579,36 @@ export function ReviewWorkbench() {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       if (/\.(txt|md)$/iu.test(file.name)) {
         const before = work.current;
-        const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
+        const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
         setHistory([...before.history.slice(-19), saved]);
         discardInFlight();
         setSourceDirtyForTranslation(false);
         setDraft({ source: text, target: '', direction: before.draft.direction, alignments: null });
         setChoices([]); setImported([]); setReports([]); setImportedCanonical(null);
+        replaceSemantic(emptySemantic() as SemanticState);
         setNotice('importedSourceText');
         return;
       }
       const value = parseWorkfile(text);
-      // This workbench cannot hold semantic decisions yet; importing a v2 file
-      // and saving it again would silently drop them, so refuse it untouched.
-      if (value.format === WORKFILE_FORMAT_V2) throw Object.assign(new Error('semantic manuscript'), { code: 'workfile_semantic_unsupported' });
       const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
       const nextChoices = value.choices as Choice[];
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({ ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '' }));
-      const importedBody = canonicalManuscript(manuscriptBody(nextDraft, nextChoices, nextReports));
+      // Semantic decisions, the old texts they need and the reference history
+      // come back with the manuscript; nothing in the file is trusted as current.
+      const nextSemantic = value.format === WORKFILE_FORMAT_V2 ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState;
+      if (importAttempt.current !== attempt) return;
+      if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
+      const importedBody = canonicalManuscript(manuscriptBody(nextDraft, nextChoices, nextReports, nextSemantic));
       // File reads can overlap a check finishing. Snapshot the accepted-time
       // work, including its reports; ordinary edit undo keeps its own semantics.
       const before = work.current;
-      const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
+      const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
       setHistory([...before.history.slice(-19), saved]);
       discardInFlight();
       setSourceDirtyForTranslation(false);
       setDraft(nextDraft); setChoices(nextChoices); setImported(nextChoices); setReports(nextReports);
+      work.current = { ...work.current, draft: nextDraft };
+      replaceSemantic(nextSemantic);
       if (importedBody) setImportedCanonical(importedBody);
       setNotice('imported');
     } catch (cause) {
@@ -547,11 +620,12 @@ export function ReviewWorkbench() {
   function clearDraft() {
     if (!holdsWork) return;
     const before = work.current;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports };
+    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
     setHistory(stack => [...stack.slice(-19), saved]);
     discardInFlight();
     setSourceDirtyForTranslation(false);
     setDraft(EMPTY);
+    replaceSemantic(emptySemantic() as SemanticState);
     setChoices([]);
     setImported([]);
     setReports([]);
@@ -560,7 +634,7 @@ export function ReviewWorkbench() {
   }
   function save() {
     try {
-      const content = serializeWorkfile(manuscriptBody(draft, choices, reports));
+      const content = serializeWorkfile(manuscriptBody(draft, choices, reports, semantic));
       downloadFile('wuwaterm-manuscript.json', content);
       setDownloadedCanonical(content);
       setError(null);
@@ -583,6 +657,7 @@ export function ReviewWorkbench() {
       choices: choices.map((choice, i) => ({ ...choice, status: reconciled[i].status, reason: reconciled[i].reason })),
       changes: current && comparison ? { new: strip(comparison.new), resolved: strip(comparison.resolved), pending: strip(comparison.pending), incomparable: strip(comparison.incomparable) } : null,
       verified_stamp: { valid: false },
+      ...semanticExport(draft, semantic).result,
     }, null, 2));
     setNotice(current ? 'exportCurrent' : 'exportStale');
   }
@@ -602,12 +677,72 @@ export function ReviewWorkbench() {
       choices,
       reconciled,
       comparison,
+      semantic: semanticExport(draft, semantic).markdown,
+      segmentTerms: semanticExport(draft, semantic).segmentTerms,
     }, lang), 'text/markdown;charset=utf-8');
     setNotice('exportMarkdown');
   }
   const summaryParts = latest ? summarizeReviewParts(latest.report) : null;
   const comparisonGroups = ([['new', m.review.comparisonNew], ['resolved', m.review.comparisonResolved], ['pending', m.review.comparisonPending], ['incomparable', m.review.comparisonIncomparable]] as const)
     .map(([key, label]) => ({ key, label, items: comparison ? comparison[key] : [] }));
+  const semanticSummary = semanticCounts(semantic) as { total: number; pending: number; handled: number; reconfirm: number; stale: number };
+  const termTotal = (latest?.report.findings.length ?? 0) + semantic.terms.reduce((n, t) => n + t.report.findings.length, 0);
+  const termTrack: ReactNode = <section className="term-track" aria-labelledby="term-track-title">
+    <h3 id="term-track-title">{sm.termTrackTitle}</h3>
+    <p className="track-note">{sm.termTrackNote}</p>
+    {latest ? <>
+      <div className="review-summary" aria-live="polite">
+        {summaryParts ? <p>{summarySentence(summaryParts, lang)}</p> : <p>{m.summary.detailMissing}</p>}
+        {current ? <p className="review-current">{m.review.summaryCurrent}</p> : <p className="review-stale">{latest.trusted ? m.review.summaryStale : m.review.summaryImported}</p>}
+        <p>{fill(m.review.ruleLine, { rule: latest.report.rule_version, commit: latest.report.dictionary.source_commit?.slice(0, 12) ?? m.review.dictUnknown })}</p>
+      </div>
+      {comparison && <details className="report-changes" open><summary>{m.review.comparisonTitle}{current ? '' : m.review.comparisonSuffix}</summary>
+        {comparisonGroups.map(group => <div key={group.key}><h4>{group.label} · {group.items.length}</h4>{group.items.map((item: { label: string; reason: string; code?: string; mention: { text: string; start: number; historical: boolean } }, i: number) => <p key={i}>{fill(item.mention.historical ? m.review.comparisonMentionHistorical : m.review.comparisonMention, { text: item.mention.text, n: item.mention.start + 1 })}：{((m.comparisonReasons as Record<string, string>)[item.code ?? ''] ?? item.reason)}</p>)}</div>)}
+        <p>{m.review.comparisonNote}</p>
+      </details>}
+      <div className="finding-nav" role="group" aria-label={m.review.filterAria}>
+        {FILTERS.map(item => <button key={item.id} type="button" className="secondary-button" aria-pressed={verdictFilter === item.id} onClick={() => setVerdictFilter(item.id)}>{(m.review.filters as Record<string, string>)[item.id] ?? item.label} {findingCounts[item.id as keyof typeof findingCounts]}</button>)}
+      </div>
+      <div className="finding-nav" role="group" aria-label={m.review.navAria}>
+        <button type="button" className="secondary-button" disabled={activeVisibleIndex <= 0} onClick={() => { const previousFinding = visibleFindings[activeVisibleIndex - 1]; if (previousFinding) setCanonicalFindingId(previousFinding.id); }}>{m.review.navPrev}</button>
+        <button type="button" className="secondary-button" disabled={activeVisibleIndex < 0 || activeVisibleIndex >= visibleFindings.length - 1} onClick={() => { const nextFinding = visibleFindings[activeVisibleIndex + 1]; if (nextFinding) setCanonicalFindingId(nextFinding.id); }}>{m.review.navNext}</button>
+        <p className="finding-position">{fill(m.review.position, { i: activeVisibleIndex < 0 ? 0 : activeVisibleIndex + 1, n: visibleFindings.length })}</p>
+      </div>
+      <div className="review-findings">{latest.report.findings.length === 0 && <p>{m.review.noFindings}</p>}
+        {visibleFindings.length === 0 && latest.report.findings.length > 0 && <p>{m.review.noFindingsFiltered}</p>}
+        {visibleFindings.map((finding: Finding) => {
+          const active = finding.id === activeFindingId;
+          const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
+          const targetLocated = finding.target_span !== null && latest.target === target && highlightSegments(target, finding.target_span) !== null;
+          return <article className="term-result" key={finding.id} data-mention-id={finding.id} data-active={active ? 'true' : 'false'} aria-current={active ? 'true' : undefined}><p className="result-summary">{active ? m.review.currentMark : ''}<span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span> · {fill(m.review.spanRange, { start: finding.source_span.start + 1, end: finding.source_span.end })}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
+            <div className="excerpt-labeled">
+              <span className="excerpt-tag">{m.review.excerptSourceLabel}</span>
+              <Excerpt text={source} span={sourceLocated ? finding.source_span : null} missing={fill(m.review.excerptMissingSource, { text: finding.source_span.text })} />
+            </div>
+            <div className="excerpt-labeled">
+              <span className="excerpt-tag">{m.review.excerptTargetLabel}</span>
+              <Excerpt text={target} span={targetLocated ? finding.target_span : null} missing={m.review.excerptMissingTarget} />
+            </div>
+            <div className="finding-jumps">
+              <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo(sourceBox.current, source, finding.source_span)}>{m.review.jumpSource}</button>
+              <button className="text-button" type="button" disabled={!targetLocated} onClick={() => { if (finding.target_span) jumpTo(targetBox.current, target, finding.target_span); }}>{m.review.jumpTarget}</button>
+            </div>
+            {finding.candidates.map((candidate: Candidate) => <div className="term-pair" key={candidate.candidate_id}><strong>{candidate.zh}</strong><span>{candidate.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, candidate.category)}</small>
+              <div className="finding-actions">
+                <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => choose(finding, candidate)}>{m.review.adopt}</button>
+                {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => replace(finding, candidate)}>{m.review.replace}</button>}
+                {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !eligibleRevision(latest, finding, candidate, draft)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
+              </div>
+              <details className="candidate-sources"><summary>{m.review.viewSources}</summary>
+                <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
+              </details>
+            </div>)}
+            <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => choose(finding, null)}>{m.review.notTerm}</button>
+          </article>;
+        })}
+      </div>
+    </> : <p className="translation-placeholder">{m.review.placeholder}</p>}
+  </section>;
   return <section className="workspace-card review-card" aria-labelledby="review-title">
     <dialog className="handoff-dialog revision-dialog" ref={revisionDialog} aria-labelledby="revision-title" aria-describedby="revision-description" onCancel={() => cancelRevision()}>
       <h3 id="revision-title">{m.review.revisionTitle}</h3>
@@ -664,6 +799,7 @@ export function ReviewWorkbench() {
       </ol>
     )}
     <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
+    {semantic.terms.length > 0 && <p className="manuscript-save-state">{sm.segmentTermsNotSaved}</p>}
     <form onSubmit={submit}>
       <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => edit({ ...draft, direction: e.target.value as 'en' | 'zh', alignments: alignments === null ? null : [] }, 'directionChanged')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
       <textarea ref={sourceBox} id="review-source" value={source} onChange={e => editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />
@@ -726,57 +862,14 @@ export function ReviewWorkbench() {
         return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{confirmTarget && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => choose(confirmTarget.finding, confirmTarget.candidate)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => { remember(); discardInFlight(); setChoices(old => old.filter((_, j) => i !== j)); setImported(old => old.filter(c => c !== choice)); }}>{m.review.choiceRemove}</button></div></div>;
       })}
     </div>}
-    {latest ? <>
-      <div className="review-summary" aria-live="polite">
-        {summaryParts ? <p>{summarySentence(summaryParts, lang)}</p> : <p>{m.summary.detailMissing}</p>}
-        {current ? <p className="review-current">{m.review.summaryCurrent}</p> : <p className="review-stale">{latest.trusted ? m.review.summaryStale : m.review.summaryImported}</p>}
-        <p>{fill(m.review.ruleLine, { rule: latest.report.rule_version, commit: latest.report.dictionary.source_commit?.slice(0, 12) ?? m.review.dictUnknown })}</p>
-      </div>
-      {comparison && <details className="report-changes" open><summary>{m.review.comparisonTitle}{current ? '' : m.review.comparisonSuffix}</summary>
-        {comparisonGroups.map(group => <div key={group.key}><h4>{group.label} · {group.items.length}</h4>{group.items.map((item: { label: string; reason: string; code?: string; mention: { text: string; start: number; historical: boolean } }, i: number) => <p key={i}>{fill(item.mention.historical ? m.review.comparisonMentionHistorical : m.review.comparisonMention, { text: item.mention.text, n: item.mention.start + 1 })}：{((m.comparisonReasons as Record<string, string>)[item.code ?? ''] ?? item.reason)}</p>)}</div>)}
-        <p>{m.review.comparisonNote}</p>
-      </details>}
-      <div className="finding-nav" role="group" aria-label={m.review.filterAria}>
-        {FILTERS.map(item => <button key={item.id} type="button" className="secondary-button" aria-pressed={verdictFilter === item.id} onClick={() => setVerdictFilter(item.id)}>{(m.review.filters as Record<string, string>)[item.id] ?? item.label} {findingCounts[item.id as keyof typeof findingCounts]}</button>)}
-      </div>
-      <div className="finding-nav" role="group" aria-label={m.review.navAria}>
-        <button type="button" className="secondary-button" disabled={activeVisibleIndex <= 0} onClick={() => { const previousFinding = visibleFindings[activeVisibleIndex - 1]; if (previousFinding) setCanonicalFindingId(previousFinding.id); }}>{m.review.navPrev}</button>
-        <button type="button" className="secondary-button" disabled={activeVisibleIndex < 0 || activeVisibleIndex >= visibleFindings.length - 1} onClick={() => { const nextFinding = visibleFindings[activeVisibleIndex + 1]; if (nextFinding) setCanonicalFindingId(nextFinding.id); }}>{m.review.navNext}</button>
-        <p className="finding-position">{fill(m.review.position, { i: activeVisibleIndex < 0 ? 0 : activeVisibleIndex + 1, n: visibleFindings.length })}</p>
-      </div>
-      <div className="review-findings">{latest.report.findings.length === 0 && <p>{m.review.noFindings}</p>}
-        {visibleFindings.length === 0 && latest.report.findings.length > 0 && <p>{m.review.noFindingsFiltered}</p>}
-        {visibleFindings.map((finding: Finding) => {
-          const active = finding.id === activeFindingId;
-          const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
-          const targetLocated = finding.target_span !== null && latest.target === target && highlightSegments(target, finding.target_span) !== null;
-          return <article className="term-result" key={finding.id} data-mention-id={finding.id} data-active={active ? 'true' : 'false'} aria-current={active ? 'true' : undefined}><p className="result-summary">{active ? m.review.currentMark : ''}<span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span> · {fill(m.review.spanRange, { start: finding.source_span.start + 1, end: finding.source_span.end })}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
-            <div className="excerpt-labeled">
-              <span className="excerpt-tag">{m.review.excerptSourceLabel}</span>
-              <Excerpt text={source} span={sourceLocated ? finding.source_span : null} missing={fill(m.review.excerptMissingSource, { text: finding.source_span.text })} />
-            </div>
-            <div className="excerpt-labeled">
-              <span className="excerpt-tag">{m.review.excerptTargetLabel}</span>
-              <Excerpt text={target} span={targetLocated ? finding.target_span : null} missing={m.review.excerptMissingTarget} />
-            </div>
-            <div className="finding-jumps">
-              <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo(sourceBox.current, source, finding.source_span)}>{m.review.jumpSource}</button>
-              <button className="text-button" type="button" disabled={!targetLocated} onClick={() => { if (finding.target_span) jumpTo(targetBox.current, target, finding.target_span); }}>{m.review.jumpTarget}</button>
-            </div>
-            {finding.candidates.map((candidate: Candidate) => <div className="term-pair" key={candidate.candidate_id}><strong>{candidate.zh}</strong><span>{candidate.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, candidate.category)}</small>
-              <div className="finding-actions">
-                <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => choose(finding, candidate)}>{m.review.adopt}</button>
-                {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => replace(finding, candidate)}>{m.review.replace}</button>}
-                {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !eligibleRevision(latest, finding, candidate, draft)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
-              </div>
-              <details className="candidate-sources"><summary>{m.review.viewSources}</summary>
-                <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
-              </details>
-            </div>)}
-            <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => choose(finding, null)}>{m.review.notTerm}</button>
-          </article>;
-        })}
-      </div>
-    </> : <p className="translation-placeholder">{m.review.placeholder}</p>}
+    {capabilities?.includes('semantic-review-v1') && <div className="issue-overview" role="group" aria-label={sm.overviewAria}>
+      <button type="button" className="secondary-button" onClick={() => document.getElementById('term-track-title')?.scrollIntoView({ block: 'start' })}>{fill(sm.overviewTerms, { n: termTotal })}</button>
+      <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
+    </div>}
+    <SemanticWorkbench lang={lang} draft={draft} semantic={semantic} setSemantic={applySemantic} commit={commitSemantic} work={work}
+      choices={choices} pool={pool} capabilities={capabilities} resetSignal={semanticReset}
+      canUndoLast={serial => history.at(-1)?.serial === serial} undo={undo}
+      locate={(side, span) => side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span)}
+      onRunActive={setSemanticRunActive} termTrack={termTrack} />
   </section>;
 }

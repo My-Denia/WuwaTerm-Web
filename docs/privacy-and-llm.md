@@ -12,7 +12,8 @@ them to the authoritative VPS `/v1` API with a credential that never enters the
 browser. Dictionary-first processing and term locking remain backend behavior,
 not a second implementation in the Site.
 
-Semantic review sends both the source segment and its translation, plus the
+Semantic review is experimental and off by default (not enabled on the public
+Site). Where a self-hosted service turns it on, it sends both the source segment and its translation, plus the
 optional previous-segment context and human precedents you chose, to the
 service's model. The Site does not store or log them. Translation may likewise
 send optional context when the service supports it.

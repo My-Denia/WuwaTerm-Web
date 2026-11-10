@@ -24,6 +24,13 @@ export type MarkdownChoice = { source: string; direction: string; source_span: M
 export type MarkdownReconciled = { status: string; reason: string; code?: string; span?: MarkdownSpan };
 export type MarkdownComparisonItem = { label: string; reason: string; code?: string; mention: { text: string; start: number; historical: boolean } };
 export type MarkdownComparison = { new: MarkdownComparisonItem[]; resolved: MarkdownComparisonItem[]; pending: MarkdownComparisonItem[]; incomparable: MarkdownComparisonItem[] };
+export type MarkdownSemanticItem = {
+  issue_id: string; category: string; confidence: string; segment_index: number | null;
+  source_excerpt: string | null; target_excerpt: string | null; rationale: string;
+  suggestion: string | null; suggestion_withheld: string | null; status: string;
+};
+export type MarkdownSemantic = { items: MarkdownSemanticItem[]; resolved: number; segments: { total: number; reviewed: number } };
+export type MarkdownSegmentTerms = { index: number; stale: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[] }[] };
 export type MarkdownCurrency = 'current' | 'stale' | 'imported' | 'none';
 
 export type MarkdownReportInput = {
@@ -34,6 +41,8 @@ export type MarkdownReportInput = {
   choices: MarkdownChoice[];
   reconciled: MarkdownReconciled[];
   comparison: MarkdownComparison | null;
+  semantic?: MarkdownSemantic | null;
+  segmentTerms?: MarkdownSegmentTerms[] | null;
 };
 
 function backtickRun(text: string): number {
@@ -236,6 +245,39 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
       })), '');
     }
     paragraph(md.comparisonNote);
+  }
+
+  if (input.segmentTerms && input.segmentTerms.length) {
+    heading(2, fill(md.segmentTermsHeading, { n: input.segmentTerms.length }));
+    paragraph(md.segmentTermsNote);
+    for (const segment of input.segmentTerms) {
+      out.push('### ' + fill(md.segmentTermsLabel, { n: segment.index + 1 }) + (segment.stale ? ' · ' + md.segmentTermsStale : ''), '');
+      if (!segment.findings.length) { paragraph(md.segmentTermsNone); continue; }
+      out.push(...bullets(segment.findings.map(finding => ((msg(lang).review.verdicts as Record<string, string>)[finding.verdict] ?? finding.verdict)
+        + ' · ' + inline(finding.source_span.text) + ' · ' + fill(md.spanLabel, { start: finding.source_span.start + 1, end: finding.source_span.end })
+        + (finding.target_span ? ' · ' + fill(md.targetSpanLabel, { start: finding.target_span.start + 1, end: finding.target_span.end }) + colon(lang) + inline(finding.target_span.text) : ' · ' + md.noTargetSpan)
+        + (finding.candidates.length ? ' · ' + finding.candidates.map(c => inline(c.zh) + ' / ' + inline(c.en)).join(semicolon(lang)) : ''))), '');
+    }
+  }
+  if (input.semantic) {
+    const semantic = input.semantic;
+    heading(2, md.semanticHeading);
+    paragraph(fill(md.semanticCoverage, { reviewed: semantic.segments.reviewed, total: semantic.segments.total }));
+    paragraph(fill(md.semanticResolved, { n: semantic.resolved }));
+    if (!semantic.items.length) paragraph(md.semanticNone);
+    semantic.items.forEach((item, index) => {
+      const where = item.segment_index === null ? '' : fill(md.semanticSegment, { n: item.segment_index + 1 }) + ' · ';
+      out.push('### ' + (index + 1) + '. ' + where + (md.semanticCategories[item.category] ?? inline(item.category)), '');
+      out.push(...bullets([
+        md.semanticConfidenceLabel + colon(lang) + (md.semanticConfidences[item.confidence] ?? inline(item.confidence)),
+        item.source_excerpt === null ? '' : md.semanticSourceLabel + colon(lang) + inline(item.source_excerpt),
+        item.target_excerpt === null ? '' : md.semanticTargetLabel + colon(lang) + inline(item.target_excerpt),
+        md.semanticRationaleLabel + colon(lang) + inline(item.rationale),
+        md.semanticSuggestionLabel + colon(lang) + (item.suggestion !== null ? inline(item.suggestion)
+          : item.suggestion_withheld !== null ? md.semanticWithheld : md.semanticNoSuggestion),
+        md.semanticStatusLabel + colon(lang) + (md.semanticStatuses[item.status] ?? inline(item.status)),
+      ]), '');
+    });
   }
 
   paragraph(md.notCertifiedLine);

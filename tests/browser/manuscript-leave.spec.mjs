@@ -31,6 +31,7 @@ function manuscriptFile() {
 async function open(page, reviews) {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: POOL });
     if (path === '/api/reviews' && reviews) return reviews(route);
     throw new Error(`Unexpected API request: ${path}`);

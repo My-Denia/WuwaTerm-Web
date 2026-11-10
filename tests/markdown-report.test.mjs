@@ -296,3 +296,54 @@ test('imported review-v1 history exports instead of throwing on the missing revi
   const en = renderMarkdownReport(inputFor(latest, { currency: 'imported' }), 'en');
   assert.equal(en.includes('Not provided'), true);
 });
+
+const semanticItems = [
+  { issue_id: 'a'.repeat(32), category: 'omission', confidence: 'high', segment_index: 0, source_excerpt: 'Hello `world`', target_excerpt: '# Forged\n你好',
+    rationale: '<script>alert(1)</script> [x](https://evil.invalid)', suggestion: 'Better', suggestion_withheld: null, status: 'accepted' },
+  { issue_id: 'b'.repeat(32), category: 'term_sense', confidence: 'low', segment_index: 3, source_excerpt: null, target_excerpt: 'only target',
+    rationale: 'why', suggestion: null, suggestion_withheld: 'span_too_long', status: 'pending' },
+];
+
+test('semantic section is optional: absent and null leave the output byte-identical', () => {
+  const latest = snapshotFor();
+  const plain = renderMarkdownReport(inputFor(latest), 'zh');
+  assert.equal(renderMarkdownReport({ ...inputFor(latest), semantic: null }, 'zh'), plain);
+  assert.equal(renderMarkdownReport({ ...inputFor(latest), semantic: undefined }, 'en'), renderMarkdownReport(inputFor(latest), 'en'));
+  assert.equal(plain.includes(msg('zh').md.semanticHeading), false);
+});
+
+test('semantic section lists issues with status, keeps the term part unchanged and never claims certification', () => {
+  const latest = snapshotFor();
+  const plain = renderMarkdownReport(inputFor(latest), 'zh');
+  const semantic = { items: semanticItems, resolved: 1, segments: { total: 4, reviewed: 2 } };
+  const zh = renderMarkdownReport({ ...inputFor(latest), semantic }, 'zh');
+  assert.equal(zh.includes('## 语义疑点（模型，可能有误、请自行判断）'), true);
+  assert.equal(zh.includes('已处理 1 条；这不代表整句语义已认证。'), true);
+  assert.equal(zh.includes('已审校段落：2 / 4'), true);
+  assert.equal(zh.includes('第 1 段'), true);
+  assert.equal(zh.includes('第 4 段'), true);
+  assert.equal(zh.includes('范围较长，请人工调整'), true);
+  assert.equal(zh.includes('已采纳'), true);
+  assert.equal(zh.includes('`Better`'), true);
+  // Everything the plain report said is still there, in the same order, before the shared closing line.
+  const head = plain.slice(0, plain.indexOf(msg('zh').md.notCertifiedLine));
+  assert.equal(zh.startsWith(head), true);
+  assert.equal(zh.endsWith(msg('zh').md.notCertifiedLine + '\n'), true);
+  const en = renderMarkdownReport({ ...inputFor(latest), semantic }, 'en');
+  assert.equal(en.includes('## Semantic issues (model output; may be wrong — use your judgement)'), true);
+  assert.equal(en.includes('Segment 4'), true);
+  assert.equal(en.includes('Accepted'), true);
+  const empty = renderMarkdownReport({ ...inputFor(latest), semantic: { items: [], resolved: 0, segments: { total: 1, reviewed: 0 } } }, 'zh');
+  assert.equal(empty.includes(msg('zh').md.semanticNone), true);
+});
+
+test('model text in the semantic section cannot become report structure', () => {
+  const latest = snapshotFor();
+  const base = markdownStructure(renderMarkdownReport(inputFor(latest), 'en'));
+  const out = markdownStructure(renderMarkdownReport({ ...inputFor(latest), semantic: { items: semanticItems, resolved: 0, segments: { total: 1, reviewed: 1 } } }, 'en'));
+  assert.equal(out.links, 0);
+  assert.equal(out.htmlTags, 0);
+  assert.equal(out.headings.some(h => h.includes('Forged')), false);
+  // the section heading plus one heading per issue
+  assert.equal(out.headings.length, base.headings.length + 1 + semanticItems.length);
+});

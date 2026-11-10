@@ -16,7 +16,7 @@ export function requireWindowsRoot() {
   assert.equal(realpathSync(root), realpathSync(top), 'WUWATERM_WINDOWS_ROOT must be the checkout root');
   const actual = git('rev-parse', '--verify', 'HEAD^{commit}').toString('utf8').trim();
   assert.equal(actual, pin, 'Windows checkout does not match contracts/windows-ref.txt');
-  for (const path of ['src/wuwaterm_client/strings.py', 'src/wuwaterm_client/manuscript.py']) {
+  for (const path of ['src/wuwaterm_client/strings.py', 'src/wuwaterm_client/manuscript.py', 'src/wuwaterm_client/semantic.py']) {
     assert.deepEqual(readFileSync(join(root, path)), git('show', `${pin}:${path}`), `Windows source differs from pinned commit: ${path}`);
   }
   return root;
