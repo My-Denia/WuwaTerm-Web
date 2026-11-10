@@ -70,6 +70,7 @@ async function open(page, respond = reportFor) {
   const reviews = [];
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: {
       status: 'available', translation_enabled: true,
       terms: { used: 0, limit: 100, remaining: 100 },

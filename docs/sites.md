@@ -46,7 +46,9 @@ paired segment to the service's model only when the service lists
 `semantic-review-v1`. It is charged as one translation, with characters equal to
 the longer side, and so shares the translation switch and daily allowance. When
 the service does not list it, the Site answers 503 `semantic_review_unavailable`
-without charging anything.
+without charging anything. The public Site's Core does not list
+`semantic-review-v1` (the feature is experimental and off by default), so on the
+public Site this path is idle.
 
 Optional `/api/meta` is not requested when the page loads. Opening 「词典版本」
 asks once for the dictionary the running service reports: database schema
@@ -63,7 +65,8 @@ separate surfaces and are unchanged by public Site access.
 
 ## Resumable bilingual manuscripts
 
-The review workbench saves a user-initiated `wuwaterm-manuscript-v1` JSON file.
+The review workbench saves a user-initiated `wuwaterm-manuscript-v1` JSON file
+(`wuwaterm-manuscript-v2` once it holds semantic decisions or history).
 It contains source, target, direction, up to 32 occurrence-specific decisions,
 their dictionary/rule/candidate basis, explicit scalar correspondences and the
 last two reports. Import is local and bounded to 1 MiB; it never sends a request.
@@ -79,9 +82,62 @@ manuscript, decisions and reports. A crash or forced quit can still discard the 
 
 The 2,000-character review request limit does not restrict manuscript storage:
 long translations can be saved and reopened intact within the 1 MiB file cap.
-The workbench asks users to review longer texts in smaller sections and keeps
-the check action unavailable until both texts fit. Both replacement actions
-refuse edits that would exceed the review limit without changing the draft.
+A manuscript over the limit is paired into segments with `segmentation-v1`
+(Core's rules and fixtures; at most 1,800 scalars per side) and checked one
+segment at a time. Term results of a long manuscript are read-only: they can
+be located but per-occurrence term choices still need a manuscript within the
+limit. Both replacement actions refuse edits that would exceed the review limit
+without changing the draft.
+
+## Semantic review workbench
+
+Semantic review is an experimental Core feature that is off by default. The
+public Site does not enable it; a self-hosted Core can turn it on explicitly.
+The track appears only when `/api/capabilities` lists `semantic-review-v1`, and
+then carries an "Experimental" label. Without it the workbench shows no semantic
+panel and everything else works the same: term review (per segment for long
+manuscripts), translation with previous-segment context and precedents when
+`translation-context-v1` is listed, segment progress, manual splitting, import,
+export and re-review. A v2 manuscript imported there keeps its semantic decisions
+and writes them back unchanged. Issues are listed in two tracks: term constraints
+(literal dictionary matches, deterministic, no model) and semantic issues (model
+output, labelled as possibly wrong). They can be filtered by status, category and
+segment. Each issue shows both excerpts, the model's reason, the suggestion and at
+most one alternative as a strike-through preview, and a fixed note when the
+suggestion changes or introduces an official term form. The user accepts, adjusts
+or ignores one issue at a time; the workbench then moves to the next open issue.
+There is no accept-all. A withheld suggestion (`span_too_long`,
+`replacement_too_long`) offers only adjust and ignore, and every accept first
+checks that the complete range still reads the same. `J`/`K` move between issues
+and `Enter` selects the issue in the text box. Every handling step can be undone.
+
+Segments are sent one at a time. A run can be paused and continued; a failed
+segment can be retried on its own; `shared_pool_busy` or an upstream rate limit
+waits for the stated time and then continues; a used-up daily quota pauses the run
+with finished segments kept; two consecutive identical failures stop it; a timed-out
+segment is never retried automatically because its quota is not refunded. Edits
+during a run never abort a request that is already charged; a result whose segment
+text changed meanwhile is not used.
+
+When the two sides cannot be paired (`needs_manual_split`), the segment list shows
+both paragraph and sentence counts. One action turns every single line break into
+a blank line on both sides, which resolves the most common cause (one side breaks
+paragraphs with a single newline). A split helper lines paragraphs up by number,
+marks rows whose length ratio is unlike the rest of the document, and inserts a
+blank line between two sentences or merges two paragraphs with one click. When
+both sides already have the same number of paragraphs, a split waits for the
+matching place on the other side so the pairing is never broken half-way. Pairs
+are never guessed; every step is an ordinary, undoable text edit.
+
+Translation and review requests carry the previous segment (at most 400 scalars per side) as read-only
+context and, by default, the manuscript's own human decisions before that
+segment as occurrence-scoped precedents (Core ADR 0019); the user can turn
+precedents off. A request over 32 KiB drops the furthest precedent first, then
+shortens the context. Untranslated segments, and a blank translation of a long
+source, can be translated segment by segment with the same context.
+Semantic decisions are saved in manuscript v2 ([format](manuscript-v2.md));
+exports list each issue with its handling status and keep
+`sentence_meaning_evaluated: false`.
 
 Import selection ownership follows a strict latest-selection policy: the latest chosen
 file immediately supersedes any prior pending file read regardless of completion order.

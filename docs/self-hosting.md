@@ -26,6 +26,20 @@ compatible stable Core release is published, use that source with the Core
 repository's API setup instructions. This is source compatibility, not a new
 backend release or production deployment.
 
+## Version 0.2.0 and semantic review
+
+Web 0.2.0 adds the semantic review workbench and opens manuscript v2 files in the browser.
+Semantic review is an experimental Core feature, off by default; the public Site does not
+enable it. The workbench shows it, marked experimental, only when the Core API lists
+`semantic-review-v1`, which a self-hosted Core does after its operator turns the feature on
+(`WUWATERM_SEMANTIC_REVIEW_ENABLED` on the Core side; see the Core self-hosting guide).
+Without it (feature off, or an older Core) the semantic panel is hidden and the rest of the
+workbench works as before, including long-manuscript segments, manual splitting and
+translation with context when the Core lists `translation-context-v1`.
+A v2 manuscript cannot be opened by Web 0.1.x or Windows 0.3.x, which reject the format;
+v1 manuscripts stay readable everywhere, and a v2 file is written only once the manuscript
+holds a semantic decision or history.
+
 ## Download the Linux x64 bundle
 
 The standalone release candidate contains the server, browser assets and

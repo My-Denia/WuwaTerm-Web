@@ -8,6 +8,7 @@ async function open(page) {
   const calls = [];
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     calls.push(path);
     if (path !== '/api/pool') throw new Error(`Unexpected admission: ${path}`);
     await route.fulfill({ json: {

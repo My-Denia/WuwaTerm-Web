@@ -47,6 +47,7 @@ async function openPage(page, metaFor) {
   const counts = { meta: 0 };
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: POOL });
     if (path === '/api/meta') {
       counts.meta += 1;

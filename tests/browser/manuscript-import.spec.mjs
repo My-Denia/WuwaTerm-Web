@@ -24,6 +24,7 @@ async function open(page) {
   const gate = { next: null };
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: {
       status: 'available', translation_enabled: true,
       terms: { used: 0, limit: 100, remaining: 100 },
@@ -497,11 +498,24 @@ test('import and undo issue zero translation/review POSTs and exports remain his
   expect(resultJson.verified_stamp.valid).toBe(false);
 });
 
-test('a v2 manuscript with semantic records is refused, so saving cannot silently drop its decisions', async ({ page }) => {
+test('a v2 manuscript with semantic records imports and restores its decisions', async ({ page }) => {
   await open(page);
   await page.locator('#review-source').fill('当前稿件源文。');
   const v2 = readFileSync(new URL('../../contracts/manuscript-v2/valid-all-parts.json', import.meta.url));
+  const parsed = JSON.parse(v2.toString('utf-8'));
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'semantic.json', mimeType: 'application/json', buffer: v2 });
-  await expect(page.locator('.error-panel')).toHaveText('此稿件含语义审校记录，当前版本的网页工作台还不能打开；当前稿件未被替换。');
-  await expect(page.locator('#review-source')).toHaveValue('当前稿件源文。');
+  await expect(page.locator('.error-panel')).toHaveCount(0);
+  await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
+  await expect(page.locator('#review-source')).toHaveValue(parsed.source);
+  await expect(page.locator('#review-target')).toHaveValue(parsed.target);
+  // The decisions were made against an older target, so no issue row is shown,
+  // but they are kept and a save writes them back instead of dropping them.
+  const waiting = page.waitForEvent('download');
+  await page.getByRole('button', { name: '保存稿件', exact: true }).click();
+  const stream = await (await waiting).createReadStream();
+  const parts = [];
+  for await (const chunk of stream) parts.push(chunk);
+  const saved = JSON.parse(Buffer.concat(parts).toString('utf-8'));
+  expect(saved.format).toBe('wuwaterm-manuscript-v2');
+  expect(saved.semantic_decisions).toEqual(parsed.semantic_decisions);
 });

@@ -19,6 +19,7 @@ async function open(page, data = engine.cases[0], responder) {
   const requests = [];
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: {
       status: 'available', translation_enabled: true,
       terms: { used: 0, limit: 100, remaining: 100 }, translations: { used: 0, limit: 100, remaining: 100 },

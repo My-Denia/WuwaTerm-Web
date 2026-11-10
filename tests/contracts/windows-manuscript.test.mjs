@@ -1,32 +1,80 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { WORKFILE_FORMAT, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, serializeWorkfile } from '../../lib/manuscript.js';
+import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
 
 const windowsRoot = requireWindowsRoot();
 const manuscriptPath = join(windowsRoot, 'src/wuwaterm_client/manuscript.py');
 
-// Load only the pinned, stdlib-only manuscript module: importing the client
+// Load only the pinned, stdlib-only manuscript and semantic modules: importing the client
 // package's API or UI would require desktop credentials and Qt dependencies.
 const pythonBridge = String.raw`
-import importlib.util
+import importlib
 import json
+import os
 import sys
+import types
 
 if sys.version_info < (3, 12):
     raise RuntimeError('The Windows consumer requires Python 3.12 or later')
-spec = importlib.util.spec_from_file_location('windows_manuscript', sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+# manuscript.py imports its stdlib-only sibling semantic.py relatively, so register the
+# package directory without running the client's UI or API imports.
+package = types.ModuleType('wuwaterm_client')
+package.__path__ = [os.path.dirname(sys.argv[1])]
+sys.modules['wuwaterm_client'] = package
+module = importlib.import_module('wuwaterm_client.manuscript')
 request = json.load(sys.stdin)
+
+
+def build_v2(module):
+    # Built from the Windows consumer's own helpers and plain dicts, not from a Web file.
+    import hashlib
+    revision = lambda text: hashlib.sha256(text.encode('utf-8')).hexdigest()
+    term_basis = {'dictionary_revision': 'e3' * 32, 'matcher_revision': 'f4' * 32}
+    basis = {'review_version': 'semantic-review-v1', 'term_basis': term_basis}
+    source, old_target = '第五天到了。\n它很安静。', 'It is the fourth day.\nIt is quiet.'
+    target = 'It is the fifth day.\nIt is quiet.'
+    core_source, core_target = source[:5], old_target[:21]
+    span = lambda text, start, end: {'start': start, 'end': end, 'text': text[start:end]}
+    decision = lambda n, category, s_span, t_span, kind, applied: {
+        'issue_id': ('%02x' % n) * 16, 'fingerprint': ('%02x' % (n + 16)) * 16, 'category': category,
+        'segment_index': 0, 'source_revision': revision(source), 'target_revision': revision(old_target),
+        'source_span': s_span, 'target_span': t_span, 'decision': kind, 'applied_text': applied, 'basis': basis}
+    decisions = [
+        decision(1, 'quantity_change', span(source, 0, 3), span(old_target, 7, 17), 'accepted', 'fifth'),
+        decision(2, 'omission', span(source, 7, 11), None, 'ignored', None),
+        decision(3, 'meaning_shift', None, span(old_target, 28, 33), 'adjusted', 'calm'),
+    ]
+    issue = {
+        'id': '9' * 32, 'fingerprint': '12' * 16, 'category': 'quantity_change', 'origin': 'model', 'confidence': 'high',
+        'source_span': span(core_source, 0, 3), 'target_span': span(core_target, 7, 17),
+        'source_excerpt': core_source[0:3], 'target_excerpt': core_target[7:17], 'rationale': 'Windows-built.',
+        'suggestion': {'target_span': span(core_target, 7, 17), 'replacement': 'he fifth ', 'term_effect': 'none'},
+        'suggestion_withheld': None, 'alternatives': []}
+    report = {
+        'request_id': 'windows-built', 'review_version': 'semantic-review-v1', 'source_revision': revision(core_source),
+        'target_revision': revision(core_target), 'term_basis': term_basis, 'status': 'complete', 'status_reason': None,
+        'dropped_unanchored': 0, 'checked': ['omission', 'unsupported_addition', 'meaning_shift', 'negation_change',
+        'quantity_change', 'reference_inconsistency', 'term_sense'], 'issues': [issue], 'truncated': False,
+        'truncated_reason': None, 'omitted_issues': 0}
+    payload = {
+        'source': source, 'target': target, 'direction': 'en', 'alignments': None, 'choices': [], 'history': [],
+        'semantic_decisions': decisions, 'semantic_texts': [{'revision': revision(old_target), 'text': old_target}],
+        'semantic_history': [{'source': source, 'target': old_target, 'direction': 'en', 'segments': [{
+            'segment_index': 0, 'source_start': 0, 'source_end': 5, 'target_start': 0, 'target_end': 21, 'report': report}]}]}
+    return {'payload': payload, 'content': module.serialize_workfile(payload)}
 try:
     if request['operation'] == 'parse':
         result = module.parse_workfile(request['content'])
     elif request['operation'] == 'serialize':
         result = module.serialize_workfile(request['payload'])
+    elif request['operation'] == 'build_v2':
+        result = build_v2(module)
     elif request['operation'] == 'groups':
         result = module.choice_conflict_groups(request['payload'])
     else:
@@ -107,6 +155,7 @@ test('both consumers reject unsupported formats, report versions and duplicate s
   const { payload } = sample();
   const base = parseWorkfile(serializeWorkfile(payload));
   const cases = [
+    // A v2 label on a v1 body lacks the semantic keys, so both consumers reject it as an unsupported shape.
     { code: 'workfile_unsupported_format', mutate: value => { value.format = 'wuwaterm-manuscript-v2'; } },
     { code: 'workfile_invalid_content', mutate: value => { value.history[0].report.rule_version = 'review-v3'; } },
     { code: 'workfile_unsupported_format', mutate: value => { value.trusted = true; } },
@@ -149,4 +198,81 @@ test('choices that converge after a source edit cannot be saved until the confli
   assert.deepEqual(reopened.choices, [first]);
   assert.deepEqual(reopened.history, payload.history);
   assert.deepEqual(reopened.alignments, payload.alignments);
+});
+
+// ---- Manuscript v2: both directions -------------------------------------------------
+
+const v2Dir = fileURLToPath(new URL('../../contracts/manuscript-v2/', import.meta.url));
+const v2Cases = JSON.parse(readFileSync(join(v2Dir, 'cases.json'), 'utf8'));
+const read = file => readFileSync(join(v2Dir, file), 'utf8');
+const SEMANTIC_KEYS = ['semantic_decisions', 'semantic_texts', 'semantic_history'];
+
+// Exchange one v2 file: Windows reads it, rewrites it, Web reads that rewrite.
+// Returns whether the rewrite is byte-identical to the input.
+function exchange(content, label) {
+  const web = parseWorkfile(content);
+  assert.equal(web.format, WORKFILE_FORMAT_V2, label);
+  const fromWindows = windows({ operation: 'parse', content });
+  assert.ok(fromWindows.result, `${label}: Windows rejected a Web v2 file (${fromWindows.error})`);
+  assert.deepEqual(fromWindows.result, web, `${label}: Windows parse differs from Web parse`);
+  const rewritten = windows({ operation: 'serialize', payload: fromWindows.result });
+  assert.ok(rewritten.result, `${label}: Windows could not write it back (${rewritten.error})`);
+  const reread = parseWorkfile(rewritten.result);
+  assert.deepEqual(reread, web, `${label}: Windows rewrite changes the content`);
+  for (const key of SEMANTIC_KEYS) assert.deepEqual(reread[key], web[key], `${label}: ${key}`);
+  assert.deepEqual(semanticPartsOf(reread), semanticPartsOf(web));
+  const webAgain = serializeWorkfile(web);
+  return { rewritten: rewritten.result, bytesEqual: rewritten.result === content, webBytesEqual: webAgain === content };
+}
+
+test('every valid v2 fixture is read by Windows and survives a Windows rewrite', () => {
+  assert.ok(v2Cases.valid.length >= 1);
+  for (const { file } of v2Cases.valid) {
+    const content = read(file);
+    const result = exchange(content, file);
+    assert.equal(result.webBytesEqual, true, `${file}: Web does not rewrite its own fixture byte for byte`);
+    assert.equal(result.bytesEqual, true, `${file}: Windows rewrite differs from the fixture bytes`);
+  }
+});
+
+test('a Web-written v2 manuscript with every decision kind is read by Windows and rewritten by it', () => {
+  const { payload } = sample();
+  const base = parseWorkfile(read(v2Cases.valid[0].file));
+  const live = { ...payload, ...semanticPartsOf(base) };
+  assert.deepEqual(live.semantic_decisions.map(item => item.decision), ['accepted', 'ignored', 'adjusted']);
+  const content = serializeWorkfile(live);
+  assert.equal(JSON.parse(content).format, WORKFILE_FORMAT_V2);
+  const result = exchange(content, 'live Web v2');
+  assert.equal(result.webBytesEqual, true);
+  assert.equal(result.bytesEqual, true, 'Windows rewrite differs from the Web-written bytes');
+  assert.deepEqual(parseWorkfile(result.rewritten).choices, payload.choices);
+});
+
+test('a v2 manuscript built by the Windows client is read and rewritten by Web, and read back by Windows', () => {
+  const built = windows({ operation: 'build_v2' }).result;
+  assert.equal(JSON.parse(built.content).format, WORKFILE_FORMAT_V2);
+  const web = parseWorkfile(built.content);
+  assert.deepEqual(web.semantic_decisions, built.payload.semantic_decisions);
+  assert.deepEqual(web.semantic_texts, built.payload.semantic_texts);
+  assert.deepEqual(web.semantic_history, built.payload.semantic_history);
+  const webFile = serializeWorkfile(web);
+  assert.equal(webFile, built.content, 'Web rewrite differs from the Windows-written bytes');
+  const back = windows({ operation: 'parse', content: webFile });
+  assert.ok(back.result, back.error);
+  assert.deepEqual(back.result, web);
+});
+
+test('both consumers reject every invalid v2 fixture', () => {
+  const differing = [];
+  for (const { file, error } of v2Cases.invalid) {
+    const content = read(file);
+    let webCode = null;
+    try { parseWorkfile(content); } catch (cause) { webCode = cause.code; }
+    assert.equal(webCode, error, `${file}: Web error code`);
+    const windowsCode = windows({ operation: 'parse', content }).error;
+    assert.ok(windowsCode, `${file}: Windows accepted an invalid fixture`);
+    if (windowsCode !== error) differing.push(`${file}: Web ${error}, Windows ${windowsCode}`);
+  }
+  // Both reject; the error code must match where the two ports define the same limit.
+  assert.deepEqual(differing, [], 'Web and Windows report different codes for the same invalid file');
 });

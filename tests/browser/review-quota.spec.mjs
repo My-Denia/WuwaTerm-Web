@@ -54,6 +54,7 @@ async function fillPair(page) {
 test('first-run shows a full shared review allowance in Chinese and English', async ({ page }) => {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: poolBody(60) });
     throw new Error(`Unexpected API request: ${path}`);
   });
@@ -76,6 +77,7 @@ test('a full review quota disables the two admission buttons and leaves local ac
   const reviews = [];
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: poolBody(0) });
     if (path === '/api/reviews') {
       reviews.push(route.request().postDataJSON());
@@ -117,6 +119,7 @@ test('adopt and not-term stay available after a check once the snapshot reaches 
   let remaining = 60;
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: poolBody(remaining) });
     if (path === '/api/reviews') {
       const body = route.request().postDataJSON();
@@ -140,6 +143,7 @@ test('adopt and not-term stay available after a check once the snapshot reaches 
 test('a 200 pool response without reviews is an incomplete snapshot and does not disable review', async ({ page }) => {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') return route.fulfill({ json: {
       status: 'available',
       translation_enabled: true,
@@ -165,6 +169,7 @@ test('limits explains the independent review quota and does not read the live po
   let poolCalls = 0;
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
     if (path === '/api/pool') poolCalls += 1;
     return route.fulfill({ status: 200, json: {} });
   });

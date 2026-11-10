@@ -15,9 +15,10 @@ everywhere. `parseWorkfile` accepts both and returns the object as stored; its
 `format` field tells the caller which one. `semanticPartsOf(parsed)` returns the three
 semantic arrays (empty for v1).
 
-Until the workbench holds semantic state (W2), the review workbench refuses to import a
-v2 file (`workfile_semantic_unsupported`) instead of saving it back as v1 without its
-decisions.
+The web review workbench reads and writes v2. Opening a v2 file restores its decisions,
+stored old texts and history snapshots; saving writes them back, so no semantic state is
+lost between sessions. Without a Core that offers `semantic-review-v1`, the semantic
+features are hidden and the decisions in an opened file are kept as they are.
 
 ## Fields
 
@@ -45,6 +46,19 @@ Top level (exact keys): the v1 keys (`format`, `source`, `target`, `direction`,
 Writing keeps the last 2 history snapshots. Over 1 MiB the oldest snapshots are dropped
 first; if the file is still too large the write fails with `workfile_too_large`. Decisions
 are never dropped.
+
+## What the web writer stores
+
+- `semantic_texts` holds only revisions that an `ignored` decision references and that
+  differ from the current text, newest first, at most 16, within 1 MiB. When they do not
+  fit, the oldest are dropped first. An `ignored` decision whose text was dropped gets
+  `old_text_unavailable` at the next re-review and returns to needing reconfirmation; the
+  decision itself is kept.
+- A `semantic_history` snapshot includes only segments whose current slice still equals the
+  content that was sent to Core, at most 64 segments.
+- Processing the same occurrence again replaces the earlier decision for it.
+- At 128 decisions the workbench refuses a new decision and says so.
+- Precedents and request context are never written into the manuscript.
 
 ## Re-review merge rules (`lib/semantic-decisions.js`)
 

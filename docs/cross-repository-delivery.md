@@ -12,6 +12,16 @@ pins a Web commit independently. A passing pair proves compatibility for those
 two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
+Current pins: `contracts/windows-ref.txt` is `9010190cd8dfbbb75c241a4caf21bacabc10826c`
+(WuwaTerm-Windows PR #3, which reads and writes `wuwaterm-manuscript-v2`), so the Web and
+Windows manuscript contract test now exchanges v2 files in both directions: every valid
+`contracts/manuscript-v2/` fixture, a Web-written file and a Windows-built file are read by
+the other side, and every invalid fixture is rejected by both. `contracts/backend-ref.txt`
+stays `7122ea7cb41e5987aac80b23fc27bd071fcfa22b` (Core PR #198, which added the
+`semantic-review-v1` and `segmentation-v1` contracts). To do: raise `backend-ref.txt` to the
+Core commit that implements the semantic review engine once that PR is merged, and record
+the resulting producer and consumer SHAs.
+
 The meta contract sends actual Python API response bodies through the real BFF.
 The label contract compares the Python category/reason keys and existing Windows
 Chinese labels with Web projections. Web-only unit and browser tests do not need
