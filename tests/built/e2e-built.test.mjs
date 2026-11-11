@@ -129,8 +129,12 @@ test('built unknown routes expose the observed framework HTML 404, separately fr
     const response = await server.fetch(path);
     assert.equal(response.status, 404);
     assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
-    // The locked vinext bundle has no global JSON not_found/no-store handler.
-    assert.equal(response.headers.get('cache-control'), null);
+    // vinext 1.4.4 puts the framework's dynamic-HTML default on this 404, where
+    // beta.8 sent no header at all. no-store plus private/no-cache/max-age=0 is a
+    // more conservative answer than silence, not a regression: the unknown route
+    // becomes no more cacheable than before. Pinned exactly so a future default
+    // that makes this 404 cacheable fails here instead of shipping quietly.
+    assert.equal(response.headers.get('cache-control'), 'private, no-cache, no-store, max-age=0, must-revalidate');
     assert.match(await response.text(), /404/);
   }
   assert.equal(upstream.calls.length, 0);
