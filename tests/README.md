@@ -54,6 +54,15 @@ WUWATERM_BROWSER_BUILT=1 npm run test:browser
 The build server URL is allocated by the harness and captured by Playwright;
 the browser API responses remain synthetic.
 
+Each action has its own 10s limit against the 30s test budget. An action that
+stops making progress therefore fails at the interaction, with its own call log,
+instead of consuming whatever is left of the test clock and being reported at
+the test declaration line. CI allows one retry: a deterministic failure still
+fails both attempts and keeps the job red, and a test that only passes on retry
+is reported as flaky. Failed and retried attempts keep their trace under
+`.wrangler/browser-results`, which CI publishes as the `browser-results`
+artifact, so a rare stall leaves evidence instead of only a reporter message.
+
 ## Node requirement
 
 `npm test` imports the TypeScript message catalog and Markdown renderer
