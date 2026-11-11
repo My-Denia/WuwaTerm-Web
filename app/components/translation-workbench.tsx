@@ -39,6 +39,11 @@ export function TranslationWorkbench() {
   const translationInput = useRef<HTMLTextAreaElement>(null);
   const sourceFileInput = useRef<HTMLInputElement>(null);
   const sourceFileAttempt = useRef(0);
+  // Bumped by every action that replaces the editable source or the
+  // translation belonging to it (edit, term insert, query move, direction,
+  // translate, cancel). A file read that started before a bump is stale: its
+  // result or failure must not win over the newer work.
+  const generation = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -111,6 +116,7 @@ export function TranslationWorkbench() {
     if (termQuery) setBrowserQuery(null);
   }
   function insertTerm(text: string) {
+    generation.current += 1;
     translationController.current?.abort();
     translationController.current = null;
     setSource(prev => prev ? prev + ' ' + text : text);
@@ -126,9 +132,10 @@ export function TranslationWorkbench() {
       if (sourceFileAttempt.current === attempt) setSourceFileStatus({ kind: 'error', code: 'sourceFileTooLarge' });
       return;
     }
+    const mine = generation.current;
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
-      if (sourceFileAttempt.current !== attempt) return;
+      if (sourceFileAttempt.current !== attempt || generation.current !== mine) return;
       translationController.current?.abort();
       translationController.current = null;
       setSource(text);
@@ -138,7 +145,7 @@ export function TranslationWorkbench() {
       setSourceFileStatus({ kind: 'notice', code: 'sourceFileImported' });
       translationInput.current?.focus();
     } catch {
-      if (sourceFileAttempt.current === attempt) setSourceFileStatus({ kind: 'error', code: 'sourceFileInvalid' });
+      if (sourceFileAttempt.current === attempt && generation.current === mine) setSourceFileStatus({ kind: 'error', code: 'sourceFileInvalid' });
     }
   }
   function sendTermToReview(zh: string, en: string) {
@@ -146,6 +153,7 @@ export function TranslationWorkbench() {
   }
   async function translate(event: FormEvent) {
     event.preventDefault(); if (!source.trim()) return;
+    generation.current += 1;
     translationController.current?.abort();
     const controller = new AbortController(); translationController.current = controller;
     setCopied(false); setCopyFailed(false); setSourceFileStatus(null); setTranslation({ kind: 'loading' });
@@ -159,11 +167,13 @@ export function TranslationWorkbench() {
     finally { if (translationController.current === controller) translationController.current = null; }
   }
   function moveQueryToTranslation() {
+    generation.current += 1;
     translationController.current?.abort(); translationController.current = null;
     setSource(query); setTranslation({ kind: 'idle' }); setCopied(false); setSourceFileStatus(null);
     translationInput.current?.focus();
   }
   function cancelTranslation() {
+    generation.current += 1;
     translationController.current?.abort(); translationController.current = null;
     setTranslation({ kind: 'cancelled' }); setPoolAttempt(n => n + 1);
   }
@@ -219,8 +229,8 @@ export function TranslationWorkbench() {
         <p className="card-intro">{m.translation.intro}</p>
         {translationClosed && <p className="notice-state">{pool.kind === 'success' && !pool.data.translation_enabled ? m.tMsg.translation_disabled : m.tMsg.translation_pool_exhausted}</p>}
         <form onSubmit={translate}>
-          <div className="label-row"><label htmlFor="translation-source">{m.translation.label}</label><select aria-label={m.translation.directionAria} value={target} disabled={translation.kind === 'loading'} onChange={e => setTarget(e.target.value as 'auto' | 'en' | 'zh')}><option value="auto">{m.translation.directionAuto}</option><option value="en">{m.translation.directionToEn}</option><option value="zh">{m.translation.directionToZh}</option></select></div>
-          <textarea ref={translationInput} id="translation-source" value={source} disabled={translation.kind === 'loading'} onChange={e => { setSource(e.target.value); setTranslation({ kind: 'idle' }); setCopied(false); setSourceFileStatus(null); }} placeholder={m.translation.placeholder} rows={5} />
+          <div className="label-row"><label htmlFor="translation-source">{m.translation.label}</label><select aria-label={m.translation.directionAria} value={target} disabled={translation.kind === 'loading'} onChange={e => { generation.current += 1; setTarget(e.target.value as 'auto' | 'en' | 'zh'); }}><option value="auto">{m.translation.directionAuto}</option><option value="en">{m.translation.directionToEn}</option><option value="zh">{m.translation.directionToZh}</option></select></div>
+          <textarea ref={translationInput} id="translation-source" value={source} disabled={translation.kind === 'loading'} onChange={e => { generation.current += 1; setSource(e.target.value); setTranslation({ kind: 'idle' }); setCopied(false); setSourceFileStatus(null); }} placeholder={m.translation.placeholder} rows={5} />
           <div className="field-hint"><span>{m.translation.hintSafety}</span><span aria-live="polite">{fill(m.translation.charCount, { n: sourceLength.toLocaleString(locale) })}</span></div>
           {sourceLength > 2000 && <p className="translation-file-status" role="status">{m.translation.longSource}</p>}
           {sourceFileStatus && <p className="translation-file-status" role={sourceFileStatus.kind === 'error' ? 'alert' : 'status'}>{m.translation[sourceFileStatus.code]}</p>}
