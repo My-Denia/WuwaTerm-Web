@@ -15,7 +15,14 @@ jobs:
   web:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The install step below bounds each of its three attempts at 3 min and its
+    # fallback at another 3, so a dead mirror costs about 10 min there instead of
+    # the 10 min a single attempt already spent on 2026-11-11; with the browser
+    # suite that follows, 20 min covers the worst case that still reaches the
+    # fallback. At the previous 15 min ceiling a dead mirror could cancel the job
+    # mid-retry, which is the failure this change exists to remove. A healthy run
+    # still finishes in about 4 min.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -30,7 +37,44 @@ jobs:
       - run: npm run build
       - run: npm run verify:no-client-secret
       - run: npm run test:built
-      - run: npx playwright install --with-deps chromium
+      # 2026-11-11, run 43033222869: all four attempts of this job died in
+      # `npx playwright install --with-deps chromium` while every earlier step
+      # passed, and the same step took 19s on the same commit twenty minutes
+      # earlier. The failure was apt's own line,
+      #   E: Failed to fetch ... Temporary failure resolving 'azure.archive.ubuntu.com'
+      # so the mirror's DNS decided the job. Resolving the mirror is the runner
+      # image's property, not this repository's; a package that is genuinely
+      # missing is this repository's problem. The step separates the two: three
+      # bounded attempts with 5s/15s backoff for anything transient, no retry at
+      # all for a package apt cannot find, and then a browser-only install that
+      # says the system libraries were not installed. If the fallback also
+      # fails, or chromium cannot launch after it, the step is red and names the
+      # cause; a green step here never claims the system dependencies were
+      # installed when they were not.
+      #
+      # The cache holds the browser binary only, never the OS packages, so
+      # `--with-deps` still runs on every attempt, cache hit included: once the
+      # download is skipped that is the cheap part, and skipping it would make
+      # the system-dependency check depend on whatever the image happens to
+      # ship. The key carries the resolved @playwright/test version because that
+      # version pins the chromium build.
+      - name: Read Playwright version for the browser cache key
+        id: playwright-version
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install Playwright chromium
+        env:
+          PLAYWRIGHT_CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
+        run: bash .github/scripts/install-playwright-chromium.sh
       - run: npm run test:browser
         env:
           WUWATERM_BROWSER_BUILT: '1'
