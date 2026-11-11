@@ -34,6 +34,16 @@ jobs:
       - run: npm run test:browser
         env:
           WUWATERM_BROWSER_BUILT: '1'
+      # A browser flake that only passes on retry leaves the job green, so the
+      # trace has to be published unconditionally; without it the failed attempt
+      # leaves nothing behind except the reporter text.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: browser-results
+          path: .wrangler/browser-results
+          if-no-files-found: ignore
+          retention-days: 7
       - run: npm run build:selfhost
         env:
           NEXT_PUBLIC_WUWATERM_BASE_PATH: /private
