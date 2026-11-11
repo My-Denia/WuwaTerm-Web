@@ -7,8 +7,8 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { guardPairForRequest, pairSegments, segmentText, SEGMENT_LIMIT } from '../../lib/segmentation.js';
 import {
-  classifyFailure, contextBefore, diffSplice, fitRequestBody, initialRun, mapRegion, mapSpan, nextQueued,
-  historySnapshot, placeSegmentIssues, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
+  classifyFailure, contextBefore, diffSplice, fitRequestBody, initialRun, mapRegion, mapSpan,
+  historySnapshot, nextToSend, placeSegmentIssues, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../../lib/semantic-run.js';
 import {
@@ -73,7 +73,7 @@ export type SemanticState = {
 };
 type ChoiceLike = { source: string; source_span: Span; choice: string; candidate: { zh: string; en: string } | null };
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
-type RunItem = { key: string; index: number; status: string; code: string | null };
+type RunItem = { key: string; index: number; status: string; code: string | null; attempt?: number };
 type RunState = { kind: 'term' | 'semantic' | 'translate' | null; phase: string; items: RunItem[]; waitUntil: number | null; stopCode: string | null };
 /** Applies a draft edit and/or semantic change; returns the serial of the undo entry it pushed, else null. */
 export type Commit = (next: { draft?: Draft; semantic?: (state: SemanticState) => SemanticState; notice?: string | null; remember?: boolean }) => number | null;
@@ -159,7 +159,8 @@ export function SemanticWorkbench(props: Props) {
   const [run, dispatch] = useReducer(runReducer as (state: RunState, event: Record<string, unknown>) => RunState, undefined, initialRun as () => RunState);
   const runGeneration = useRef(0);
   const runAbort = useRef<AbortController | null>(null);
-  const inflight = useRef<string | null>(null);
+  // The send just started, until the run state shows it (see nextToSend).
+  const inflight = useRef<{ key: string; attempt: number } | null>(null);
   const translateRun = useRef<{ source: string; direction: 'en' | 'zh'; segments: { start: number; end: number; core_start: number; core_end: number }[]; pieces: string[]; base: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [usePrecedents, setUsePrecedents] = useState(PRECEDENTS_DEFAULT_ON);
@@ -407,9 +408,9 @@ export function SemanticWorkbench(props: Props) {
   const runners = useRef({ term: sendTerm, translate: sendTranslate, semantic: sendSemantic });
   useLayoutEffect(() => { runners.current = { term: sendTerm, translate: sendTranslate, semantic: sendSemantic }; });
   useEffect(() => {
-    const item = nextQueued(run) as RunItem | null;
-    if (!item || inflight.current) return;
-    inflight.current = item.key;
+    const item = nextToSend(run, inflight.current) as RunItem | null;
+    if (!item) return;
+    inflight.current = { key: item.key, attempt: (item.attempt ?? 0) + 1 };
     dispatch({ type: 'sent', key: item.key });
     const abort = new AbortController(); runAbort.current = abort;
     const generation = runGeneration.current;
@@ -418,7 +419,6 @@ export function SemanticWorkbench(props: Props) {
       // A runner that throws must not leave its item sending forever.
       if (runGeneration.current === generation) failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'stop' }, now: Date.now() });
     }).finally(() => {
-      if (runGeneration.current === generation) inflight.current = null;
       if (runAbort.current === abort) runAbort.current = null;
     });
   }, [run]);

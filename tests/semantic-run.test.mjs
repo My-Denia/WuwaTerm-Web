@@ -391,3 +391,27 @@ test('semanticExportItems flattens issues with their status and semanticIssuesRe
   assert.equal(semanticIssuesResolved({ a: 'accepted', b: 'pending', c: 'needs_reconfirmation', d: 'ignored' }), 2);
   assert.equal(semanticExportItems({ issues: [base], statuses: { [base.id]: 'needs_reconfirmation' } })[0].status, 'needs_reconfirmation');
 });
+
+test('nextToSend moves on as soon as the run state shows the last send finished, however late its promise settles', async () => {
+  const { nextToSend } = await import('../lib/semantic-run.js');
+  const items = ['a', 'b', 'c'].map((key, index) => ({ key, index }));
+  let s = runReducer(initialRun(), { type: 'start', kind: 'semantic', items });
+  // The caller starts b but the state does not show it yet: never start it twice.
+  s = runReducer(runReducer(s, { type: 'sent', key: 'a' }), { type: 'done', key: 'a' });
+  const pendingB = { key: 'b', attempt: 1 };
+  assert.equal(nextToSend(s, pendingB), null);
+  // b failed (charged, 502). Its runner may still be settling; the run continues with c.
+  // (The old guard waited for that promise and stalled the run when it settled after the render.)
+  s = runReducer(runReducer(s, { type: 'sent', key: 'b' }), { type: 'failed', key: 'b', code: 'upstream_network_error', classification: { action: 'segment_failed' }, now: 0 });
+  assert.equal(nextToSend(s, pendingB)?.key, 'c');
+  // A wait puts b back in the queue after its send: resuming sends b again.
+  let w = runReducer(runReducer(initialRun(), { type: 'start', kind: 'semantic', items }), { type: 'sent', key: 'a' });
+  w = runReducer(w, { type: 'failed', key: 'a', code: 'shared_pool_busy', classification: { action: 'wait', seconds: 5 }, now: 0 });
+  assert.equal(nextToSend(w, { key: 'a', attempt: 1 }), null);
+  w = runReducer(w, { type: 'resume' });
+  assert.equal(nextToSend(w, { key: 'a', attempt: 1 })?.key, 'a');
+  // A retried failed item is sent again.
+  s = runReducer(runReducer(s, { type: 'sent', key: 'c' }), { type: 'done', key: 'c' });
+  s = runReducer(s, { type: 'retry', key: 'b' });
+  assert.equal(nextToSend(s, { key: 'c', attempt: 1 })?.key, 'b');
+});
