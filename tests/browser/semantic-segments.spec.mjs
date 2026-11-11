@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { serializeWorkfile } from '../../lib/manuscript.js';
+import { fixture as savedFixture } from '../fixtures/manuscript.mjs';
 import { S, fill, openWorkbench, fillPair, longPair, zhParagraph, enParagraph } from '../helpers/semantic-routes.mjs';
 
 const chips = page => page.locator('.segment-chip');
@@ -85,7 +87,8 @@ test('a long source without a translation is translated segment by segment, each
   rec.translations.forEach((body, i) => {
     expect(body.text).toBe(zhParagraph(i + 1));
     expect(body.to).toBe('en');
-    if (i === 0) expect(body.context).toBeUndefined();
+    // ADR 0019 decision 5: the first segment has nothing before it and sends an empty context.
+    if (i === 0) expect(body.context).toEqual({});
     else {
       expect(body.context.before.source).toBe(Array.from(zhParagraph(i)).slice(-400).join(''));
       expect(body.context.before.target).toBe(`Translated ${i}.`);
@@ -122,6 +125,36 @@ test('changing the direction during segment translation stops it and drops the r
   await page.waitForTimeout(1_000);
   expect(rec.translations.map(body => body.to)).toEqual(['en']);
   await expect(page.locator('#review-target')).toHaveValue('');
+});
+
+test('translating one untranslated pair sends an empty context once the service negotiates it', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'] });
+  const source = '她看见三只鸟。';
+  await page.locator('#review-source').fill(source);
+  await page.getByRole('button', { name: S.segTranslate, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Translated 1.', { timeout: 30_000 });
+  expect(rec.translations).toEqual([{ text: source, to: 'en', context: {} }]);
+});
+
+test('the second pair translation still carries the previous pair as its before context', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'] });
+  // An imported aligned manuscript: the first pair is translated, the second has no target text.
+  const source = '甲一。\n\n甲二。';
+  const target = 'Alpha one.';
+  const file = serializeWorkfile({
+    source, target, direction: 'en',
+    alignments: [
+      { source: { start: 0, end: 3, text: '甲一。' }, target: { start: 0, end: 10, text: target } },
+      { source: { start: 5, end: 8, text: '甲二。' }, target: null },
+    ],
+    choices: [],
+    history: [{ source, target, direction: 'en', alignments: null, report: savedFixture(source, target).report, resolutions: [] }],
+  });
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'manuscript.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+  await expect(page.locator('#review-source')).toHaveValue(source);
+  await page.locator('.segment-chip').nth(1).getByRole('button', { name: S.segTranslate, exact: true }).click();
+  await expect(page.locator('#review-target')).toContainText('Translated 1.', { timeout: 30_000 });
+  expect(rec.translations).toEqual([{ text: '甲二。', to: 'en', context: { before: { source: '甲一。', target } } }]);
 });
 
 test('without the context capability the segment translation sends no context', async ({ page }) => {

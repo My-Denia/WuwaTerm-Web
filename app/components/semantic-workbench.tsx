@@ -377,7 +377,7 @@ export function SemanticWorkbench(props: Props) {
     const prev = item.index > 0 ? plan.segments[item.index - 1] : null;
     const previousPiece = item.index > 0 ? plan.pieces[item.index - 1] : '';
     const before = prev ? { source: chars(slice(sc, prev.core_start, prev.core_end)).slice(-400).join(''), target: chars(previousPiece.trim()).slice(-400).join('') } : null;
-    const fitted = fitRequestBody({ text: core, to: plan.direction, ...(contextOn && before ? { context: { before } } : {}) });
+    const fitted = fitRequestBody({ text: core, to: plan.direction, ...(contextOn ? { context: before ? { before } : {} } : {}) });
     if (!fitted.fits) { failRun({ type: 'failed', key: item.key, code: 'bodyTooLarge', classification: { action: 'stop' }, now: Date.now() }); return; }
     try {
       const response = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(fitted.body), signal });
@@ -446,7 +446,8 @@ export function SemanticWorkbench(props: Props) {
     const list = safePairs(d.source, d.target, d.alignments);
     const before = contextBefore({ pairs: list, segmentIndex: view.pair.index, source: d.source, target: d.target });
     const precedents = usePrecedents ? selectPrecedents({ items: precedentItems(d, work.current.semantic), source: d.source, pairs: list, segmentIndex: view.pair.index }) : [];
-    const context = contextOn && (before || precedents.length) ? { context: { ...(before ? { before } : {}), ...(precedents.length ? { precedents } : {}) } } : {};
+    // ADR 0019 decision 5: a negotiated context is always present, even as {} on the first pair.
+    const context = contextOn ? { context: { ...(before ? { before } : {}), ...(precedents.length ? { precedents } : {}) } } : {};
     const fitted = fitRequestBody({ text: view.sCore, to: d.direction, ...context });
     if (!fitted.fits) return;
     setPairTranslating(view.pair.index);
