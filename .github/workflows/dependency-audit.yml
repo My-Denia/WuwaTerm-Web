@@ -66,8 +66,8 @@ on:
       - .github/workflows/dependency-audit.yml
   schedule:
     # Advisories are published against versions that never change, so a week
-    # with no commit can still turn this red. Monday 05:23 UTC, minutes after
-    # ci.yml's 06:00 pass rather than on the same minute as it.
+    # with no commit can still turn this red. Monday 05:23 UTC: a minute ci.yml's
+    # 06:00 pass does not use, so the two scheduled runs do not start together.
     - cron: '23 5 * * 1'
   workflow_dispatch:
 
