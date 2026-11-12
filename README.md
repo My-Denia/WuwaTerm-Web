@@ -35,9 +35,12 @@ npx playwright install chromium
 WUWATERM_BROWSER_BUILT=1 npm run test:browser
 ```
 
-`npm audit --json` runs in the scheduled, manual, and Dependabot `audit` CI job
-and can also be run locally when updating dependencies. `npm run dev` starts
-local development. Tests use synthetic upstream responses and local D1 storage;
+`npm audit --json` runs in the scheduled, manual, and Dependabot `audit` CI job.
+The `dependency-audit` workflow additionally gates the production tree
+(`npm audit --omit=dev --json`) on pull requests that touch a dependency file and
+once a week. Both commands can also be run locally when updating dependencies.
+`npm run dev` starts local development. Tests use synthetic upstream responses
+and local D1 storage;
 they do not consume production quota. Details and limits of the evidence are in
 [tests/README.md](tests/README.md).
 
