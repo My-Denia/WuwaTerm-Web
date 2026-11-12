@@ -17,6 +17,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
   useEffect(() => { document.title = m.meta.title; }, [lang, m.meta.title]);
   return (
     <>
+      <a className="skip-link" href="#terms-title">{m.nav.skipToTerms}</a>
       <nav className="topbar" aria-label={m.nav.ariaLabel}>
         <a className="brand" href="#top" aria-label={m.nav.homeAria}>
           <span className="brand-mark" aria-hidden="true">W</span>

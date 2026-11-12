@@ -53,6 +53,17 @@ async function switchTo(page, language) {
   }).toPass({ timeout: 10_000 });
 }
 
+test('the first Tab reveals a skip link to the term tool', async ({ page }) => {
+  await open(page);
+  await page.keyboard.press('Tab');
+  const skip = page.locator('.skip-link');
+  await expect(skip).toBeFocused();
+  await expect(skip).toBeVisible();
+  await skip.press('Enter');
+  await expect(page).toHaveURL(/#terms-title$/);
+});
+
+
 test('first visit defaults to Chinese with server-rendered lang and metadata', async ({ page }) => {
   await open(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
