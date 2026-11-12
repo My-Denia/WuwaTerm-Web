@@ -9,6 +9,12 @@ const zh = {
     title: 'WuwaTerm · 鸣潮中英术语与整句翻译',
     description: '查找鸣潮官方中英术语，字典优先、保留术语的整句翻译。全站共享公测额度，先到先用，不保证个人公平。',
   },
+  notFound: {
+    kicker: '404',
+    title: '这里没有术语',
+    body: '这个页面不存在。回到首页继续查词、翻译或审校。',
+    home: '返回 WuwaTerm',
+  },
   language: {
     toggleAria: '界面语言',
     zh: '中文',
@@ -560,6 +566,12 @@ const en: typeof zh = {
   meta: {
     title: 'WuwaTerm · Wuthering Waves Terms & Sentence Translation',
     description: 'Look up official Wuthering Waves terms in Chinese and English, and translate full sentences dictionary-first with terms preserved. One shared public beta pool, first come first served.',
+  },
+  notFound: {
+    kicker: '404',
+    title: 'No term here',
+    body: 'This page does not exist. Go back to the home page to look up terms, translate or review.',
+    home: 'Back to WuwaTerm',
   },
   language: {
     toggleAria: 'Interface language',
