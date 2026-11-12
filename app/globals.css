@@ -11,6 +11,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .site-main { padding:0 clamp(18px,5vw,72px); }
 .topbar,.workbench,.provenance,footer { width:min(1180px,100%); margin-inline:auto; }
 .topbar { display:flex; justify-content:space-between; align-items:center; padding:24px 0; border-bottom:1px solid var(--line); gap:16px; }
+.skip-link { position:absolute; left:16px; top:-64px; z-index:20; padding:10px 14px; border:1px solid var(--accent); border-radius:8px; background:var(--surface); color:var(--text); font-size:13px; }
+.skip-link:focus { top:12px; }
 .brand { display:flex; align-items:center; gap:12px; text-decoration:none; }
 .brand-mark { display:grid; place-items:center; width:40px; height:40px; border:1px solid var(--accent); border-radius:10px; color:var(--accent); font-size:24px; font-weight:800; }
 .brand strong,.brand small { display:block; }
