@@ -178,6 +178,54 @@ test('a reason-less review error body still shows the localized fallback, and re
   await expect(page.locator('.error-panel')).toContainText('temporarily unavailable');
 });
 
+// Every header label is a single text run: a brand name, a section pill, a
+// limits/privacy link or a language button. The bar has three groups, and
+// below 1140px they only fit by wrapping. Before the wrap rule the bar
+// squeezed them instead, so at 541px each pill ran three to four lines, the
+// links and the 中文 button stacked one character per line, and the bar reached
+// 360px. Counting line boxes per label is independent of fonts and of the
+// language: one line each is the whole contract.
+const HEADER_LABELS = ['.brand strong', '.section-pill', '.nav-links > a', '.lang-toggle button'];
+
+async function headerLabelLines(page) {
+  return page.evaluate(selectors => {
+    const out = [];
+    const range = document.createRange();
+    for (const selector of selectors) {
+      for (const element of document.querySelectorAll(selector)) {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let lines = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent.trim()) continue;
+          range.selectNodeContents(node);
+          lines = Math.max(lines, range.getClientRects().length);
+        }
+        out.push({ selector, text: element.textContent.trim(), lines });
+      }
+    }
+    return out;
+  }, HEADER_LABELS);
+}
+
+test('the header keeps every label on one line from the phone layout up', async ({ page }) => {
+  await open(page);
+  const widths = [541, 600, 700, 768, 860, 900, 1024, 1100];
+  for (const language of ['中文', 'English']) {
+    await switchTo(page, language);
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 900 });
+      const labels = await headerLabelLines(page);
+      // 1 brand, 4 pills, 2 document links and 2 language buttons.
+      expect(labels).toHaveLength(9);
+      for (const { selector, text, lines } of labels) {
+        expect(lines, `${language} ${width}px ${selector} “${text}”`).toBe(1);
+      }
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `${language} ${width}px overflow`).toBeLessThanOrEqual(1);
+    }
+  }
+});
+
 test('both languages fit the narrow viewport without horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page);
