@@ -96,6 +96,13 @@ test('the quota strip reserves its height before the snapshot arrives', async ({
 });
 
 
+test('unknown routes render the branded 404 in the current language', async ({ page }) => {
+  await page.goto(BASE + '/this-page-does-not-exist');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('这里没有术语');
+  await expect(page.getByRole('link', { name: '返回 WuwaTerm' })).toHaveAttribute('href', '/');
+});
+
+
 test('first visit defaults to Chinese with server-rendered lang and metadata', async ({ page }) => {
   await open(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
