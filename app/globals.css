@@ -37,7 +37,10 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .pool-notice strong { color:#dcf1e3; font-size:13px; }
 .pool-notice p { margin:5px 0 0; color:#b1c7b8; font-size:12px; line-height:1.65; }
 .pool-notice a { margin-left:auto; white-space:nowrap; font-size:12px; color:var(--accent); }
-.pool-strip { display:flex; gap:20px; align-items:center; flex-wrap:wrap; margin:18px 0 28px; }
+/* The populated strip is 49px high; the loading paragraph is 40px. Reserve the
+   final height so the workspace grid below does not shift when the snapshot
+   arrives. This changes no quota visibility rule. */
+.pool-strip { display:flex; gap:20px; align-items:center; flex-wrap:wrap; margin:18px 0 28px; min-height:49px; }
 .pool-strip > div { padding-right:20px; border-right:1px solid var(--line); }
 .pool-strip > div > span { display:block; font-size:10px; color:var(--muted); margin-bottom:5px; }
 .pool-strip strong { font-size:19px; letter-spacing:.3px; }

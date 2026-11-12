@@ -64,6 +64,38 @@ test('the first Tab reveals a skip link to the term tool', async ({ page }) => {
 });
 
 
+test('the quota strip reserves its height before the snapshot arrives', async ({ page }) => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') return route.fulfill({ json: { capabilities: [], request_id: 'synthetic' } });
+    if (path === '/api/pool') {
+      await gate;
+      return route.fulfill({ json: {
+        status: 'available', translation_enabled: true,
+        terms: { used: 0, limit: 100, remaining: 100 },
+        translations: { used: 0, limit: 100, remaining: 100 },
+        characters: { used: 0, limit: 10000, remaining: 10000 },
+        reviews: { used: 0, limit: 60, remaining: 60 },
+        reset_at: '2099-01-01T00:00:00Z',
+      } });
+    }
+    throw new Error(`Unexpected API request: ${path}`);
+  });
+  await page.goto(BASE + '/');
+  const strip = page.locator('.pool-strip');
+  await expect(strip).toBeVisible();
+  const before = await page.locator('.workspace-grid').boundingBox();
+  release();
+  await expect(strip).toContainText('100');
+  const after = await page.locator('.workspace-grid').boundingBox();
+  expect(before).not.toBeNull();
+  expect(after).not.toBeNull();
+  expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1);
+});
+
+
 test('first visit defaults to Chinese with server-rendered lang and metadata', async ({ page }) => {
   await open(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
