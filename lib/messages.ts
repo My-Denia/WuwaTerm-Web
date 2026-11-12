@@ -611,7 +611,7 @@ const en: typeof zh = {
     buttonIdle: 'Look up',
     buttonLoading: 'Looking up…',
     hint: 'Up to 200 characters · lookups never spend the sentence-translation quota',
-    matchesFound: '{n} match(es) found',
+    matchesFound: 'Matches found: {n}',
     emptyTitle: 'Start with one term.',
     emptyBody: 'Chinese–English pairs and match notes will appear here.',
     loading: 'Looking up terms…',
