@@ -82,7 +82,7 @@ test('toggling language switches copy in place, keeps workbench state, and sends
   await switchTo(page, 'English');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page).toHaveTitle(/Terms & Sentence Translation/u);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('delivered accurately');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('term, delivered accurately');
   await expect(page.getByRole('button', { name: 'Check terms', exact: true })).toBeVisible();
   // Workbench state survives: manuscript, currency semantics, choice, filter, active finding, expansion.
   await expect(page.locator('#review-source')).toHaveValue(SOURCE);

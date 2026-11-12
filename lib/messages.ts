@@ -579,7 +579,7 @@ const en: typeof zh = {
   },
   hero: {
     eyebrow: 'WUTHERING WAVES · 中文 / ENGLISH',
-    title: 'Every Wuthering Waves term,',
+    title: 'Every Wuthering Waves term, ',
     titleAccent: 'delivered accurately.',
     subtitle: 'Look up official Chinese–English terms and translate whole sentences. Dictionary first; sentence translation keeps terms intact.',
   },
