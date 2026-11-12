@@ -39,7 +39,7 @@ export function LimitsBody() {
   const reviews = selfhost ? local?.reviews.limit : limits.reviewsPerDay;
   const upstream = selfhost ? (Number.isSafeInteger(localUpstream) && (localUpstream ?? 0) > 0 ? localUpstream : undefined) : limits.upstreamPerMinute;
   return <main className="document"><div className="document-top"><a className="back-link" href={withQuery('/', termQuery)}>{m.nav.back}</a><LanguageToggle /></div><p className="eyebrow">{m.limits.eyebrow}</p><h1>{m.limits.h1}</h1><p className="document-lead">{m.limits.lead}</p>
-    <section><h2>{m.limits.s1h}</h2><table><thead><tr><th>{m.limits.tableFeature}</th><th>{m.limits.tableCeiling}</th></tr></thead><tbody>
+    <section><h2>{m.limits.s1h}</h2><table className="limits-table"><thead><tr><th>{m.limits.tableFeature}</th><th>{m.limits.tableCeiling}</th></tr></thead><tbody>
       <tr><td>{m.limits.rowTerms}</td><td>{terms === undefined ? '—' : fill(m.limits.rowTermsCeiling, { n: terms })}</td></tr>
       <tr><td>{m.limits.rowTranslation}</td><td>{translations === undefined || characters === undefined ? '—' : fill(m.limits.rowTranslationCeiling, { n: translations, chars: characters.toLocaleString(locale) })}</td></tr>
       <tr><td>{m.limits.rowReview}</td><td>{reviews === undefined ? '—' : fill(m.limits.rowReviewCeiling, { n: reviews })}</td></tr>
