@@ -1,0 +1,149 @@
+name: Dependency audit
+
+# Advisory gate for the locked dependency tree: on every pull request that can
+# change it, and every week, whether or not anybody commits.
+#
+# Why this is a separate workflow, and what it does not replace
+# ------------------------------------------------------------
+# `ci.yml` already has an `audit` job. Its trigger is `schedule`,
+# `workflow_dispatch`, and `dependabot/*` pull requests; that is a recorded
+# owner workflow decision, so this change leaves the job, its `if:` and its
+# steps exactly as they are and adds the two cases it does not cover:
+#
+#   * an ordinary pull request. Today a dependency change can land on a tree
+#     with a known advisory and only surface on the next scheduled run.
+#   * a production-tree criterion that fails closed. The old job runs
+#     `npm audit --json` and lets npm's exit status speak. That status is 1 both
+#     when advisories were found and when the audit itself failed: measured with
+#     npm 11.6.2, a missing lockfile answers exit 1 with
+#     `{"error":{"code":"ENOLOCK"}}`, and an unreachable registry answers exit 1
+#     with an endpoint error instead of a report. Here the report is validated
+#     before it is read, and anything unreadable is red.
+#
+# Neither job is a superset of the other. The old job still answers "what does
+# the registry say about the whole tree, whenever an owner or Dependabot asks";
+# this one answers "does the production tree have a blocking advisory for this
+# change, and did the week that produced no commits produce one".
+#
+# Why not put `paths:` on ci.yml: `paths` is a workflow-level filter. Hanging it
+# off ci.yml would skip the test matrix, the contract job and the built-artifact
+# checks on every pull request that does not touch a dependency file, which is
+# most of them. The filter is wanted for this check only. The same reasoning
+# keeps the weekly pass out of ci.yml: a weekly advisory check should not rebuild
+# and re-test the product.
+#
+# What this gate is, and is not, looking at
+# -----------------------------------------
+# The verdict comes from the production tree (`npm audit --omit=dev`). A
+# critical or high advisory there is red. The full tree is audited too and
+# printed with its severities, but it does not gate: build and test tooling
+# carries moderate advisories that are not what this check is for, and a weekly
+# run that goes red for them is a run people learn to ignore. Both raw reports
+# are uploaded on every outcome, so a dev-tree finding is visible without being
+# a verdict.
+#
+# Two resolutions in this tree are outside the advisory databases by
+# construction: `braces` and `minimatch` resolve to `file:vendor/*` local
+# patches, and the registry databases key on a registry name@version that a
+# filesystem resolution does not have. `npm audit` says nothing about them in
+# either direction — see `vendor/braces/README.md`. Their evidence is
+# behavioural and lives in `npm test` (`tests/braces-security.test.mjs`,
+# `tests/braces-glob-compat.test.mjs`, `tests/minimatch-compat.test.mjs`), which
+# runs in ci.yml. A green run here is not a statement about those two packages.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Only a dependency change can change this answer. A pull request that
+    # touches none of these does not run this workflow at all, and the checks it
+    # would otherwise have to repeat are the ones ci.yml already runs.
+    paths:
+      - package.json
+      - package-lock.json
+      - scripts/check-dependency-advisories.mjs
+      - tests/dependency-advisories.test.mjs
+      - .github/workflows/dependency-audit.yml
+  schedule:
+    # Advisories are published against versions that never change, so a week
+    # with no commit can still turn this red. Monday 05:23 UTC: a minute ci.yml's
+    # 06:00 pass does not use, so the two scheduled runs do not start together.
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: dependency-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    name: locked tree (production critical/high)
+    runs-on: ubuntu-latest
+    # Two registry bulk checks over ~700 locked packages and the report reader
+    # finish in well under a minute. Ten is the runaway ceiling, not the
+    # expectation.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      # The same npm the rest of CI uses, so a report produced here can be
+      # compared with the one the older job prints.
+      - run: npm install --global --no-audit npm@11.6.2
+      - name: Audit the locked tree
+        id: audit
+        # No `npm ci` first: `npm audit` reads package.json and package-lock.json
+        # and needs no node_modules (verified on this lock: the report covers the
+        # same 20 production packages either way). Whether the lock installs is
+        # ci.yml's question, and this job should not take long enough to compete
+        # with it.
+        #
+        # The statuses are recorded rather than trusted: npm 11.6.2 exits 1 for
+        # advisories and for its own failures alike, so the report decides and
+        # the status is handed over as corroboration.
+        run: |
+          set -euo pipefail
+          production=0
+          npm audit --omit=dev --json > production-tree-audit.json || production=$?
+          full=0
+          npm audit --json > full-tree-audit.json || full=$?
+          echo "npm audit --omit=dev exit status: ${production}"
+          echo "npm audit (full tree) exit status: ${full}"
+          echo "production=${production}" >> "$GITHUB_OUTPUT"
+          echo "full=${full}" >> "$GITHUB_OUTPUT"
+      - name: Production tree gate
+        # The verdict. High or critical in the production tree is red; an
+        # unreadable or self-contradicting report is red; everything else is
+        # reported and allowed.
+        run: |
+          node scripts/check-dependency-advisories.mjs production-tree-audit.json \
+            --audit-exit "${{ steps.audit.outputs.production }}" \
+            --label "production dependency tree"
+      - name: Full tree findings
+        # Runs after a red gate on purpose: the dev-inclusive findings are the
+        # context for it. This step does not fail on severity, only on a report
+        # nobody can read.
+        if: always()
+        run: |
+          node scripts/check-dependency-advisories.mjs full-tree-audit.json \
+            --audit-exit "${{ steps.audit.outputs.full }}" \
+            --label "full dependency tree (report only)" \
+            --summary-only
+      - name: Keep the audit reports
+        # The reports are the evidence for both outcomes, and a red run nobody
+        # can inspect from the log alone is a red run that gets re-run until it
+        # is green. `run_attempt` keeps the name unique inside a run: without it
+        # a re-run after a fix fails on the upload instead of recording the new
+        # audit.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-audit-report-${{ github.run_attempt }}
+          path: |
+            production-tree-audit.json
+            full-tree-audit.json
+          if-no-files-found: warn
