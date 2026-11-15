@@ -373,8 +373,9 @@ which the client lists for removal.
 segmentation-v1 caps each core at 1,800 scalars on both sides, so the longer side sets
 the segment count. Adjacent ready pairs merge while both sides still fit. As a result,
 every two consecutive segments hold more than 1,800 scalars on the longer side, and a
-segment averages more than 900. For 512 segments, that guarantees these source
-capacities in the worst case:
+segment averages more than 900. For 512 segments, that gives these source
+capacities for text without hard cuts or manual-split pairs (a hard-cut piece or a
+non-ready pair never merges, so such text can hold less):
 
 | Direction and target length | Source capacity |
 |---|---|
@@ -534,7 +535,9 @@ the current segmentation-v1 pairing, using the current `alignments`, in order:
 - If only the alignment input or the basis changed, the record becomes stale.
 - If the manuscript has more than 512 segments, the save fails with
   `workfile_too_many_entries`, and the message tells the user to split the manuscript.
-  Saving without segment records is allowed only as the user's explicit choice.
+  Saving without segment records is allowed only as the user's explicit choice; their
+  choices then move to `segment_choice_history`, and if that history would exceed its cap,
+  the user is told which choices will be dropped before the save.
 
 **Leaving long mode.** When both sides drop to 2,000 scalars or fewer, the records go
 away. Their choices move to `segment_choice_history`, each with the hash of its
