@@ -597,3 +597,14 @@ test('Runtime step 2 in a session: an edit that makes one segment equal another 
   assert.deepEqual(segments.map(r => [r.status, r.choices.map(c => [c.choice, c.confirmed])]),
     [['pending', [['official_pair', false]]], ['done', [['not_a_term', true]]]]);
 });
+
+test('Compact term result: exportSegments carries the result\'s truncated flag and each finding\'s candidates_truncated', () => {
+  // Record 1's second finding has candidates_truncated; a copy of the record marks the result truncated (Core's 32-finding cap).
+  const base = L.longFromWorkfile(ALL);
+  const truncated = { ...base, records: base.records.map((r, i) => (i === 1 ? { ...r, result: { ...r.result, truncated: true } } : r)) };
+  const rows = L.exportSegments(truncated, ctx(DRAFT, B));
+  assert.deepEqual(rows.map(r => [r.index, r.truncated]), [[1, true], [2, false]]);
+  assert.deepEqual(rows[0].findings.map(f => f.candidates_truncated), RESULTS[1].findings.map(f => f.candidates_truncated));
+  assert.ok(rows[0].findings.some(f => f.candidates_truncated));
+  assert.equal(rows[0].report.truncated, true);
+});

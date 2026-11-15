@@ -32,7 +32,9 @@ export type MarkdownSemanticItem = {
 export type MarkdownSemantic = { items: MarkdownSemanticItem[]; resolved: number; segments: { total: number; reviewed: number } };
 // `state` (long-mode term review, manuscript v3): current, saved (restored, not yet confirmed with the live basis) or
 // stale (re-check pending); without it, `stale` alone decides the label.
-export type MarkdownSegmentTerms = { index: number; state?: 'pending' | 'saved' | 'current' | 'stale'; stale: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[] }[] };
+// `truncated` (the segment result left findings out) and `candidates_truncated` (a finding left candidates out) are rendered
+// with the same lines as the document report's.
+export type MarkdownSegmentTerms = { index: number; state?: 'pending' | 'saved' | 'current' | 'stale'; stale: boolean; truncated?: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[]; candidates_truncated?: boolean }[] };
 export type MarkdownCurrency = 'current' | 'stale' | 'imported' | 'none';
 
 export type MarkdownReportInput = {
@@ -264,11 +266,13 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
     for (const segment of input.segmentTerms) {
       const mark = segment.state === 'saved' ? md.segmentTermsSaved : segment.stale ? md.segmentTermsStale : '';
       out.push('### ' + fill(md.segmentTermsLabel, { n: segment.index + 1 }) + (mark ? ' · ' + mark : ''), '');
+      if (segment.truncated) paragraph(md.truncatedLine);
       if (!segment.findings.length) { paragraph(md.segmentTermsNone); continue; }
       out.push(...bullets(segment.findings.map(finding => ((msg(lang).review.verdicts as Record<string, string>)[finding.verdict] ?? finding.verdict)
         + ' · ' + inline(finding.source_span.text) + ' · ' + fill(md.spanLabel, { start: finding.source_span.start + 1, end: finding.source_span.end })
         + (finding.target_span ? ' · ' + fill(md.targetSpanLabel, { start: finding.target_span.start + 1, end: finding.target_span.end }) + colon(lang) + inline(finding.target_span.text) : ' · ' + md.noTargetSpan)
-        + (finding.candidates.length ? ' · ' + finding.candidates.map(c => inline(c.zh) + ' / ' + inline(c.en)).join(semicolon(lang)) : ''))), '');
+        + (finding.candidates.length ? ' · ' + finding.candidates.map(c => inline(c.zh) + ' / ' + inline(c.en)).join(semicolon(lang)) : '')
+        + (finding.candidates_truncated ? ' · ' + md.candidatesTruncatedLine : ''))), '');
     }
   }
   if (input.semantic) {
@@ -293,7 +297,11 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
   }
 
   paragraph(md.notCertifiedLine);
-  return out.join('\n').replace(/\n{3,}/gu, '\n\n').trimEnd() + '\n';
+  // Only the structural spacing is normalized: runs of empty entries between sections become one blank line. A fenced block's
+  // text is a single entry and keeps its blank lines exactly, so the report stays a snapshot of the manuscript.
+  const lines: string[] = [];
+  for (const entry of out) if (!(entry === '' && lines.at(-1) === '')) lines.push(entry);
+  return lines.join('\n').trimEnd() + '\n';
 }
 
 /**
