@@ -165,6 +165,17 @@ test('without the context capability the segment translation sends no context', 
   expect(rec.translations.map(body => body.context)).toEqual([undefined, undefined]);
 });
 
+test('without the context capability the single-pair translation sends no context key (MY-238)', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: [] });
+  const source = '她看见三只鸟。';
+  await page.locator('#review-source').fill(source);
+  await page.getByRole('button', { name: S.segTranslate, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Translated 1.', { timeout: 30_000 });
+  expect(rec.translations).toHaveLength(1);
+  expect(Object.hasOwn(rec.translations[0], 'context')).toBe(false);
+  expect(rec.translations[0]).toEqual({ text: source, to: 'en' });
+});
+
 test('forced cuts, untranslated segments and an extra translation paragraph each carry their own hint', async ({ page }) => {
   await openWorkbench(page);
   // One 2,500-character sentence per side with commas to cut at, no sentence end inside it.

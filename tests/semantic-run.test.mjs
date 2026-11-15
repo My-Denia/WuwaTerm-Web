@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  classifyFailure, contextBefore, diffSplice, fitRequestBody, historySnapshot, initialRun, liveIssue, mapRegion, mapSpan,
-  nextQueued, placeSegmentIssues, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
+  classifyFailure, contextBefore, diffSplice, fitRequestBody, historySnapshot, initialRun, itemDisplayState, liveIssue, mapRegion, mapSpan,
+  nextQueued, placeSegmentIssues, runDisplayState, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../lib/semantic-run.js';
 import { parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
@@ -423,4 +423,43 @@ test('nextToSend moves on as soon as the run state shows the last send finished,
   s = runReducer(runReducer(s, { type: 'sent', key: 'c' }), { type: 'done', key: 'c' });
   s = runReducer(s, { type: 'retry', key: 'b' });
   assert.equal(nextToSend(s, { key: 'c', attempt: 1 })?.key, 'b');
+});
+
+test('extend queues new keys of a long-mode term run in segment order and leaves every known item alone', () => {
+  // manuscript-v3 SPEC Runtime step 5: a new basis from the probe makes saved records due within the same run.
+  let state = runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'p', index: 2 }, { key: 'a', index: 0 }] });
+  state = runReducer(state, { type: 'sent', key: 'p' });
+  state = runReducer(state, { type: 'extend', items: [{ key: 'p', index: 2 }, { key: 'b', index: 1 }, { key: 'c', index: 3 }, { key: 'b', index: 1 }] });
+  assert.deepEqual(state.items.map(i => [i.key, i.status, i.attempt]), [['a', 'queued', 0], ['b', 'queued', 0], ['p', 'sending', 1], ['c', 'queued', 0]]);
+  state = runReducer(state, { type: 'done', key: 'p' });
+  assert.equal(nextQueued(state).key, 'a');
+  // A finished run is not reopened by a late extend.
+  const finished = runReducer(runReducer(runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'x', index: 0 }] }), { type: 'sent', key: 'x' }), { type: 'done', key: 'x' });
+  assert.equal(runReducer(finished, { type: 'extend', items: [{ key: 'y', index: 1 }] }), finished);
+});
+
+test('runDisplayState and itemDisplayState tell running, retrying, waiting, paused, failed and done apart', () => {
+  const start = runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'a', index: 0 }, { key: 'b', index: 1 }, { key: 'c', index: 2 }] });
+  assert.equal(runDisplayState(initialRun()), 'idle');
+  const sending = runReducer(start, { type: 'sent', key: 'a' });
+  assert.equal(runDisplayState(sending), 'running');
+  assert.equal(itemDisplayState(sending, sending.items[0]), 'sending');
+  const busy = runReducer(sending, { type: 'failed', key: 'a', code: 'shared_pool_busy', classification: { action: 'wait', seconds: 5 }, now: 0 });
+  assert.equal(runDisplayState(busy), 'waiting');
+  assert.deepEqual(busy.items.map(i => itemDisplayState(busy, i)), ['waiting', 'queued', 'queued']);
+  const resent = runReducer(runReducer(busy, { type: 'resume' }), { type: 'sent', key: 'a' });
+  assert.equal(runDisplayState(resent), 'retrying');
+  assert.equal(itemDisplayState(resent, resent.items[0]), 'retrying');
+  const paused = runReducer(runReducer(resent, { type: 'pause' }), { type: 'done', key: 'a' });
+  assert.equal(runDisplayState(paused), 'paused');
+  assert.deepEqual(paused.items.map(i => itemDisplayState(paused, i)), ['done', 'paused', 'paused']);
+  const stopped = runReducer(runReducer(runReducer(paused, { type: 'resume' }), { type: 'sent', key: 'b' }),
+    { type: 'failed', key: 'b', code: 'upstream_rate_limited', classification: { action: 'stop' }, now: 0 });
+  assert.equal(runDisplayState(stopped), 'failed');
+  assert.deepEqual(stopped.items.map(i => itemDisplayState(stopped, i)), ['done', 'failed', 'paused']);
+  const segmentFailed = runReducer(runReducer(runReducer(runReducer(stopped, { type: 'resume' }), { type: 'sent', key: 'b' }), { type: 'done', key: 'b' }),
+    { type: 'sent', key: 'c' });
+  const ended = runReducer(segmentFailed, { type: 'failed', key: 'c', code: 'upstream_network_error', classification: { action: 'segment_failed' }, now: 0 });
+  assert.deepEqual([ended.phase, runDisplayState(ended)], ['done', 'failed']);
+  assert.equal(runDisplayState(runReducer(runReducer(segmentFailed, { type: 'done', key: 'c' }), { type: 'resume' })), 'done');
 });

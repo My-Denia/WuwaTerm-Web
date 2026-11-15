@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { S, openWorkbench, fillPair, longPair, TRIO, trioResponse, downloadFrom } from '../helpers/semantic-routes.mjs';
+import { S, fill, openWorkbench, fillPair, longPair, TRIO, trioResponse, downloadFrom } from '../helpers/semantic-routes.mjs';
 
 const WITHOUT = [
   ['an empty capability list', []],
@@ -35,13 +35,16 @@ test('a long manuscript keeps its segment panel, per-segment term check and manu
   await expect(page.locator('.semantic-track')).toHaveCount(0);
   await expect(page.locator('.segment-chip')).toHaveCount(4);
   await expect(page.locator('.segment-chip').first()).toContainText(S.segTermPending);
-  await page.getByRole('button', { name: S.runTerm, exact: true }).click();
+  await page.getByRole('button', { name: fill(S.runTerm, { n: 4 }), exact: true }).click();
   await expect(page.locator('.segment-head p')).toContainText('术语已核 4/4 段', { timeout: 30_000 });
   await expect(page.locator('.segment-chip').first()).toContainText(S.segTermChecked);
   expect(rec.reviews).toHaveLength(4);
   expect(rec.semantic).toHaveLength(0);
-  // The finished per-segment term reports are exported, and the page says they are not in the manuscript file.
-  await expect(page.locator('.manuscript-save-state').filter({ hasText: S.segmentTermsNotSaved })).toBeVisible();
+  // manuscript-v3 SPEC "Writing": the finished per-segment term results are saved with the manuscript (they used to be
+  // export-only), and they are also exported.
+  const saved = JSON.parse((await downloadFrom(page, '保存稿件')).text);
+  expect(saved.format).toBe('wuwaterm-manuscript-v3');
+  expect(saved.segments.map(r => r.status)).toEqual(['done', 'done', 'done', 'done']);
   const result = JSON.parse((await downloadFrom(page, '导出当前结果')).text);
   expect(result.segment_term_reports.map(r => [r.segment, r.stale])).toEqual([[1, false], [2, false], [3, false], [4, false]]);
   expect(result.segment_term_reports.every(r => r.report.rule_version === 'review-v2')).toBe(true);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { fill, msg, summaryHeadline, summarySentence } from '../lib/messages.ts';
@@ -127,10 +128,15 @@ test('reconcile/compare/error codes are all covered by both catalogs', () => {
   for (const content of ['', '{', '[]', JSON.stringify({ format: 'other' }), 'x'.repeat(1_048_577)]) {
     try { parseWorkfile(content); } catch (cause) { errorCodes.add(cause.code); }
   }
+  // Every code a manuscript parser can report (manuscript-v3 SPEC "Error codes"), including the four v3 ones.
+  for (const code of JSON.parse(readFileSync(new URL('../contracts/manuscript-v3/cases.json', import.meta.url), 'utf8')).codes) errorCodes.add(code);
   for (const code of errorCodes) {
     assert.equal(typeof zhErrors[code], 'string', `error code ${code} missing zh`);
     assert.equal(typeof enErrors[code], 'string', `error code ${code} missing en`);
   }
+  // The zh catalog is the SPEC message where the SPEC changed it (size and entry limits).
+  assert.equal(zhErrors.workfile_too_large, '稿件文件超过大小上限（v1/v2 为 1 MiB，v3 为 44 MiB）；请把稿件拆成较小的几份。');
+  assert.equal(zhErrors.workfile_too_many_entries, '稿件文件条目过多；超过 512 段的稿件请拆成几份保存，选择历史过多时请先移除部分记录。');
   for (const code of ['direction_changed', 'source_block_changed', 'scope_changed', 'awaiting_fresh_basis', 'basis_changed', 'finding_missing_or_truncated', 'imported_not_a_term', 'user_not_a_term', 'candidate_gone', 'candidate_partial_visible', 'position_basis_match', 'duplicate_position']) {
     assert.equal(typeof zhReasons[code], 'string', `choice code ${code} missing zh`);
     assert.equal(typeof enReasons[code], 'string', `choice code ${code} missing en`);

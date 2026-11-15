@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
-  addSegmentResult, emptySemantic, issueStatus, mapSemanticEdit, occurrenceKey, placedOccurrence, reconcileState, upsertDecision,
+  addSegmentResult, emptySemantic, freshSemantic, issueStatus, longHoldsWork, mapSemanticEdit, occurrenceKey, placedOccurrence, reconcileState, upsertDecision,
 } from '../lib/semantic-state.js';
+import { longFromWorkfile } from '../lib/long-review.js';
 import { makeSemanticDecision } from '../lib/semantic-decisions.js';
 import { MAX_SEMANTIC_DECISIONS, parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
@@ -72,4 +74,22 @@ test('re-reviewing a segment replaces its issues; an older ignore carries withou
   // The decision still round-trips through manuscript v2 unchanged.
   const file = serializeWorkfile({ source, target, direction: 'zh', alignments: null, choices: [], history: [], semantic_decisions: merged.decisions, semantic_texts: [], semantic_history: [] });
   assert.deepEqual(parseWorkfile(file).semantic_decisions, merged.decisions);
+});
+
+test('every edit reconciles the long state, including a direction change that leaves both texts as they were', () => {
+  // manuscript-v3 SPEC Writing "Records": if the direction changes, every record becomes pending.
+  const file = JSON.parse(readFileSync(new URL('../contracts/manuscript-v3/valid-v3-all-parts.json', import.meta.url), 'utf8'));
+  const draft = { source: file.source, target: file.target, direction: file.direction, alignments: file.alignments };
+  const state = { ...emptySemantic(), long: longFromWorkfile(file) };
+  assert.equal(longHoldsWork(state.long), true);
+  assert.ok(state.long.records.some(r => r.result !== null));
+  const turned = mapSemanticEdit(state, draft, { ...draft, direction: draft.direction === 'en' ? 'zh' : 'en' });
+  assert.deepEqual(turned.long.records.map(r => r.status), state.long.records.map(() => 'pending'));
+  assert.ok(turned.long.records.every(r => r.choices.every(c => !c.confirmed)));
+  // A texts-only call (no direction or alignments) leaves the long state as it is.
+  assert.equal(mapSemanticEdit(state, { source: draft.source, target: draft.target }, { source: draft.source, target: `${draft.target}x` }).long, state.long);
+  // A newly installed long draft starts with one pending record per segment.
+  const fresh = freshSemantic(draft);
+  assert.deepEqual(fresh.long.records.map(r => r.status), state.long.records.map(() => 'pending'));
+  assert.equal(longHoldsWork(fresh.long), false);
 });

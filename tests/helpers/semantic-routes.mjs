@@ -1,7 +1,7 @@
 // Synthetic local routes and page helpers for the semantic review browser specs.
 // Every /api request is fulfilled here; nothing reaches a real service or model.
 import { expect } from '@playwright/test';
-import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { capabilitiesBody, defaultSemanticResponse, semanticResponse } from './semantic-fixture.mjs';
 import { semanticMsg } from '../../lib/semantic-messages.ts';
 
@@ -31,12 +31,16 @@ export const busy = () => failure(429, 'shared_pool_busy', { retry_after_seconds
  *  respond: async (request, callNumber) => response | undefined   replaces the default plan
  *  delayMs: per semantic request latency
  *  translate: (body, callNumber) => string
+ *  reviewFailures / translateFailures: { [callNumber]: {status, body} }
+ *  reviewHold / translateHold: { [callNumber]: Promise } holding that call open until it settles
+ *  matcherRevision: the review-v2 matcher_revision the term reviews return (rec.matcherRevision can change it later)
  * Returned recorder: semantic / translations / reviews (request bodies), maxInflight,
  * gate(n) -> {release} holding semantic call n open until released.
  */
 export async function installRoutes(page, options = {}) {
-  const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate, translateFailures = {}, translateHold = {}, reviewFailures = {} } = options;
-  const rec = { semantic: [], translations: [], reviews: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map() };
+  const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate, translateFailures = {}, translateHold = {}, reviewFailures = {}, reviewHold = {},
+    matcherRevision = FRESH_MATCHER_REVISION } = options;
+  const rec = { semantic: [], translations: [], reviews: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map(), matcherRevision };
   rec.gate = n => {
     let release;
     const held = new Promise(resolve => { release = resolve; });
@@ -69,9 +73,11 @@ export async function installRoutes(page, options = {}) {
     if (path === '/api/reviews') {
       const body = route.request().postDataJSON();
       rec.reviews.push(body);
-      const failed = reviewFailures[rec.reviews.length];
+      const n = rec.reviews.length;
+      if (reviewHold[n]) await reviewHold[n];
+      const failed = reviewFailures[n];
       if (failed) return route.fulfill({ status: failed.status, json: failed.body });
-      return route.fulfill({ json: freshApiReport(fixture(body.source, body.target, body.direction).report) });
+      return route.fulfill({ json: { ...freshApiReport(fixture(body.source, body.target, body.direction).report), matcher_revision: rec.matcherRevision } });
     }
     if (path === '/api/translations') {
       const body = route.request().postDataJSON();
@@ -127,6 +133,14 @@ export const blurFocus = page => page.evaluate(() => document.activeElement && d
 export const zhParagraph = (i, sentences = 80) => Array.from({ length: sentences }, (_, k) => `第${i}段第${k + 1}句是合成句子。`).join('');
 /** An English paragraph of about 1,150 scalars. */
 export const enParagraph = (i, sentences = 34) => Array.from({ length: sentences }, (_, k) => `Paragraph ${i} line ${k + 1} is synthetic. `).join('').trim();
+/** A long pair whose every segment has one official term (今汐 / Jinhsi), so each term check reports a finding there. */
+export const termParagraph = i => `今汐在第${i}段出场。${zhParagraph(i)}`;
+export const termTargetParagraph = (i, tag = '') => `Jinhsi appears in paragraph ${i}${tag}. ${enParagraph(i)}`;
+export const termPair = (n = 4) => ({
+  paragraphs: n,
+  source: Array.from({ length: n }, (_, i) => termParagraph(i + 1)).join('\n\n'),
+  target: Array.from({ length: n }, (_, i) => termTargetParagraph(i + 1)).join('\n\n'),
+});
 export const longPair = (n = 6) => ({
   paragraphs: n,
   source: Array.from({ length: n }, (_, i) => zhParagraph(i + 1)).join('\n\n'),

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
-import { S, openWorkbench, fillPair, downloadFrom, TRIO, trioResponse, zhParagraph, enParagraph, failure } from '../helpers/semantic-routes.mjs';
+import { S, fill, openWorkbench, fillPair, downloadFrom, TRIO, trioResponse, zhParagraph, enParagraph, failure } from '../helpers/semantic-routes.mjs';
 
 const card = page => page.locator('.semantic-card');
 const act = (page, name) => card(page).getByRole('button', { name, exact: true });
@@ -123,7 +123,7 @@ test('a partial term run exports the manuscript segment numbers, not positions i
   const source = [1, 2, 3].map(i => zhParagraph(i)).join('\n\n');
   const target = [1, 2, 3].map(i => enParagraph(i)).join('\n\n');
   await fillPair(page, source, target);
-  await page.getByRole('button', { name: S.runTerm, exact: true }).click();
+  await page.getByRole('button', { name: fill(S.runTerm, { n: 3 }), exact: true }).click();
   await expect(page.locator('.segment-head p')).toContainText('术语已核 2/3 段', { timeout: 30_000 });
   const result = JSON.parse((await downloadFrom(page, '导出当前结果')).text);
   expect(result.segment_term_reports.map(r => r.segment)).toEqual([1, 3]);
