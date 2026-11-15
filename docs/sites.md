@@ -65,11 +65,14 @@ separate surfaces and are unchanged by public Site access.
 
 ## Resumable bilingual manuscripts
 
-The review workbench saves a user-initiated `wuwaterm-manuscript-v1` JSON file
-(`wuwaterm-manuscript-v2` once it holds semantic decisions or history).
+The review workbench saves a user-initiated JSON file in the lowest manuscript
+format that holds the work: `wuwaterm-manuscript-v1`, `wuwaterm-manuscript-v2`
+once it holds semantic decisions or history, or `wuwaterm-manuscript-v3` once it
+holds long-manuscript segment state (below). It reads all three.
 It contains source, target, direction, up to 32 occurrence-specific decisions,
 their dictionary/rule/candidate basis, explicit scalar correspondences and the
-last two reports. Import is local and bounded to 1 MiB; it never sends a request.
+last two reports. Import is local and bounded to 1 MiB (44 MiB for v3); it never
+sends a request.
 Undoing an import restores the prior manuscript and its historical reports; it still requires an explicit fresh check.
 There are no accounts, cloud manuscripts, automatic uploads or browser-storage
 history. The user must download and later import the file to resume. The page
@@ -81,13 +84,40 @@ Forward and reload request the browser's own warning. Cancelling retains the
 manuscript, decisions and reports. A crash or forced quit can still discard the page.
 
 The 2,000-character review request limit does not restrict manuscript storage:
-long translations can be saved and reopened intact within the 1 MiB file cap.
-A manuscript over the limit is paired into segments with `segmentation-v1`
-(Core's rules and fixtures; at most 1,800 scalars per side) and checked one
-segment at a time. Term results of a long manuscript are read-only: they can
-be located but per-occurrence term choices still need a manuscript within the
-limit. Both replacement actions refuse edits that would exceed the review limit
-without changing the draft.
+long translations can be saved and reopened intact within the file size cap
+(1 MiB for v1 and v2, 44 MiB for v3).
+A manuscript with either side over 2,000 scalars is in long mode: it is paired
+into segments with `segmentation-v1` (Core's rules and fixtures; at most 1,800
+scalars per side) and checked one segment at a time. The user's term choices are
+kept per segment (see "Long manuscripts in v3"). Both replacement
+actions refuse edits that would exceed the review limit without changing the
+draft.
+
+### Long manuscripts in v3
+
+A long manuscript saves as v3 ([specification](../contracts/manuscript-v3/SPEC.md)).
+Per segment, the file holds a compact term result, the inputs and basis it was
+computed under, and the user's term choices in that segment; it also holds a
+history of choices whose segment no longer exists, the finished segments and the
+current position. v3 files are minified JSON of up to 44 MiB. A manuscript without
+segment state or choice history still saves as v1 or v2, byte for byte as before,
+when that fits in 1 MiB.
+
+Opening a v3 file sends no request. A saved segment result is reused only when
+the content hashes of the segment's source and target, the request inputs
+(direction and alignment input) and the basis (rule version, dictionary schema
+version, revision, source commit and term count, and matcher revision) all equal
+the current ones. The current basis comes from one live review-v2 request with
+`X-WuwaTerm-Matcher-Basis: 1`, which is the first request of the term run the
+user starts after opening. Until it answers, saved results show as saved, not as
+checked against the current service, and no choices are sent. An unchanged
+manuscript with an unchanged basis costs that one request. Edited segments and
+segments whose basis changed are checked again, also from the run button; a
+finished mark survives a basis change. Document mode keeps the earlier rule: v1
+choices and history and v2 semantic data are history until a fresh check.
+
+A result JSON or Markdown export is not a resumable manuscript and not a backup.
+Web 0.2.0 and Windows 0.4.2 reject v3 files with an explicit error.
 
 ## Semantic review workbench
 
@@ -121,12 +151,7 @@ retry, and two consecutive identical failures stop the run. A used-up daily quot
 pauses the run with finished segments kept. Segment translation assembles the text
 in order, so it stops at any failed segment instead of skipping it. Every run keeps
 the direction it started with: a reply for another direction is not used.
-
-Per-segment term results of a long manuscript are not written to the manuscript
-file: the format's report history holds two reports of at most 2,000 characters,
-and changing it would break the current WuwaTerm-Windows reader. The page says so;
-the results are in the current-result and Markdown exports. Edits
-during a run never abort a request that is already charged; a result whose segment
+Edits during a run never abort a request that is already charged; a result whose segment
 text changed meanwhile is not used.
 
 When the two sides cannot be paired (`needs_manual_split`), the segment list shows
@@ -286,8 +311,8 @@ sends no translation, review or meta request. Browser tests check that the
 language choice is the only cookie and that exercised workbench state is not
 written to browser storage. The client-secret scan checks emitted artifacts.
 
-Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`), the
-result JSON (`wuwaterm-result-v2`), the translation TXT, and a readable
+Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`, `-v2` or `-v3`,
+the lowest that holds the work), the result JSON (`wuwaterm-result-v2`), the translation TXT, and a readable
 Markdown snapshot of the full report (`wuwaterm-report.md`). The Markdown is
 generated from the current workbench state without requests and without
 state changes; it lists every finding unfiltered with spans, excerpts,

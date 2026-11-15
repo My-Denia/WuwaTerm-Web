@@ -36,10 +36,18 @@ only while the paired versions remain compatible. Do not assume these two cases
 have the same deployment order.
 
 Keep the `/v1` API path, report `rule_version`, dictionary `schema_version`,
-opt-in `matcher_revision` hash and `wuwaterm-manuscript-v1` format distinct.
+opt-in `matcher_revision` hash and the `wuwaterm-manuscript-v1`, `-v2` and `-v3`
+formats distinct.
 The matcher hash is requested with `X-WuwaTerm-Matcher-Basis: 1`; it is not
 a report field named `matcher_basis`. Their actual validators and fixtures are the
-contracts; a manuscript import is not fresh certification against the live DB.
+contracts. A document-mode import (v1 choices and history, v2 semantic data) is not
+fresh certification against the live DB. A v3 segment result is reused only when
+its content hashes, request inputs and all six basis values equal the current ones,
+where the current basis comes from a live review-v2 request
+([contract](../contracts/manuscript-v3/SPEC.md)).
+
+Web 0.2.0 and Windows 0.4.2 reject v3 files. Cross-client v3 interchange is
+verified once a Windows v3 client is pinned in `contracts/windows-ref.txt`.
 
 ## Deployment receipt
 
