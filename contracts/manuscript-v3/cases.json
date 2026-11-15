@@ -17,19 +17,19 @@
     "workfile_progress_invalid"
   ],
   "limits": {
-    "file_bytes": 12582912,
+    "file_bytes": 46137344,
     "legacy_file_bytes": 1048576,
-    "text_scalars": 12582912,
-    "array_items": 128,
+    "text_scalars": 46137344,
+    "array_items": 512,
     "object_fields": 32,
     "depth": 16,
-    "segments": 128,
+    "segments": 512,
     "findings_per_result": 32,
     "candidates_per_finding": 8,
     "choices_per_record": 32,
     "offered_per_choice": 8,
-    "segment_choice_history": 128,
-    "progress_completed": 128,
+    "segment_choice_history": 512,
+    "progress_completed": 512,
     "core_scalars": 2000,
     "choices": 32,
     "history": 2,
@@ -44,7 +44,7 @@
       "file": "valid-v3-all-parts.json",
       "canonical": "valid-v3-all-parts.json",
       "legacy_error": "workfile_unsupported_format",
-      "note": "three ready segments: pending with an unconfirmed choice, done with a verified and a needs_review finding, stale under the previous basis; one history choice; progress"
+      "note": "three ready segments: pending with an unconfirmed choice, done with a verified and a needs_review finding (the latter has candidates_truncated and a confirmed not_a_term, which stays valid), stale under the previous basis; one history choice; progress with a done and a stale record completed"
     },
     {
       "file": "valid-v3-integral-numbers.json",
@@ -59,6 +59,18 @@
       "note": "record 1 source_hash differs from the current core: a valid file whose result the runtime treats as not current"
     },
     {
+      "file": "valid-v3-inputs-not-current.json",
+      "canonical": "valid-v3-inputs-not-current.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "record 1 has direction zh while the file has en, and record 2 has the alignment input of an empty list while the file has no alignments: a valid file whose two results the runtime treats as not current"
+    },
+    {
+      "file": "valid-v3-explicit-alignments.json",
+      "canonical": "valid-v3-explicit-alignments.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "the manuscript has one alignment per paragraph (each also covers the blank line after it); pairSegments with them keeps the cores of the automatic pairing, so the records are the same, and the done and stale records have non-trivial alignment inputs"
+    },
+    {
       "file": "valid-v3-with-semantic.json",
       "canonical": "valid-v3-with-semantic.json",
       "legacy_error": "workfile_unsupported_format",
@@ -71,10 +83,10 @@
       "note": "a v3 file without segment state; the writer emits it as the v2 file named in canonical"
     },
     {
-      "file": "valid-v3-128-segments.json",
-      "canonical": "valid-v3-128-segments.json",
-      "legacy_error": "workfile_unsupported_format",
-      "note": "128 pending records over 128 short paragraphs; the ranges are paragraph ranges, not a segmentation-v1 result"
+      "file": "valid-v3-512-segments.json",
+      "canonical": "valid-v3-512-segments.json",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "512 pending records over 512 short paragraphs; the ranges are paragraph ranges, not a segmentation-v1 result"
     },
     {
       "file": "valid-v3-32-choices.json",
@@ -83,10 +95,16 @@
       "note": "a done record with 32 findings and 32 confirmed choices"
     },
     {
-      "file": "valid-v3-128-history.json",
-      "canonical": "valid-v3-128-history.json",
-      "legacy_error": "workfile_unsupported_format",
-      "note": "128 history choices"
+      "file": "valid-v3-512-history.json",
+      "canonical": "valid-v3-512-history.json",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "512 history choices"
+    },
+    {
+      "file": "valid-v3-over-1mib.json",
+      "canonical": "valid-v3-over-1mib.json",
+      "legacy_error": "workfile_too_large",
+      "note": "a zh to en manuscript with a target about twice the source, over 1 MiB, with records that match pairSegments: most pending, 2 done with small results; the v1/v2 part alone is over 1 MiB"
     },
     {
       "file": "valid-v3-2000-core-8-offered.json",
@@ -108,10 +126,10 @@
     },
     {
       "file": "valid-v3-all-parts.json",
-      "pad_to_bytes": 12582912,
+      "pad_to_bytes": 46137344,
       "canonical": "valid-v3-all-parts.json",
       "legacy_error": "workfile_too_large",
-      "note": "padded with spaces to exactly 12 MiB: accepted by a v3 reader; an old client stops at its 1 MiB check"
+      "note": "padded with spaces to exactly 44 MiB (46,137,344 bytes): accepted by a v3 reader; an old client stops at its 1 MiB check"
     },
     {
       "file": "valid-v2-all-parts.json",
@@ -124,10 +142,10 @@
   "invalid": [
     {
       "file": "valid-v3-all-parts.json",
-      "pad_to_bytes": 12582913,
+      "pad_to_bytes": 46137345,
       "error": "workfile_too_large",
       "legacy_error": "workfile_too_large",
-      "note": "a v3 file one byte over 12 MiB"
+      "note": "a v3 file one byte over 44 MiB (46,137,345 bytes)"
     },
     {
       "file": "valid-v2-all-parts.json",
@@ -137,10 +155,10 @@
       "note": "a v2 file one byte over 1 MiB: non-v3 input keeps the 1 MiB cap"
     },
     {
-      "file": "invalid-v3-129-segments.json",
+      "file": "invalid-v3-513-segments.json",
       "error": "workfile_too_many_entries",
       "legacy_error": "workfile_too_many_entries",
-      "note": "129 records: the generic array cap is 128"
+      "note": "513 records: the v3 array cap is 512"
     },
     {
       "file": "invalid-v3-33-choices.json",
@@ -161,10 +179,10 @@
       "note": "a finding with 9 candidates (the finding has no choice)"
     },
     {
-      "file": "invalid-v3-129-history.json",
+      "file": "invalid-v3-513-history.json",
       "error": "workfile_too_many_entries",
       "legacy_error": "workfile_too_many_entries",
-      "note": "129 history choices: the generic array cap is 128"
+      "note": "513 history choices: the v3 array cap is 512"
     },
     {
       "file": "invalid-v3-9-offered.json",
@@ -182,7 +200,7 @@
       "file": "invalid-v3-33-fields.json",
       "error": "workfile_too_many_fields",
       "legacy_error": "workfile_too_many_fields",
-      "note": "a record with 33 fields"
+      "note": "a record with 33 fields (its 14 plus 19 extra)"
     },
     {
       "file": "invalid-v3-forbidden-key.json",
@@ -224,7 +242,25 @@
       "file": "invalid-v3-pending-with-result.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a pending record that still holds a basis and a result"
+      "note": "a pending record that still holds a direction, an alignment input, a basis and a result"
+    },
+    {
+      "file": "invalid-v3-pending-with-direction.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a pending record with a direction: direction, alignment_input, basis and result are all null in a pending record"
+    },
+    {
+      "file": "invalid-v3-done-null-direction.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a done record whose direction is null"
+    },
+    {
+      "file": "invalid-v3-bad-alignment-input.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "an alignment input that is neither \"automatic\" nor a 64-hex digest"
     },
     {
       "file": "invalid-v3-done-without-result.json",
@@ -365,16 +401,16 @@
       "note": "progress.current names a record that does not exist"
     },
     {
-      "file": "invalid-v3-progress-completed-not-done.json",
+      "file": "invalid-v3-progress-completed-pending.json",
       "error": "workfile_progress_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "completed names record 2, which is stale"
+      "note": "completed is strictly ascending but names record 0, which is pending (records 1 and 2 are done and stale, which is allowed)"
     },
     {
       "file": "invalid-v3-progress-completed-unsorted.json",
       "error": "workfile_progress_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "completed repeats an index, so it is not strictly ascending (record 1 is the only done record)"
+      "note": "completed repeats an index, so it is not strictly ascending (both entries name a done record)"
     }
   ]
 }

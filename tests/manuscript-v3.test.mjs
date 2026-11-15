@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
-import { WORKFILE_FORMAT_V2, parseWorkfile } from '../lib/manuscript.js';
+import { WORKFILE_FORMAT_V2, parseWorkfile, validAlignments } from '../lib/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
 import { pairSegments } from '../lib/segmentation.js';
 import {
-  MAX_V3_BYTES, MODEL_KINDS, REVIEW_MAX_JSON_BYTES, V3_FORMAT, budgetManuscript, buildFixtures, canonicalV3, padContent,
+  MAX_V3_BYTES, MODEL_NAMES, REVIEW_MAX_JSON_BYTES, V3_FORMAT, alignmentInput, alignmentList, budgetManuscript, buildFixtures, canonicalV3, padContent,
 } from '../scripts/build-manuscript-v3-fixtures.mjs';
 
 const dir = new URL('../contracts/manuscript-v3/', import.meta.url);
@@ -30,7 +31,8 @@ const text = (x, max, nonEmpty) => typeof x === 'string' && (!nonEmpty || x.leng
 
 const V3_KEYS = ['format', 'source', 'target', 'direction', 'alignments', 'choices', 'history', 'semantic_decisions', 'semantic_texts', 'semantic_history', 'segments', 'segment_choice_history', 'progress'];
 const V2_PART_KEYS = ['source', 'target', 'direction', 'alignments', 'choices', 'history', 'semantic_decisions', 'semantic_texts', 'semantic_history'];
-const RECORD_KEYS = ['index', 'segmentation_version', 'source_start', 'source_end', 'target_start', 'target_end', 'source_hash', 'target_hash', 'status', 'basis', 'result', 'choices'];
+const RECORD_KEYS = ['index', 'segmentation_version', 'source_start', 'source_end', 'target_start', 'target_end', 'source_hash', 'target_hash', 'status', 'direction', 'alignment_input', 'basis', 'result', 'choices'];
+const V3_TEXT_SCALARS = 46_137_344;
 const RESULT_KEYS = ['truncated', 'evaluated', 'not_evaluated', 'findings'];
 const FINDING_KEYS = ['verdict', 'source', 'target', 'candidates', 'candidates_truncated'];
 const CHOICE_KEYS = ['source_span', 'choice', 'candidate', 'offered', 'confirmed'];
@@ -40,7 +42,7 @@ const VERDICTS = ['verified_constraint', 'confirmed_conflict', 'needs_review', '
 function checkTree(x, depth = 0) {
   if (depth > 16) throw fail('workfile_too_deep');
   if (Array.isArray(x)) {
-    if (x.length > 128) throw tooMany();
+    if (x.length > 512) throw tooMany();
     x.forEach(v => checkTree(v, depth + 1));
   } else if (isObject(x)) {
     const keys = Object.keys(x);
@@ -96,7 +98,10 @@ function checkRecordShape(r, sourceLength, targetLength) {
   if (!int(r.index) || r.segmentation_version !== 'segmentation-v1' || !range(r.source_start, r.source_end, sourceLength)
     || !range(r.target_start, r.target_end, targetLength) || !hex(r.source_hash) || !hex(r.target_hash)
     || !['pending', 'done', 'stale'].includes(r.status)) throw invalid();
-  if (r.status === 'pending' ? r.basis !== null || r.result !== null : r.basis === null || r.result === null) throw invalid();
+  // direction, alignment_input, basis and result are null exactly when the record is pending.
+  const live = r.status !== 'pending';
+  if (['direction', 'alignment_input', 'basis', 'result'].some(k => (r[k] === null) === live)) throw invalid();
+  if (live && (!['en', 'zh'].includes(r.direction) || !(r.alignment_input === 'automatic' || hex(r.alignment_input)))) throw invalid();
   if (r.basis !== null && !basisValid(r.basis)) throw invalid();
   if (r.result !== null) checkResultShape(r.result);
   if (!Array.isArray(r.choices)) throw invalid();
@@ -135,6 +140,19 @@ function checkRecordContent(r, sourceScalars, targetScalars) {
   if (new Set(r.choices.map(c => `${c.source_span.start}:${c.source_span.end}`)).size !== r.choices.length) throw fail('workfile_duplicate_choices');
 }
 
+// Step 5. Through lib parseWorkfile when the v2 projection fits its 1 MiB check. Over that, the lib reader cannot run. When there are
+// no choices, history or semantic data, what is left to check is the two texts, the direction and the alignments, which this does the
+// way lib/manuscript.js does, with the v3 text limit. Anything else over 1 MiB is a case this reference reader cannot check.
+function checkV2Part(x) {
+  const projection = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]])) });
+  if (Buffer.byteLength(projection, 'utf8') <= MiB) { parseWorkfile(projection); return; }
+  const parts = ['choices', 'history', 'semantic_decisions', 'semantic_texts', 'semantic_history'].map(k => x[k]);
+  if (parts.some(p => !Array.isArray(p))) throw fail('workfile_invalid_content');
+  if (parts.some(p => p.length > 0)) throw new Error('the reference reader cannot check a v1/v2 part over 1 MiB that has choices, history or semantic data');
+  if (!text(x.source, V3_TEXT_SCALARS) || !text(x.target, V3_TEXT_SCALARS) || !['en', 'zh'].includes(x.direction)
+    || !validAlignments(x.alignments, x.source, x.target)) throw fail('workfile_invalid_content');
+}
+
 /** Takes the file's text; returns the parsed value or throws an error with a `code`. */
 function readV3(content) {
   if (Buffer.byteLength(content, 'utf8') > MAX_V3_BYTES) throw fail('workfile_too_large');
@@ -143,9 +161,7 @@ function readV3(content) {
   if (!json || !isObject(x) || x.format !== V3_FORMAT) return parseWorkfile(content);
   checkTree(x);
   if (!exactKeys(x, V3_KEYS)) throw fail('workfile_unsupported_format');
-  const projection = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]])) });
-  if (Buffer.byteLength(projection, 'utf8') > MiB) throw new Error('the reference reader cannot check a v1/v2 part over 1 MiB');
-  parseWorkfile(projection);
+  checkV2Part(x);
   if (!Array.isArray(x.segments)) throw invalid();
   const sourceScalars = Array.from(x.source);
   const targetScalars = Array.from(x.target);
@@ -161,7 +177,7 @@ function readV3(content) {
   const progress = () => fail('workfile_progress_invalid');
   if (!exactKeys(p, ['current', 'completed'])) throw progress();
   if (p.current !== null && !(int(p.current) && p.current >= 0 && p.current < x.segments.length)) throw progress();
-  if (!Array.isArray(p.completed) || !p.completed.every((n, i) => int(n) && (i === 0 || p.completed[i - 1] < n) && x.segments[n]?.status === 'done')) throw progress();
+  if (!Array.isArray(p.completed) || !p.completed.every((n, i) => int(n) && (i === 0 || p.completed[i - 1] < n) && ['done', 'stale'].includes(x.segments[n]?.status))) throw progress();
   return x;
 }
 
@@ -222,7 +238,10 @@ test('f. every v2 case keeps its result under the reference reader', () => {
   for (const c of v2cases.invalid) assert.throws(() => readV3(read(c.file, v2dir)), { code: c.error }, c.file);
 });
 
-test('g. hashes match the current cores and ranges match pairSegments', async () => {
+// These fixtures are valid on purpose with a stored value that is not current, or with ranges that are not a segmentation-v1 result.
+const NOT_CURRENT_INPUTS = ['valid-v3-hash-not-current.json', 'valid-v3-inputs-not-current.json', 'valid-v3-2000-core-8-offered.json'];
+
+test('g. hashes match the current cores, ranges match pairSegments, and the request inputs match the rule', async () => {
   const hashesMatch = async (file, x, onlyIndex = null) => {
     const source = Array.from(x.source); const target = Array.from(x.target);
     for (const r of x.segments) {
@@ -242,8 +261,15 @@ test('g. hashes match the current cores and ranges match pairSegments', async ()
     const x = readV3(read(c.file));
     if (x.segments.length === 0) continue;
     await hashesMatch(c.file, x, c.file === 'valid-v3-hash-not-current.json' ? 1 : null);
-    // These ranges are not a segmentation-v1 result: 128 short paragraphs, and 2,000-scalar cores (segmentation stops at 1,800).
-    if (['valid-v3-128-segments.json', 'valid-v3-2000-core-8-offered.json'].includes(c.file)) continue;
+    if (c.file === 'valid-v3-inputs-not-current.json') {
+      // The point of this file: record 1 has another direction than the manuscript, record 2 another alignment input.
+      assert.notEqual(x.segments[1].direction, x.direction);
+      assert.equal(x.segments[1].alignment_input, alignmentInput(x.alignments, x.source, x.target, x.segments[1]));
+      assert.notEqual(x.segments[2].alignment_input, alignmentInput(x.alignments, x.source, x.target, x.segments[2]));
+      assert.equal(x.segments[2].direction, x.direction);
+    }
+    // These ranges are not a segmentation-v1 result: 512 short paragraphs, and 2,000-scalar cores (segmentation stops at 1,800).
+    if (['valid-v3-512-segments.json', 'valid-v3-2000-core-8-offered.json'].includes(c.file)) continue;
     const pairs = pairSegments(x.source, x.target, 1800, x.alignments);
     assert.equal(pairs.length, x.segments.length, c.file);
     pairs.forEach((p, i) => {
@@ -251,27 +277,80 @@ test('g. hashes match the current cores and ranges match pairSegments', async ()
       const r = x.segments[i];
       assert.deepEqual([r.source_start, r.source_end, r.target_start, r.target_end], [p.source.core_start, p.source.core_end, p.target.core_start, p.target.core_end], `${c.file} record ${i}`);
     });
+    if (NOT_CURRENT_INPUTS.includes(c.file)) continue;
+    for (const r of x.segments) {
+      if (r.status === 'pending') continue;
+      assert.equal(r.direction, x.direction, `${c.file} record ${r.index}`);
+      assert.equal(r.alignment_input, alignmentInput(x.alignments, x.source, x.target, r), `${c.file} record ${r.index}`);
+    }
   }
   // The two core-length boundary files are invalid, but their hashes agree with their cores, so only the core length can fail.
   for (const file of ['invalid-v3-core-2001.json', 'invalid-v3-done-empty-core.json']) await hashesMatch(file, JSON.parse(read(file)));
 });
 
+test('g2. the alignment input rule: clip to the cores, rebase, take the core slice, drop what does not intersect', () => {
+  const sha = value => createHash('sha256').update(value, 'utf8').digest('hex');
+  const source = 'abcdefghij';
+  const target = 'ABCDEFGHIJKLMNOP';
+  // Source core 2..6 reads "cdef"; target core 3..9 reads "DEFGHI".
+  const record = { source_start: 2, source_end: 6, target_start: 3, target_end: 9 };
+  const span = (start, end, text) => ({ start, end, text });
+  assert.equal(source.slice(2, 6), 'cdef');
+  assert.equal(target.slice(3, 9), 'DEFGHI');
+  const alignments = [
+    { source: span(0, 4, 'abcd'), target: span(0, 5, 'ABCDE') }, // crosses the start of both cores: [2,4) and [3,5), rebased to [0,2)
+    { source: span(4, 8, 'efgh'), target: null }, // crosses the end of the source core: [4,6), rebased to [2,4); a null target stays null
+    { source: span(8, 10, 'ij'), target: span(12, 14, 'MN') }, // outside both cores: dropped
+  ];
+  const expected = [
+    { source: span(0, 2, 'cd'), target: span(0, 2, 'DE') },
+    { source: span(2, 4, 'ef'), target: null },
+  ];
+  assert.deepEqual(alignmentList(alignments, source, target, record), expected);
+  assert.equal(JSON.stringify(alignmentList(alignments, source, target, record)), JSON.stringify(expected), 'key order');
+  assert.equal(alignmentInput(alignments, source, target, record), sha('[{"source":{"start":0,"end":2,"text":"cd"},"target":{"start":0,"end":2,"text":"DE"}},{"source":{"start":2,"end":4,"text":"ef"},"target":null}]'));
+  assert.equal(sha(JSON.stringify(expected)), alignmentInput(alignments, source, target, record));
+  // The source intersects the core but the target does not: dropped. A null alignments list sends nothing, and [] is a real input.
+  assert.equal(alignmentInput([{ source: span(2, 6, 'cdef'), target: span(10, 12, 'KL') }], source, target, record), sha('[]'));
+  assert.equal(alignmentInput([], source, target, record), sha('[]'));
+  assert.equal(alignmentInput(null, source, target, record), 'automatic');
+  assert.ok(read('SPEC.md').includes(sha('[]')), 'SPEC.md states the digest of an empty list');
+});
+
 test('h. size models: the limit model keeps a 25% margin under the cap, and the extreme one fails or fits by its size', () => {
-  const sizes = {};
-  for (const kind of MODEL_KINDS) {
-    const payload = budgetManuscript(kind);
-    assert.equal(pairSegments(payload.source, payload.target).length, payload.segments.length, kind);
+  const sizes = {}; const counts = {};
+  for (const name of MODEL_NAMES) {
+    const payload = budgetManuscript(name);
+    const pairs = pairSegments(payload.source, payload.target);
+    assert.equal(pairs.length, payload.segments.length, name);
+    pairs.forEach((p, i) => {
+      const r = payload.segments[i];
+      assert.deepEqual([r.source_start, r.source_end, r.target_start, r.target_end], [p.source.core_start, p.source.core_end, p.target.core_start, p.target.core_end], `${name} record ${i}`);
+    });
     const content = canonicalV3(payload, { maxBytes: Infinity });
-    sizes[kind] = Buffer.byteLength(content, 'utf8');
-    if (sizes[kind] > MAX_V3_BYTES) {
-      assert.throws(() => canonicalV3(payload), { code: 'workfile_too_large' }, kind);
+    counts[name] = payload.segments.length;
+    sizes[name] = Buffer.byteLength(content, 'utf8');
+    if (sizes[name] > MAX_V3_BYTES) {
+      assert.throws(() => canonicalV3(payload), { code: 'workfile_too_large' }, name);
     } else {
-      assert.equal(canonicalV3(payload), content, kind);
-      assert.doesNotThrow(() => readV3(content), kind);
+      assert.equal(canonicalV3(payload), content, name);
+      assert.doesNotThrow(() => readV3(content), name);
     }
+    console.log(`manuscript-v3 size model ${name}: ${counts[name]} segments, ${(sizes[name] / MiB).toFixed(2)} MiB`);
   }
-  const extremeResult = Buffer.byteLength(JSON.stringify(budgetManuscript('extreme').segments[0].result), 'utf8');
+  const extremeResult = Buffer.byteLength(JSON.stringify(budgetManuscript('extreme-512').segments[0].result), 'utf8');
   assert.ok(extremeResult <= REVIEW_MAX_JSON_BYTES && extremeResult > REVIEW_MAX_JSON_BYTES - 64, `extreme result ${extremeResult} bytes`);
-  console.log(`manuscript-v3 size models (MiB): ${MODEL_KINDS.map(kind => `${kind} ${(sizes[kind] / MiB).toFixed(2)}`).join(', ')}`);
-  assert.ok(sizes.limit * 1.25 <= MAX_V3_BYTES);
+  assert.ok(sizes['limit-512'] * 1.25 <= MAX_V3_BYTES);
+  assert.ok(counts['zh-en-x3-100k'] <= 512, `${counts['zh-en-x3-100k']} segments`);
+});
+
+test('i. valid-v3-over-1mib.json is over 1 MiB, its v1/v2 part is too, and it has at most 512 segments', () => {
+  const content = read('valid-v3-over-1mib.json');
+  const x = readV3(content);
+  assert.ok(Buffer.byteLength(content, 'utf8') > MiB);
+  const part = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]])) });
+  assert.ok(Buffer.byteLength(part, 'utf8') > MiB);
+  assert.ok(x.segments.length <= 512);
+  assert.equal(x.segments.filter(r => r.status === 'done').length, 2);
+  assert.throws(() => parseWorkfile(part), { code: 'workfile_too_large' });
 });
