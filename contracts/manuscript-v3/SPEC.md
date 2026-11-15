@@ -648,8 +648,16 @@ rest. v1 and v2 files themselves stay pretty-printed, exactly as today.
    when it matches. Allowed difference: a client may re-check such a segment in one
    request with the confirmed choices as resolutions (Web), or first without
    resolutions and then once more with the choices that were confirmed before the edit
-   and still match (two requests). Only the request count differs; the file written
+   and still match (two requests). Only the request count may differ; the file written
    after the run is the same.
+
+   A still-matching unconfirmed choice is confirmed by step 7 instead, identically in
+   both clients, in these cases:
+   1. the first check of a reopened manuscript while the session has no basis yet,
+      whether or not the segment was edited;
+   2. a basis that changed between the edit and the re-check;
+   3. the request without resolutions that a client sends after Core refuses a request
+      with resolutions (HTTP 400, `invalid_request`).
 7. **Realignment** is by occurrence and candidate, against the new result:
    - An `official_pair` is kept if the finding at the same source span still has a
      candidate with the same `candidate_id`, `zh`, `en` and `category`.

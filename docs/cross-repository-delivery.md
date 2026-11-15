@@ -12,15 +12,16 @@ pins a Web commit independently. A passing pair proves compatibility for those
 two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
-Current pins: `contracts/windows-ref.txt` is `760ef34b50d455d39a35bd6585edd049adba8702`
-(WuwaTerm-Windows PR #19, which reads and writes `wuwaterm-manuscript-v3`; raised from
-`9010190cd8dfbbb75c241a4caf21bacabc10826c`, PR #3, v2). The Web and Windows manuscript
-contract test exchanges v2 and v3 files in both directions: every valid
-`contracts/manuscript-v2/` and `contracts/manuscript-v3/` fixture is read alike by both and
-written back to its canonical bytes, every invalid fixture is rejected by both with its
-code, the explicit-alignments fixture gets the same alignment input digests, and a long
-manuscript with choices and progress, built by each client's own runtime, gives the same
-v3 bytes and is kept unchanged by the other. `contracts/backend-ref.txt`
+Current pins: `contracts/windows-ref.txt` is `e8880eb27b6117ff30d3bf134022303fe5f1a441`
+(WuwaTerm-Windows PR #20, the target-only-edit rule on top of PR #19, which reads and writes
+`wuwaterm-manuscript-v3`; raised from `9010190cd8dfbbb75c241a4caf21bacabc10826c`, PR #3,
+v2). The Web and Windows manuscript contract test exchanges v2 and v3 files in both
+directions: every valid `contracts/manuscript-v2/` and `contracts/manuscript-v3/` fixture is
+read alike by both and written back to its canonical bytes, every invalid fixture is
+rejected by both with its code, the explicit-alignments fixture gets the same alignment
+input digests, and a long manuscript with choices, a target-only edit and progress, built
+by each client's own runtime, gives the same v3 bytes and is kept unchanged by the other.
+`contracts/backend-ref.txt`
 is `d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core PR #199, the semantic review engine:
 semantic review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
 `translation-context-v1` is always listed when a model is configured). It was raised from

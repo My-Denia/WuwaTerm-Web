@@ -74,32 +74,46 @@ def build_v2(module):
 def build_v3(module, scenario):
     # A long manuscript run through the Windows client's own segment runtime, not read from a Web file:
     # the probe on segment 0, a check of segment 1, a term choice in each, a re-check of segment 0 with
-    # its resolution, and the user's position and finished marks.
+    # its resolution; then a second choice in segment 0 that a changed result unconfirms and that matches
+    # again; a target-only edit of segment 0 and its re-check; and the user's position and finished marks.
     records = importlib.import_module('wuwaterm_client.segment_records')
     segmentation = importlib.import_module('wuwaterm_client.segmentation')
     payload = {'source': scenario['source'], 'target': scenario['target'], 'direction': 'en', 'alignments': None,
                'choices': [], 'history': [], 'semantic_decisions': [], 'semantic_texts': [], 'semantic_history': []}
-    payload = records.with_parts(payload, records.normalize(payload, segmentation.pair_segments(payload['source'], payload['target'])))
-    candidate, size = scenario['candidate'], len(scenario['candidate']['zh'])
+    pairs = lambda value: segmentation.pair_segments(value['source'], value['target'])
+    payload = records.with_parts(payload, records.normalize(payload, pairs(payload)))
+    candidate, extra, size = scenario['candidate'], scenario['extra'], len(scenario['candidate']['zh'])
     state = {'payload': payload, 'basis': None}
 
-    def report(index):
+    def second(core, text):
+        return core.index(text, core.index(text) + 1)
+
+    def report(index, variant):
         record = records.parts_of(state['payload']).segments[index]
+        source_core = state['payload']['source'][record['source_start']:record['source_end']]
         target_core = state['payload']['target'][record['target_start']:record['target_end']]
-        at = target_core.index(candidate['en'])
-        result = {'truncated': False, 'evaluated': 1, 'not_evaluated': 0, 'findings': [{
-            'verdict': 'verified_constraint', 'source': [0, size], 'target': [at, at + len(candidate['en'])],
-            'candidates': [candidate], 'candidates_truncated': False}]}
+        at, again = target_core.index(candidate['en']), second(target_core, candidate['en'])
+        both = [candidate, extra] if variant == 'extra' else [candidate]
+        found = lambda s, t, c: {'verdict': 'verified_constraint', 'source': [s, s + size], 'target': [t, t + len(candidate['en'])],
+                                 'candidates': c, 'candidates_truncated': False}
+        s2 = second(source_core, candidate['zh'])
+        result = {'truncated': False, 'evaluated': 2, 'not_evaluated': 0,
+                  'findings': [found(0, at, [candidate]), found(s2, again, both)]}
         value = records.expand_result({**record, 'basis': scenario['basis'], 'result': result},
                                       state['payload']['source'], state['payload']['target'])
         return {**value, 'request_id': 'windows-built'}
 
-    def check(index):
-        request = records.plan_request(state['payload'], index, state['basis'])
-        applied = records.apply_response(state['payload'], request, report(index), state['basis'])
-        if applied.outcome != 'stored' or applied.again:
-            raise RuntimeError('unexpected outcome ' + applied.outcome)
-        state['payload'], state['basis'] = records.with_parts(state['payload'], applied.parts), applied.basis
+    def check(index, variants=()):
+        # One segment check as the client runs it: the planned request, then again while the runtime asks for it.
+        for n in range(3):
+            request = records.plan_request(state['payload'], index, state['basis'])
+            applied = records.apply_response(state['payload'], request, report(index, variants[n] if n < len(variants) else None), state['basis'])
+            if applied.outcome != 'stored':
+                raise RuntimeError('unexpected outcome ' + applied.outcome)
+            state['payload'], state['basis'] = records.with_parts(state['payload'], applied.parts), applied.basis
+            if not applied.again:
+                return n + 1
+        raise RuntimeError('the check did not settle')
 
     def choose(*args):
         state['payload'] = records.with_parts(state['payload'], records.choose(state['payload'], *args))
@@ -109,9 +123,19 @@ def build_v3(module, scenario):
     choose(0, 0, size, 'official_pair', candidate['candidate_id'])
     choose(1, 0, size, 'not_a_term')
     check(0)
+    s2 = second(state['payload']['source'], candidate['zh'])
+    choose(0, s2, s2 + size, 'not_a_term')
+    check(0, ['extra'])
+    # A target-only edit of segment 0, as the editor reports it, then normalized to the new pairing.
+    before, (old, new) = state['payload']['target'], scenario['target_edit']
+    start = before.index(old)
+    parts = records.apply_edit(records.parts_of(state['payload']), before, 'target', start, start + len(old), len(new))
+    edited = records.with_parts({**state['payload'], 'target': before.replace(old, new, 1)}, parts)
+    state['payload'] = records.with_parts(edited, records.normalize(edited, pairs(edited), state['basis']))
+    requests = check(0)
     parts = records.parts_of(state['payload'])
     payload = records.with_parts(state['payload'], parts._replace(progress={'current': 1, 'completed': [0, 1]}))
-    return {'payload': payload, 'content': module.serialize_workfile(payload)}
+    return {'content': module.serialize_workfile(payload), 'edit_requests': requests}
 
 
 def v3_runtime(operation, payload):
@@ -385,60 +409,88 @@ test('Windows computes the stored alignment input digest of the explicit-alignme
 
 // Three synthetic paragraphs per side, each starting with the term: a long manuscript of three ready segments.
 const SCENARIO = (() => {
-  const zh = i => `今汐在第${i}段。${Array.from({ length: 80 }, (_, k) => `第${i}段第${k + 1}句是合成句子。`).join('')}`;
-  const en = i => `Jinhsi is in paragraph ${i}. ${Array.from({ length: 34 }, (_, k) => `Paragraph ${i} line ${k + 1} is synthetic.`).join(' ')}`;
+  const zh = i => `今汐在第${i}段。今汐又来了。${Array.from({ length: 80 }, (_, k) => `第${i}段第${k + 1}句是合成句子。`).join('')}`;
+  const en = i => `Jinhsi is in paragraph ${i}. Jinhsi came back. ${Array.from({ length: 34 }, (_, k) => `Paragraph ${i} line ${k + 1} is synthetic.`).join(' ')}`;
   return {
     source: [1, 2, 3].map(zh).join('\n\n'), target: [1, 2, 3].map(en).join('\n\n'),
     candidate: { candidate_id: hash('candidate-jinhsi'), zh: '今汐', en: 'Jinhsi', category: 'character' },
+    // A second candidate that one response offers at the second occurrence, which unconfirms the not_a_term chosen there.
+    extra: { candidate_id: hash('candidate-jinhsi-extra'), zh: '今汐', en: 'Jinhsi Prime', category: 'character' },
     basis: { rule_version: 'review-v2', dictionary: { ...dictionary }, matcher_revision: FRESH_MATCHER_REVISION },
+    target_edit: ['Paragraph 1 line 1 is synthetic.', 'Paragraph 1 line 1 is still synthetic.'],
   };
 })();
 
 /** The same steps as build_v3 in the bridge, through the Web runtime (lib/long-review.js). */
-function webBuiltV3({ source, target, candidate, basis: responseBasis }) {
-  const draft = { source, target, direction: 'en', alignments: null };
+function webBuiltV3({ source, target, candidate, extra, basis: responseBasis, target_edit: [old, replacement] }) {
+  let draft = { source, target, direction: 'en', alignments: null };
   let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
   let basis = null;
-  const report = index => {
+  const second = (core, text) => core.indexOf(text, core.indexOf(text) + 1);
+  const report = (index, variant) => {
     const it = L.segmentInputs(draft).items[index];
-    const at = it.targetCore.indexOf(candidate.en);
-    const result = { truncated: false, evaluated: 1, not_evaluated: 0, findings: [{ verdict: 'verified_constraint', source: [0, 2],
-      target: [at, at + candidate.en.length], candidates: [candidate], candidates_truncated: false }] };
+    const found = (s, t, candidates) => ({ verdict: 'verified_constraint', source: [s, s + candidate.zh.length], target: [t, t + candidate.en.length],
+      candidates, candidates_truncated: false });
+    const result = { truncated: false, evaluated: 2, not_evaluated: 0, findings: [
+      found(0, it.targetCore.indexOf(candidate.en), [candidate]),
+      found(second(it.sourceCore, candidate.zh), second(it.targetCore, candidate.en), variant === 'extra' ? [candidate, extra] : [candidate]),
+    ] };
     return { ...L.expandResult({ source_hash: it.sourceHash, target_hash: it.targetHash, basis: responseBasis, result }, it.sourceCore, it.targetCore), request_id: 'web-built' };
   };
-  const check = index => {
-    const ctx = { draft, basis };
-    const request = L.segmentRequest(long, index, ctx, { withResolutions: L.recheckPlan(long, index, ctx) === 'with_resolutions' });
-    const out = L.applyResult(long, ctx, request, report(index));
-    assert.deepEqual([out.error, out.secondRequest], [null, false]);
-    ({ long, basis } = out);
+  // One segment check as the workbench runs it: the planned request, then at most one more when applyResult asks for it.
+  const check = (index, variants = []) => {
+    for (let n = 0; n < 2; n += 1) {
+      const ctx = { draft, basis };
+      const request = L.segmentRequest(long, index, ctx, { withResolutions: n > 0 || L.recheckPlan(long, index, ctx) === 'with_resolutions' });
+      const out = L.applyResult(long, ctx, request, report(index, variants[n]));
+      assert.equal(out.error, null);
+      ({ long, basis } = out);
+      if (!out.secondRequest) return n + 1;
+    }
+    assert.fail('the check did not settle');
   };
-  const choose = (index, picked) => { long = L.chooseTerm(long, { index, finding: { source: [0, 2] }, candidate: picked }, { draft, basis }).long; };
+  const choose = (index, start, picked) => {
+    long = L.chooseTerm(long, { index, finding: { source: [start, start + candidate.zh.length] }, candidate: picked }, { draft, basis }).long;
+  };
   check(0);
   check(1);
-  choose(0, candidate);
-  choose(1, null);
+  choose(0, 0, candidate);
+  choose(1, 0, null);
   check(0);
+  choose(0, second(source, candidate.zh), null);
+  check(0, ['extra']);
+  // A target-only edit of segment 0, then its re-check under the same basis.
+  const edited = { ...draft, target: draft.target.replace(old, replacement) };
+  long = L.reconcileLong(long, draft, edited);
+  draft = edited;
+  const requests = check(0);
   long = L.setFinished(L.setFinished(L.setCurrent(long, 1), 0, true), 1, true);
-  return serializeWorkfile({ ...draft, choices: [], history: [], semantic_decisions: [], semantic_texts: [], semantic_history: [], ...L.workfileParts(long, draft, { basis }) });
+  const content = serializeWorkfile({ ...draft, choices: [], history: [], semantic_decisions: [], semantic_texts: [], semantic_history: [], ...L.workfileParts(long, draft, { basis }) });
+  return { content, requests };
 }
 
-test('a long manuscript with choices and progress: Web and Windows write the same v3 bytes and keep each other\'s file', () => {
-  const webFile = webBuiltV3(SCENARIO);
+test('a long manuscript with choices, a target-only edit and progress: Web and Windows write the same v3 bytes and keep each other\'s file', () => {
+  const web = webBuiltV3(SCENARIO);
   const built = windows({ operation: 'build_v3', scenario: SCENARIO }).result;
-  assert.equal(JSON.parse(webFile).format, WORKFILE_FORMAT_V3);
-  assert.equal(built.content, webFile, 'the same runtime steps give different files');
+  assert.equal(JSON.parse(web.content).format, WORKFILE_FORMAT_V3);
+  assert.equal(built.content, web.content, 'the same runtime steps give different files');
+  // SPEC step 6: after the target-only edit only the request count may differ (Web 1, a realigning client 2).
+  assert.equal(web.requests, 1);
+  assert.ok([1, 2].includes(built.edit_requests), `${built.edit_requests} requests`);
   const parsed = parseWorkfile(built.content);
   assert.deepEqual(parsed.segments.map(r => r.status), ['done', 'stale', 'pending']);
-  assert.deepEqual(parsed.segments.map(r => r.choices.map(c => [c.choice, c.confirmed])), [[['official_pair', true]], [['not_a_term', true]], []]);
+  // The not_a_term at the second occurrence matches again but was unconfirmed before the edit, so it stays unconfirmed.
+  assert.deepEqual(parsed.segments.map(r => r.choices.map(c => [c.choice, c.source_span.start, c.confirmed])),
+    [[['official_pair', 0, true], ['not_a_term', 7, false]], [['not_a_term', 0, true]], []]);
+  assert.ok(parsed.target.includes(SCENARIO.target_edit[1]));
   assert.deepEqual(parsed.progress, { current: 1, completed: [0, 1] });
   // Web opens the Windows file through its runtime and writes it back byte for byte.
   const long = L.longFromWorkfile(parsed);
   assert.equal(serializeWorkfile({ ...parsed, ...L.workfileParts(long, draftOf(parsed), { basis: null }) }), built.content);
   // Windows reads the Web file as Web does, its normalize keeps every record, and it writes the file back byte for byte.
-  const fromWindows = windows({ operation: 'parse', content: webFile });
-  assert.deepEqual(fromWindows.result, parseWorkfile(webFile));
+  const fromWindows = windows({ operation: 'parse', content: web.content });
+  assert.deepEqual(fromWindows.result, parseWorkfile(web.content));
   assert.deepEqual(windows({ operation: 'normalize', payload: fromWindows.result }).result,
     { segments: parsed.segments, segment_choice_history: parsed.segment_choice_history, progress: parsed.progress });
-  assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, webFile);
+  assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, web.content);
 });
