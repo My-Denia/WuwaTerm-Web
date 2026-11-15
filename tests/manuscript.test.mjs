@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_WORKFILE_BYTES, basisOf, compareReports, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
+import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
 import { fixture, hash } from './fixtures/manuscript.mjs';
 const choiceFor = (s, i = 0, c = s.report.findings[i].candidates[0]) => makeChoice({ ...s, finding: s.report.findings[i], candidate: c });
 const clean = s => { const { source, target, direction, alignments, report, resolutions } = s; return { source, target, direction, alignments, report, resolutions }; };
@@ -13,7 +13,12 @@ test('a long translation can be saved and reopened intact before being split for
   assert.equal(restored.source, draft.source);
   assert.equal(restored.target, draft.target);
   assert.deepEqual(restored.history, []);
-  assert.throws(() => serializeWorkfile({ ...draft, target: 'a'.repeat(MAX_WORKFILE_BYTES) }), { code: 'workfile_too_large' });
+  // manuscript-v3 SPEC "Writing", rule 2: over 1 MiB the work is saved as v3; only over 44 MiB does the save fail.
+  const large = { ...draft, target: 'a'.repeat(MAX_WORKFILE_BYTES) };
+  const v3 = serializeWorkfile(large);
+  assert.equal(JSON.parse(v3).format, WORKFILE_FORMAT_V3);
+  assert.equal(parseWorkfile(v3).target, large.target);
+  assert.throws(() => serializeWorkfile({ ...draft, target: 'a'.repeat(MAX_V3_WORKFILE_BYTES) }), { code: 'workfile_too_large' });
 });
 
 test('local workfile roundtrip preserves Unicode, direction, per-occurrence decisions and history without trusted status', () => {

@@ -322,21 +322,30 @@ async function ignored(source, target, n) {
 }
 
 test('semanticTextsWithinBudget keeps only needed, non-current texts and drops the oldest until the file fits', async () => {
-  const big = c => `${c}${'x'.repeat(430_000)}`;
-  const [a, b, c, old] = [big('A'), big('B'), big('C'), 'old short text'];
-  const d1 = await ignored(a, b, 1);
-  const d2 = await ignored(c, old, 2);
+  const entry = async text => ({ revision: await revisionOf(text), text });
   const accepted = await makeSemanticDecision({ issue: { id: '3'.repeat(32), fingerprint: 'f'.repeat(32), category: 'omission', segment_index: 0, source_span: { start: 0, end: 1, text: 'x' }, target_span: null },
     segmentIndex: 0, source: 'unrelated source', target: 'unrelated target', termBasis: TB, decision: 'accepted', appliedText: 'y' });
-  const payload = { source: 'current source', target: 'current target', direction: 'en', alignments: null, choices: [], history: [],
-    semantic_decisions: [d1, d2, accepted], semantic_texts: [], semantic_history: [] };
-  const entry = async text => ({ revision: await revisionOf(text), text });
-  const candidates = [await entry(a), await entry(b), await entry(c), await entry(old), await entry('unrelated source'), await entry('current source')];
-  const { texts, dropped } = semanticTextsWithinBudget({ payload, candidates, currentTexts: { source: 'current source', target: 'current target' } });
-  // oldest first out: old, then c, until A+B (860 KB) fit
-  assert.deepEqual(texts.map(t => t.text === a ? 'a' : t.text === b ? 'b' : '?'), ['a', 'b']);
-  assert.equal(dropped, 2);
-  assert.equal(parseWorkfile(serializeWorkfile({ ...payload, semantic_texts: texts })).semantic_texts.length, 2);
+  const plan = async size => {
+    const big = c => `${c}${'x'.repeat(size)}`;
+    const [a, b, c, old] = [big('A'), big('B'), big('C'), 'old short text'];
+    const payload = { source: 'current source', target: 'current target', direction: 'en', alignments: null, choices: [], history: [],
+      semantic_decisions: [await ignored(a, b, 1), await ignored(c, old, 2), accepted], semantic_texts: [], semantic_history: [] };
+    const candidates = [await entry(a), await entry(b), await entry(c), await entry(old), await entry('unrelated source'), await entry('current source')];
+    const out = semanticTextsWithinBudget({ payload, candidates, currentTexts: { source: 'current source', target: 'current target' } });
+    const name = t => ({ [a]: 'a', [b]: 'b', [c]: 'c', [old]: 'old' })[t.text] ?? '?';
+    return { ...out, payload, names: out.texts.map(name) };
+  };
+  // manuscript-v3 SPEC "Writing", rule 2: texts over 1 MiB in total no longer have to go; the file is saved as v3 instead.
+  const kept = await plan(430_000);
+  assert.deepEqual(kept.names, ['a', 'b', 'c', 'old']);
+  assert.equal(kept.dropped, 0);
+  assert.equal(parseWorkfile(serializeWorkfile({ ...kept.payload, semantic_texts: kept.texts })).format, 'wuwaterm-manuscript-v3');
+  // Over the 44 MiB v3 cap the oldest go first: old, then c, until A+B (32 MB) fit.
+  const trimmed = await plan(16_000_000);
+  assert.deepEqual(trimmed.names, ['a', 'b']);
+  assert.equal(trimmed.dropped, 2);
+  assert.equal(parseWorkfile(serializeWorkfile({ ...trimmed.payload, semantic_texts: trimmed.texts })).semantic_texts.length, 2);
+  const { payload } = kept;
   // current texts are never stored
   const current = semanticTextsWithinBudget({ payload: { ...payload, semantic_decisions: [await ignored('current source', 'current target', 4)] },
     candidates: [await entry('current source'), await entry('current target')], currentTexts: { source: 'current source', target: 'current target' } });

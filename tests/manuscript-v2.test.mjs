@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { MAX_WORKFILE_BYTES, WORKFILE_FORMAT, WORKFILE_FORMAT_V2, makeChoice, parseWorkfile, semanticPartsOf, serializeWorkfile } from '../lib/manuscript.js';
+import { MAX_WORKFILE_BYTES, WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, makeChoice, parseWorkfile, semanticPartsOf, serializeWorkfile } from '../lib/manuscript.js';
 import { buildSemanticTexts, makeSemanticDecision, reconcileSemanticDecisions, toDocumentIssue } from '../lib/semantic-decisions.js';
 import { revisionOf } from '../lib/review-report.js';
 import { buildFixtures } from '../scripts/build-manuscript-v2-fixtures.mjs';
@@ -54,7 +54,7 @@ test('the fixture generator output equals the committed bytes', async () => {
   for (const [name, content] of files) assert.equal(read(name), content, name);
 });
 
-test('history is trimmed oldest-first over 1 MiB while decisions survive; decisions alone over the cap throw', () => {
+test('history is trimmed oldest-first over 1 MiB while decisions survive; a v2 payload still over 1 MiB is saved as v3', () => {
   const snapshot = (text) => ({ ...valid.semantic_history[0], source: text + valid.source, segments: valid.semantic_history[0].segments.map(s => ({ ...s, source_start: Array.from(text).length, source_end: Array.from(text).length + 5 })) });
   const first = snapshot('一'.repeat(400_000)); const second = snapshot('二'.repeat(10));
   assert.ok(new TextEncoder().encode(JSON.stringify(first)).length > 1_100_000);
@@ -64,7 +64,11 @@ test('history is trimmed oldest-first over 1 MiB while decisions survive; decisi
   assert.equal(parsed.semantic_history.length, 1);
   assert.equal(parsed.semantic_history[0].source.startsWith('二'), true);
   assert.equal(parsed.semantic_decisions.length, 3);
-  assert.throws(() => serializeWorkfile({ ...valid, source: 'a'.repeat(MAX_WORKFILE_BYTES) }), { code: 'workfile_too_large' });
+  // manuscript-v3 SPEC "Writing", rule 2: when the v2 writer's output (after its trimming) still exceeds 1 MiB, the file is v3
+  // and keeps every decision; nothing is truncated to stay under 1 MiB.
+  const large = parseWorkfile(serializeWorkfile({ ...valid, source: 'a'.repeat(MAX_WORKFILE_BYTES) }));
+  assert.equal(large.format, WORKFILE_FORMAT_V3);
+  assert.equal(large.semantic_decisions.length, valid.semantic_decisions.length);
 });
 
 test('an unreferenced semantic text is dropped by the writer', () => {
