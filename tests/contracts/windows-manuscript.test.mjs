@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
-import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
+import * as L from '../../lib/long-review.js';
+import { FRESH_MATCHER_REVISION, dictionary, fixture, freshApiReport, hash } from '../fixtures/manuscript.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
 
 const windowsRoot = requireWindowsRoot();
@@ -68,6 +69,61 @@ def build_v2(module):
         'semantic_history': [{'source': source, 'target': old_target, 'direction': 'en', 'segments': [{
             'segment_index': 0, 'source_start': 0, 'source_end': 5, 'target_start': 0, 'target_end': 21, 'report': report}]}]}
     return {'payload': payload, 'content': module.serialize_workfile(payload)}
+
+
+def build_v3(module, scenario):
+    # A long manuscript run through the Windows client's own segment runtime, not read from a Web file:
+    # the probe on segment 0, a check of segment 1, a term choice in each, a re-check of segment 0 with
+    # its resolution, and the user's position and finished marks.
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    payload = {'source': scenario['source'], 'target': scenario['target'], 'direction': 'en', 'alignments': None,
+               'choices': [], 'history': [], 'semantic_decisions': [], 'semantic_texts': [], 'semantic_history': []}
+    payload = records.with_parts(payload, records.normalize(payload, segmentation.pair_segments(payload['source'], payload['target'])))
+    candidate, size = scenario['candidate'], len(scenario['candidate']['zh'])
+    state = {'payload': payload, 'basis': None}
+
+    def report(index):
+        record = records.parts_of(state['payload']).segments[index]
+        target_core = state['payload']['target'][record['target_start']:record['target_end']]
+        at = target_core.index(candidate['en'])
+        result = {'truncated': False, 'evaluated': 1, 'not_evaluated': 0, 'findings': [{
+            'verdict': 'verified_constraint', 'source': [0, size], 'target': [at, at + len(candidate['en'])],
+            'candidates': [candidate], 'candidates_truncated': False}]}
+        value = records.expand_result({**record, 'basis': scenario['basis'], 'result': result},
+                                      state['payload']['source'], state['payload']['target'])
+        return {**value, 'request_id': 'windows-built'}
+
+    def check(index):
+        request = records.plan_request(state['payload'], index, state['basis'])
+        applied = records.apply_response(state['payload'], request, report(index), state['basis'])
+        if applied.outcome != 'stored' or applied.again:
+            raise RuntimeError('unexpected outcome ' + applied.outcome)
+        state['payload'], state['basis'] = records.with_parts(state['payload'], applied.parts), applied.basis
+
+    def choose(*args):
+        state['payload'] = records.with_parts(state['payload'], records.choose(state['payload'], *args))
+
+    check(0)
+    check(1)
+    choose(0, 0, size, 'official_pair', candidate['candidate_id'])
+    choose(1, 0, size, 'not_a_term')
+    check(0)
+    parts = records.parts_of(state['payload'])
+    payload = records.with_parts(state['payload'], parts._replace(progress={'current': 1, 'completed': [0, 1]}))
+    return {'payload': payload, 'content': module.serialize_workfile(payload)}
+
+
+def v3_runtime(operation, payload):
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    if operation == 'alignment_inputs':
+        return [records.alignment_input(payload['alignments'], payload['source'], payload['target'],
+                                        (r['source_start'], r['source_end']), (r['target_start'], r['target_end']))
+                for r in payload['segments']]
+    pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
+    parts = records.normalize(payload, pairs)
+    return {'segments': parts.segments, 'segment_choice_history': parts.history, 'progress': parts.progress}
 try:
     if request['operation'] == 'parse':
         result = module.parse_workfile(request['content'])
@@ -75,6 +131,10 @@ try:
         result = module.serialize_workfile(request['payload'])
     elif request['operation'] == 'build_v2':
         result = build_v2(module)
+    elif request['operation'] == 'build_v3':
+        result = build_v3(module, request['scenario'])
+    elif request['operation'] in ('alignment_inputs', 'normalize'):
+        result = v3_runtime(request['operation'], request['payload'])
     elif request['operation'] == 'groups':
         result = module.choice_conflict_groups(request['payload'])
     else:
@@ -88,7 +148,8 @@ json.dump(response, sys.stdout, ensure_ascii=False)
 function windows(request) {
   const result = spawnSync(process.env.WUWATERM_CONTRACT_PYTHON || 'python3',
     ['-I', '-B', '-c', pythonBridge, manuscriptPath],
-    { input: JSON.stringify(request), encoding: 'utf8', timeout: 30000 });
+    // A v3 file may be 44 MiB, so the pipes and the clock allow for one.
+    { input: JSON.stringify(request), encoding: 'utf8', timeout: 120000, maxBuffer: 256 * 1024 * 1024 });
   assert.equal(result.status, 0, `Windows manuscript process failed: ${result.error || result.stderr}`);
   const response = JSON.parse(result.stdout);
   assert.equal(response.format, WORKFILE_FORMAT, 'Windows and Web manuscript versions differ');
@@ -275,4 +336,109 @@ test('both consumers reject every invalid v2 fixture', () => {
   }
   // Both reject; the error code must match where the two ports define the same limit.
   assert.deepEqual(differing, [], 'Web and Windows report different codes for the same invalid file');
+});
+
+// ---- Manuscript v3: both directions -------------------------------------------------
+
+const v3Dir = fileURLToPath(new URL('../../contracts/manuscript-v3/', import.meta.url));
+const v3Cases = JSON.parse(readFileSync(join(v3Dir, 'cases.json'), 'utf8'));
+const readV3 = file => readFileSync(join(v3Dir, file), 'utf8');
+const contentOf = c => (c.pad_to_bytes ? readV3(c.file) + ' '.repeat(c.pad_to_bytes - Buffer.byteLength(readV3(c.file), 'utf8')) : readV3(c.file));
+const draftOf = x => ({ source: x.source, target: x.target, direction: x.direction, alignments: x.alignments });
+
+test('every valid v3 fixture is read alike by Web and Windows, and both write back its canonical bytes', () => {
+  for (const c of v3Cases.valid) {
+    const content = contentOf(c);
+    const web = parseWorkfile(content);
+    const fromWindows = windows({ operation: 'parse', content });
+    assert.ok(fromWindows.result, `${c.file}: Windows rejected it (${fromWindows.error})`);
+    assert.deepEqual(fromWindows.result, web, `${c.file}: Windows parse differs from Web parse`);
+    const canonical = readV3(c.canonical);
+    assert.equal(serializeWorkfile(web), canonical, `${c.file}: Web bytes`);
+    assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, canonical, `${c.file}: Windows bytes`);
+  }
+});
+
+test('both consumers reject every invalid v3 fixture with its code, including 129 decisions in the v2 part', () => {
+  assert.ok(v3Cases.invalid.some(c => c.file === 'invalid-v3-129-decisions.json' && c.error === 'workfile_too_many_entries'));
+  const differing = [];
+  for (const c of v3Cases.invalid) {
+    const content = contentOf(c);
+    let web = null;
+    try { parseWorkfile(content); } catch (cause) { web = cause.code; }
+    const fromWindows = windows({ operation: 'parse', content }).error ?? null;
+    if (web !== c.error || fromWindows !== c.error) differing.push(`${c.file}: expected ${c.error}, Web ${web}, Windows ${fromWindows}`);
+  }
+  assert.deepEqual(differing, []);
+});
+
+test('Windows computes the stored alignment input digest of the explicit-alignments fixture, as Web does', () => {
+  const x = parseWorkfile(readV3('valid-v3-explicit-alignments.json'));
+  assert.ok(Array.isArray(x.alignments) && x.alignments.length > 0);
+  const web = x.segments.map(r => L.alignmentInput(x.alignments, x.source, x.target, r));
+  assert.ok(web.every(value => /^[0-9a-f]{64}$/u.test(value)));
+  assert.deepEqual(windows({ operation: 'alignment_inputs', payload: x }).result, web);
+  const live = x.segments.filter(r => r.status !== 'pending');
+  assert.ok(live.length > 0);
+  for (const r of live) assert.equal(r.alignment_input, web[r.index], `record ${r.index}`);
+});
+
+// Three synthetic paragraphs per side, each starting with the term: a long manuscript of three ready segments.
+const SCENARIO = (() => {
+  const zh = i => `今汐在第${i}段。${Array.from({ length: 80 }, (_, k) => `第${i}段第${k + 1}句是合成句子。`).join('')}`;
+  const en = i => `Jinhsi is in paragraph ${i}. ${Array.from({ length: 34 }, (_, k) => `Paragraph ${i} line ${k + 1} is synthetic.`).join(' ')}`;
+  return {
+    source: [1, 2, 3].map(zh).join('\n\n'), target: [1, 2, 3].map(en).join('\n\n'),
+    candidate: { candidate_id: hash('candidate-jinhsi'), zh: '今汐', en: 'Jinhsi', category: 'character' },
+    basis: { rule_version: 'review-v2', dictionary: { ...dictionary }, matcher_revision: FRESH_MATCHER_REVISION },
+  };
+})();
+
+/** The same steps as build_v3 in the bridge, through the Web runtime (lib/long-review.js). */
+function webBuiltV3({ source, target, candidate, basis: responseBasis }) {
+  const draft = { source, target, direction: 'en', alignments: null };
+  let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
+  let basis = null;
+  const report = index => {
+    const it = L.segmentInputs(draft).items[index];
+    const at = it.targetCore.indexOf(candidate.en);
+    const result = { truncated: false, evaluated: 1, not_evaluated: 0, findings: [{ verdict: 'verified_constraint', source: [0, 2],
+      target: [at, at + candidate.en.length], candidates: [candidate], candidates_truncated: false }] };
+    return { ...L.expandResult({ source_hash: it.sourceHash, target_hash: it.targetHash, basis: responseBasis, result }, it.sourceCore, it.targetCore), request_id: 'web-built' };
+  };
+  const check = index => {
+    const ctx = { draft, basis };
+    const request = L.segmentRequest(long, index, ctx, { withResolutions: L.recheckPlan(long, index, ctx) === 'with_resolutions' });
+    const out = L.applyResult(long, ctx, request, report(index));
+    assert.deepEqual([out.error, out.secondRequest], [null, false]);
+    ({ long, basis } = out);
+  };
+  const choose = (index, picked) => { long = L.chooseTerm(long, { index, finding: { source: [0, 2] }, candidate: picked }, { draft, basis }).long; };
+  check(0);
+  check(1);
+  choose(0, candidate);
+  choose(1, null);
+  check(0);
+  long = L.setFinished(L.setFinished(L.setCurrent(long, 1), 0, true), 1, true);
+  return serializeWorkfile({ ...draft, choices: [], history: [], semantic_decisions: [], semantic_texts: [], semantic_history: [], ...L.workfileParts(long, draft, { basis }) });
+}
+
+test('a long manuscript with choices and progress: Web and Windows write the same v3 bytes and keep each other\'s file', () => {
+  const webFile = webBuiltV3(SCENARIO);
+  const built = windows({ operation: 'build_v3', scenario: SCENARIO }).result;
+  assert.equal(JSON.parse(webFile).format, WORKFILE_FORMAT_V3);
+  assert.equal(built.content, webFile, 'the same runtime steps give different files');
+  const parsed = parseWorkfile(built.content);
+  assert.deepEqual(parsed.segments.map(r => r.status), ['done', 'stale', 'pending']);
+  assert.deepEqual(parsed.segments.map(r => r.choices.map(c => [c.choice, c.confirmed])), [[['official_pair', true]], [['not_a_term', true]], []]);
+  assert.deepEqual(parsed.progress, { current: 1, completed: [0, 1] });
+  // Web opens the Windows file through its runtime and writes it back byte for byte.
+  const long = L.longFromWorkfile(parsed);
+  assert.equal(serializeWorkfile({ ...parsed, ...L.workfileParts(long, draftOf(parsed), { basis: null }) }), built.content);
+  // Windows reads the Web file as Web does, its normalize keeps every record, and it writes the file back byte for byte.
+  const fromWindows = windows({ operation: 'parse', content: webFile });
+  assert.deepEqual(fromWindows.result, parseWorkfile(webFile));
+  assert.deepEqual(windows({ operation: 'normalize', payload: fromWindows.result }).result,
+    { segments: parsed.segments, segment_choice_history: parsed.segment_choice_history, progress: parsed.progress });
+  assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, webFile);
 });

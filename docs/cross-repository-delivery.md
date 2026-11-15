@@ -12,11 +12,15 @@ pins a Web commit independently. A passing pair proves compatibility for those
 two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
-Current pins: `contracts/windows-ref.txt` is `9010190cd8dfbbb75c241a4caf21bacabc10826c`
-(WuwaTerm-Windows PR #3, which reads and writes `wuwaterm-manuscript-v2`), so the Web and
-Windows manuscript contract test now exchanges v2 files in both directions: every valid
-`contracts/manuscript-v2/` fixture, a Web-written file and a Windows-built file are read by
-the other side, and every invalid fixture is rejected by both. `contracts/backend-ref.txt`
+Current pins: `contracts/windows-ref.txt` is `760ef34b50d455d39a35bd6585edd049adba8702`
+(WuwaTerm-Windows PR #19, which reads and writes `wuwaterm-manuscript-v3`; raised from
+`9010190cd8dfbbb75c241a4caf21bacabc10826c`, PR #3, v2). The Web and Windows manuscript
+contract test exchanges v2 and v3 files in both directions: every valid
+`contracts/manuscript-v2/` and `contracts/manuscript-v3/` fixture is read alike by both and
+written back to its canonical bytes, every invalid fixture is rejected by both with its
+code, the explicit-alignments fixture gets the same alignment input digests, and a long
+manuscript with choices and progress, built by each client's own runtime, gives the same
+v3 bytes and is kept unchanged by the other. `contracts/backend-ref.txt`
 is `d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core PR #199, the semantic review engine:
 semantic review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
 `translation-context-v1` is always listed when a model is configured). It was raised from
@@ -46,8 +50,8 @@ its content hashes, request inputs and all six basis values equal the current on
 where the current basis comes from a live review-v2 request
 ([contract](../contracts/manuscript-v3/SPEC.md)).
 
-Web 0.2.0 and Windows 0.4.2 reject v3 files. Cross-client v3 interchange is
-verified once a Windows v3 client is pinned in `contracts/windows-ref.txt`.
+Web 0.2.0 and Windows 0.4.2 reject v3 files. Cross-client v3 interchange is verified
+against the Windows client pinned in `contracts/windows-ref.txt`.
 
 ## Deployment receipt
 
