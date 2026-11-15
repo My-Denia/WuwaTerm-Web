@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { categoryLabel, reasonLabel } from '../../lib/dictionary-labels';
 import { failureDetails, fill, msg } from '../../lib/messages';
+import { CAPABILITY_TRANSLATION_CONTEXT } from '../../lib/semantic-review.js';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
@@ -39,6 +40,8 @@ export function TranslationWorkbench() {
   const translationInput = useRef<HTMLTextAreaElement>(null);
   const sourceFileInput = useRef<HTMLInputElement>(null);
   const sourceFileAttempt = useRef(0);
+  // Whether the service negotiates translation-context-v1; loaded once, awaited by a translation sent before it arrives.
+  const capabilities = useRef<Promise<string[]> | null>(null);
   // Bumped by every action that replaces the editable source or the
   // translation belonging to it (edit, term insert, query move, direction,
   // translate, cancel). A file read that started before a bump is stale: its
@@ -62,6 +65,17 @@ export function TranslationWorkbench() {
     return () => window.removeEventListener(POOL_REFRESH_EVENT, onRefresh);
   }, []);
   useEffect(() => () => { termsController.current?.abort(); translationController.current?.abort(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    capabilities.current = (async () => {
+      try {
+        const response = await fetch(workbenchPath('/api/capabilities'), { cache: 'no-store', signal: controller.signal });
+        const value = await payload(response) as { capabilities?: unknown } | null;
+        return response.ok && Array.isArray(value?.capabilities) ? value.capabilities.filter((x): x is string => typeof x === 'string') : [];
+      } catch { return []; }
+    })();
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const initial = new URLSearchParams(window.location.search).get('q');
@@ -158,7 +172,11 @@ export function TranslationWorkbench() {
     const controller = new AbortController(); translationController.current = controller;
     setCopied(false); setCopyFailed(false); setSourceFileStatus(null); setTranslation({ kind: 'loading' });
     try {
-      const r = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(target === 'auto' ? { text: source } : { text: source, to: target }), signal: controller.signal });
+      // With translation-context-v1 negotiated, context (even {}) makes Core keep the source's paragraphs; without it, none is sent.
+      const known = await (capabilities.current ?? Promise.resolve([]));
+      if (controller.signal.aborted || translationController.current !== controller) return;
+      const context = known.includes(CAPABILITY_TRANSLATION_CONTEXT) ? { context: {} } : {};
+      const r = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(target === 'auto' ? { text: source, ...context } : { text: source, to: target, ...context }), signal: controller.signal });
       const v = await payload(r);
       if (controller.signal.aborted || translationController.current !== controller) return;
       setTranslation(r.ok && isTranslation(v) ? { kind: 'success', data: v } : { kind: 'error', error: failure(v) ? v : FALLBACK });
