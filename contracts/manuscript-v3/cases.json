@@ -13,19 +13,19 @@
     "workfile_duplicate_choices",
     "workfile_segment_invalid",
     "workfile_segment_order",
-    "workfile_segment_hash_mismatch",
-    "workfile_segment_basis_mismatch",
     "workfile_segment_anchor_invalid",
     "workfile_progress_invalid"
   ],
   "limits": {
-    "file_bytes": 16777216,
+    "file_bytes": 12582912,
     "legacy_file_bytes": 1048576,
-    "text_scalars": 16777216,
+    "text_scalars": 12582912,
     "array_items": 128,
     "object_fields": 32,
     "depth": 16,
     "segments": 128,
+    "findings_per_result": 32,
+    "candidates_per_finding": 8,
     "choices_per_record": 32,
     "offered_per_choice": 8,
     "segment_choice_history": 128,
@@ -44,7 +44,7 @@
       "file": "valid-v3-all-parts.json",
       "canonical": "valid-v3-all-parts.json",
       "legacy_error": "workfile_unsupported_format",
-      "note": "three ready segments: pending with a carried choice, done with a verified and a needs_review finding, stale under the previous basis; one history choice; progress"
+      "note": "three ready segments: pending with an unconfirmed choice, done with a verified and a needs_review finding, stale under the previous basis; one history choice; progress"
     },
     {
       "file": "valid-v3-integral-numbers.json",
@@ -56,7 +56,7 @@
       "file": "valid-v3-hash-not-current.json",
       "canonical": "valid-v3-hash-not-current.json",
       "legacy_error": "workfile_unsupported_format",
-      "note": "record 1 hash and report.source_revision agree but differ from the current core: a valid file whose result the runtime treats as not current"
+      "note": "record 1 source_hash differs from the current core: a valid file whose result the runtime treats as not current"
     },
     {
       "file": "valid-v3-with-semantic.json",
@@ -89,6 +89,12 @@
       "note": "128 history choices"
     },
     {
+      "file": "valid-v3-2000-core-8-offered.json",
+      "canonical": "valid-v3-2000-core-8-offered.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a done record with 2,000-scalar cores and a confirmed not_a_term whose finding offers 8 candidates; not a segmentation-v1 result"
+    },
+    {
       "file": "valid-v1.json",
       "canonical": "valid-v1.json",
       "legacy_error": null,
@@ -102,10 +108,10 @@
     },
     {
       "file": "valid-v3-all-parts.json",
-      "pad_to_bytes": 16777216,
+      "pad_to_bytes": 12582912,
       "canonical": "valid-v3-all-parts.json",
       "legacy_error": "workfile_too_large",
-      "note": "padded with spaces to exactly 16 MiB: accepted by a v3 reader; an old client stops at its 1 MiB check"
+      "note": "padded with spaces to exactly 12 MiB: accepted by a v3 reader; an old client stops at its 1 MiB check"
     },
     {
       "file": "valid-v2-all-parts.json",
@@ -118,10 +124,10 @@
   "invalid": [
     {
       "file": "valid-v3-all-parts.json",
-      "pad_to_bytes": 16777217,
+      "pad_to_bytes": 12582913,
       "error": "workfile_too_large",
       "legacy_error": "workfile_too_large",
-      "note": "a v3 file one byte over 16 MiB"
+      "note": "a v3 file one byte over 12 MiB"
     },
     {
       "file": "valid-v2-all-parts.json",
@@ -143,6 +149,18 @@
       "note": "33 choices in one record (32 plus a repeat of the first)"
     },
     {
+      "file": "invalid-v3-33-findings.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "33 findings in one result (the 32-choices file plus one more at another span)"
+    },
+    {
+      "file": "invalid-v3-9-candidates.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a finding with 9 candidates (the finding has no choice)"
+    },
+    {
       "file": "invalid-v3-129-history.json",
       "error": "workfile_too_many_entries",
       "legacy_error": "workfile_too_many_entries",
@@ -152,7 +170,7 @@
       "file": "invalid-v3-9-offered.json",
       "error": "workfile_too_many_entries",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a choice offering 9 candidate ids, ascending and distinct"
+      "note": "a not_a_term choice offering 9 candidate ids, ascending and distinct"
     },
     {
       "file": "invalid-v3-depth-17.json",
@@ -203,16 +221,16 @@
       "note": "status is not pending, done or stale"
     },
     {
-      "file": "invalid-v3-pending-with-report.json",
+      "file": "invalid-v3-pending-with-result.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a pending record that still holds a basis and a report"
+      "note": "a pending record that still holds a basis and a result"
     },
     {
-      "file": "invalid-v3-done-without-report.json",
+      "file": "invalid-v3-done-without-result.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a done record whose report is null"
+      "note": "a done record whose result is null"
     },
     {
       "file": "invalid-v3-segmentation-version.json",
@@ -230,19 +248,19 @@
       "file": "invalid-v3-range-beyond-text.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a target range that ends past the text; later checks fail too, the first failure is the range"
+      "note": "a target range that ends past the text; the first failure is the range"
     },
     {
       "file": "invalid-v3-basis-no-matcher.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a record basis without matcher_revision; a later check would give basis_mismatch, the first failure is the basis shape"
+      "note": "a record basis without matcher_revision"
     },
     {
       "file": "invalid-v3-basis-null-schema.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a choice basis with a null schema_version"
+      "note": "a record basis with a null schema_version"
     },
     {
       "file": "invalid-v3-unknown-record-key.json",
@@ -251,22 +269,28 @@
       "note": "a record with an unknown key"
     },
     {
-      "file": "invalid-v3-candidate-not-offered.json",
+      "file": "invalid-v3-unknown-verdict.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "an official_pair whose candidate id is not in offered"
+      "note": "a finding with a verdict outside the four known ones"
+    },
+    {
+      "file": "invalid-v3-official-pair-offered.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "an official_pair with a non-empty offered: only a not_a_term lists offered ids"
+    },
+    {
+      "file": "invalid-v3-pending-confirmed-choice.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a confirmed choice in a pending record: no choice is confirmed without a result"
     },
     {
       "file": "invalid-v3-non-integral-index.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "index 1.5 is not an integer; later checks fail too, the first failure is the type"
-    },
-    {
-      "file": "invalid-v3-report-span-mismatch.json",
-      "error": "workfile_segment_invalid",
-      "legacy_error": "workfile_unsupported_format",
-      "note": "a finding target span that does not read the same in the target core: the report is not valid for its cores"
+      "note": "index 1.5 is not an integer; a later check fails too, the first failure is the type"
     },
     {
       "file": "invalid-v3-history-bad-entry.json",
@@ -287,16 +311,28 @@
       "note": "record 0 ends after record 1 starts"
     },
     {
-      "file": "invalid-v3-report-revision-mismatch.json",
-      "error": "workfile_segment_hash_mismatch",
+      "file": "invalid-v3-core-2001.json",
+      "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "the report target_revision differs from the record target_hash"
+      "note": "valid-v3-2000-core-8-offered.json with a 2,001-scalar source core in a done record; the hashes agree with the cores, only the core length fails"
     },
     {
-      "file": "invalid-v3-basis-mismatch.json",
-      "error": "workfile_segment_basis_mismatch",
+      "file": "invalid-v3-done-empty-core.json",
+      "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "the record basis dictionary revision differs from the report dictionary revision"
+      "note": "a done record with an empty source core (start equals end, hash of the empty string, a result without findings): the ranges pass step 6, step 8.1 requires 1 to 2,000 scalars"
+    },
+    {
+      "file": "invalid-v3-result-span-outside-core.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a finding source that ends beyond the 20-scalar source core; the finding has no choice"
+    },
+    {
+      "file": "invalid-v3-duplicate-finding.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "two findings with the same source span"
     },
     {
       "file": "invalid-v3-choice-outside-core.json",
@@ -314,7 +350,7 @@
       "file": "invalid-v3-confirmed-choice-not-reported.json",
       "error": "workfile_segment_anchor_invalid",
       "legacy_error": "workfile_unsupported_format",
-      "note": "a confirmed choice at an occurrence the report has no finding for"
+      "note": "a confirmed choice at an occurrence the result has no finding for"
     },
     {
       "file": "invalid-v3-duplicate-choice.json",

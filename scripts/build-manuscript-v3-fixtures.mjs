@@ -3,7 +3,7 @@
 // The contract is contracts/manuscript-v3/SPEC.md; this file only produces fixtures for it.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeChoice, serializeWorkfile } from '../lib/manuscript.js';
@@ -13,19 +13,19 @@ import { buildFixtures as buildV2Fixtures } from './build-manuscript-v2-fixtures
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'contracts', 'manuscript-v3');
 
 export const V3_FORMAT = 'wuwaterm-manuscript-v3';
-export const MAX_V3_BYTES = 16_777_216;
+export const MAX_V3_BYTES = 12_582_912;
 export const MAX_V2_BYTES = 1_048_576;
+export const REVIEW_MAX_JSON_BYTES = 65_536;
 export const CODES = [
   'workfile_not_json', 'workfile_too_large', 'workfile_too_deep', 'workfile_too_many_entries', 'workfile_too_many_fields',
   'workfile_forbidden_field', 'workfile_unsupported_format', 'workfile_invalid_content', 'workfile_duplicate_choices',
-  'workfile_segment_invalid', 'workfile_segment_order', 'workfile_segment_hash_mismatch', 'workfile_segment_basis_mismatch',
-  'workfile_segment_anchor_invalid', 'workfile_progress_invalid',
+  'workfile_segment_invalid', 'workfile_segment_order', 'workfile_segment_anchor_invalid', 'workfile_progress_invalid',
 ];
 export const LIMITS = {
-  file_bytes: MAX_V3_BYTES, legacy_file_bytes: MAX_V2_BYTES, text_scalars: 16_777_216, array_items: 128, object_fields: 32, depth: 16,
-  segments: 128, choices_per_record: 32, offered_per_choice: 8, segment_choice_history: 128, progress_completed: 128,
-  core_scalars: 2000, choices: 32, history: 2, alignments: 64, semantic_decisions: 128, semantic_texts: 16, semantic_history: 2,
-  semantic_history_segments: 64,
+  file_bytes: MAX_V3_BYTES, legacy_file_bytes: MAX_V2_BYTES, text_scalars: 12_582_912, array_items: 128, object_fields: 32, depth: 16,
+  segments: 128, findings_per_result: 32, candidates_per_finding: 8, choices_per_record: 32, offered_per_choice: 8,
+  segment_choice_history: 128, progress_completed: 128, core_scalars: 2000, choices: 32, history: 2, alignments: 64,
+  semantic_decisions: 128, semantic_texts: 16, semantic_history: 2, semantic_history_segments: 64,
 };
 
 const UNSUPPORTED = 'workfile_unsupported_format';
@@ -34,7 +34,8 @@ const bytesOf = text => Buffer.byteLength(text, 'utf8');
 const scalars = text => Array.from(text);
 const scalarSlice = (text, start, end) => scalars(text).slice(start, end).join('');
 const failWith = code => Object.assign(new Error(code), { code });
-const emit = value => JSON.stringify(value, null, 2);
+// A v3 file is minified JSON with no trailing newline (SPEC "Canonical bytes").
+const minify = value => JSON.stringify(value);
 
 export function padContent(content, bytes) {
   const missing = bytes - bytesOf(content);
@@ -50,27 +51,20 @@ const orderBasis = b => ({
   dictionary: { schema_version: b.dictionary.schema_version, source_commit: b.dictionary.source_commit, term_count: b.dictionary.term_count, revision: b.dictionary.revision },
   matcher_revision: b.matcher_revision,
 });
-const orderChoiceCandidate = c => (c === null ? null : { candidate_id: c.candidate_id, zh: c.zh, en: c.en, category: c.category });
-const orderChoice = c => ({ source_span: orderSpan(c.source_span), choice: c.choice, candidate: orderChoiceCandidate(c.candidate), offered: [...c.offered], basis: orderBasis(c.basis) });
-const orderHistoryEntry = c => ({ source_hash: c.source_hash, ...orderChoice(c) });
-const orderReportCandidate = c => ({
-  zh: c.zh, en: c.en, category: c.category, sources: c.sources.map(s => ({ source_file: s.source_file, source_id: s.source_id })), candidate_id: c.candidate_id,
+const orderCandidate = c => (c === null ? null : { candidate_id: c.candidate_id, zh: c.zh, en: c.en, category: c.category });
+const orderChoice = c => ({ source_span: orderSpan(c.source_span), choice: c.choice, candidate: orderCandidate(c.candidate), offered: [...c.offered], confirmed: c.confirmed });
+const orderHistoryEntry = c => ({
+  source_hash: c.source_hash, source_span: orderSpan(c.source_span), choice: c.choice, candidate: orderCandidate(c.candidate), offered: [...c.offered],
 });
 const orderFinding = f => ({
-  id: f.id, rule_id: f.rule_id, verdict: f.verdict, source_span: orderSpan(f.source_span), target_span: f.target_span === null ? null : orderSpan(f.target_span),
-  candidates: f.candidates.map(orderReportCandidate), candidates_truncated: f.candidates_truncated,
+  verdict: f.verdict, source: [...f.source], target: f.target === null ? null : [...f.target], candidates: f.candidates.map(orderCandidate),
+  candidates_truncated: f.candidates_truncated,
 });
-const orderReport = r => ({
-  request_id: r.request_id, source_revision: r.source_revision, target_revision: r.target_revision, rule_version: r.rule_version,
-  matcher_revision: r.matcher_revision,
-  dictionary: { schema_version: r.dictionary.schema_version, source_commit: r.dictionary.source_commit, term_count: r.dictionary.term_count, revision: r.dictionary.revision },
-  coverage: { evaluated: r.coverage.evaluated, not_evaluated: r.coverage.not_evaluated, rules: [...r.coverage.rules] },
-  findings: r.findings.map(orderFinding), truncated: r.truncated,
-});
+const orderResult = r => ({ truncated: r.truncated, evaluated: r.evaluated, not_evaluated: r.not_evaluated, findings: r.findings.map(orderFinding) });
 const orderRecord = r => ({
   index: r.index, segmentation_version: r.segmentation_version, source_start: r.source_start, source_end: r.source_end,
   target_start: r.target_start, target_end: r.target_end, source_hash: r.source_hash, target_hash: r.target_hash, status: r.status,
-  basis: r.basis === null ? null : orderBasis(r.basis), report: r.report === null ? null : orderReport(r.report), choices: r.choices.map(orderChoice),
+  basis: r.basis === null ? null : orderBasis(r.basis), result: r.result === null ? null : orderResult(r.result), choices: r.choices.map(orderChoice),
 });
 
 /** The bytes a conforming writer produces from a parsed manuscript. Over maxBytes it throws workfile_too_large. */
@@ -85,7 +79,7 @@ export function canonicalV3(payload, { maxBytes = MAX_V3_BYTES } = {}) {
   const seen = new Set();
   const texts = (payload.semantic_texts ?? []).filter(t => needed.has(t.revision) && !seen.has(t.revision) && seen.add(t.revision));
   const semanticHistory = (payload.semantic_history ?? []).slice(-2);
-  const write = () => emit({
+  const write = () => minify({
     format: V3_FORMAT, source: payload.source, target: payload.target, direction: payload.direction, alignments: payload.alignments,
     choices: payload.choices, history: payload.history.slice(-2), semantic_decisions: decisions, semantic_texts: texts, semantic_history: semanticHistory,
     segments: segments.map(orderRecord), segment_choice_history: historyChoices.map(orderHistoryEntry),
@@ -115,11 +109,7 @@ const TERMS = {
   city: { zh: '示例城', en: 'Sample City', category: 'place' },
 };
 function candidateOf(term, tag = 'current') {
-  const id = sha(`candidate:${tag}:${term.zh}:${term.en}:${term.category}`);
-  return {
-    zh: term.zh, en: term.en, category: term.category, candidate_id: id,
-    sources: [{ source_file: 'Synthetic/Terms.json', source_id: `term_${id.slice(0, 8)}` }, { source_file: 'Synthetic/Labels.json', source_id: `label_${id.slice(0, 8)}` }],
-  };
+  return { candidate_id: sha(`candidate:${tag}:${term.zh}:${term.en}:${term.category}`), zh: term.zh, en: term.en, category: term.category };
 }
 
 function spanOf(text, needle, nth = 0) {
@@ -132,28 +122,24 @@ function spanOf(text, needle, nth = 0) {
   return { start, end: start + scalars(needle).length, text: needle };
 }
 
-function findingAt(core, targetCore, { text, nth = 0, verdict, targetText = null, candidates }) {
+// A compact finding: core-relative [start, end] pairs, no id, rule id, span text or sources.
+function findingOf(core, targetCore, { text, nth = 0, verdict, targetText = null, candidates }) {
   const span = spanOf(core, text, nth);
+  const target = targetText === null ? null : spanOf(targetCore, targetText);
   return {
-    id: `${span.start}:${span.end}:${span.text}`, rule_id: 'review.term_pair', verdict, source_span: span,
-    target_span: targetText === null ? null : spanOf(targetCore, targetText), candidates, candidates_truncated: false,
+    verdict, source: [span.start, span.end], target: target === null ? null : [target.start, target.end],
+    candidates: candidates.map(orderCandidate), candidates_truncated: false,
   };
 }
+const resultOf = findings => ({ truncated: false, evaluated: findings.length, not_evaluated: 0, findings });
 
-function choiceAt(core, text, nth, kind, offered, picked, basis) {
+function choiceAt(core, text, nth, kind, offered, picked, confirmed) {
   return {
-    source_span: spanOf(core, text, nth), choice: kind, candidate: kind === 'official_pair' ? orderChoiceCandidate(picked) : null,
-    offered: offered.map(c => c.candidate_id).sort(), basis: structuredClone(basis),
+    source_span: spanOf(core, text, nth), choice: kind, candidate: kind === 'official_pair' ? orderCandidate(picked) : null,
+    offered: kind === 'official_pair' ? [] : offered.map(c => c.candidate_id).sort(), confirmed,
   };
 }
-
-function reportOf(sourceCore, targetCore, basis, findings, tag) {
-  return {
-    request_id: sha(`request:${tag}`).slice(0, 32), source_revision: sha(sourceCore), target_revision: sha(targetCore),
-    rule_version: basis.rule_version, matcher_revision: basis.matcher_revision, dictionary: structuredClone(basis.dictionary),
-    coverage: { evaluated: findings.length, not_evaluated: 0, rules: ['review.term_pair'] }, findings, truncated: false,
-  };
-}
+const historyEntryOf = (core, text, kind, offered, picked) => orderHistoryEntry({ source_hash: sha(core), ...choiceAt(core, text, 0, kind, offered, picked, false) });
 
 const FILLER = n => `Filler line ${String(n).padStart(3, '0')} keeps this paragraph long.`;
 function longParagraph(lead, goal) {
@@ -187,10 +173,10 @@ function documentPayload(variant = 'standard') {
     assert.equal(scalarSlice(target, p.target.core_start, p.target.core_end), targets[i]);
   });
   assert.ok(!source.includes(OLD_CORE));
-  const shell = (i, status, basis, report, choices) => ({
+  const shell = (i, status, basis, result, choices) => ({
     index: i, segmentation_version: 'segmentation-v1', source_start: pairs[i].source.core_start, source_end: pairs[i].source.core_end,
     target_start: pairs[i].target.core_start, target_end: pairs[i].target.core_end, source_hash: sha(sources[i]), target_hash: sha(targets[i]),
-    status, basis, report, choices,
+    status, basis, result, choices,
   });
 
   const name = candidateOf(TERMS.name);
@@ -199,38 +185,87 @@ function documentPayload(variant = 'standard') {
   const place = candidateOf(TERMS.place);
   const oldCity = candidateOf(TERMS.city, 'previous');
   const oldName = candidateOf(TERMS.name, 'previous');
+  const oldItem = candidateOf(TERMS.itemA, 'previous');
 
-  const pending = shell(0, 'pending', null, null, [choiceAt(sources[0], '示例地', 0, 'not_a_term', [place], null, B)]);
+  // Pending: no result, so its choice waits for the next check and is not confirmed.
+  const pending = shell(0, 'pending', null, null, [choiceAt(sources[0], '示例地', 0, 'not_a_term', [place], null, false)]);
 
   let findings; let choices;
   if (variant === 'many') {
-    findings = Array.from({ length: 32 }, (_, k) => findingAt(middle, targets[1], { text: '示例名', nth: k, verdict: 'needs_review', candidates: [name] }));
-    choices = Array.from({ length: 32 }, (_, k) => choiceAt(middle, '示例名', k, k % 2 === 0 ? 'official_pair' : 'not_a_term', [name], k % 2 === 0 ? name : null, B));
+    findings = Array.from({ length: 32 }, (_, k) => findingOf(middle, targets[1], { text: '示例名', nth: k, verdict: 'needs_review', candidates: [name] }));
+    choices = Array.from({ length: 32 }, (_, k) => choiceAt(middle, '示例名', k, k % 2 === 0 ? 'official_pair' : 'not_a_term', [name], k % 2 === 0 ? name : null, true));
   } else {
     findings = [
-      findingAt(middle, targets[1], { text: '示例名', nth: 0, verdict: 'verified_constraint', targetText: 'Sample Name', candidates: [name] }),
-      findingAt(middle, targets[1], { text: '示例物', nth: 0, verdict: 'needs_review', candidates: [itemA, itemB] }),
-      findingAt(middle, targets[1], { text: '示例名', nth: 1, verdict: 'needs_review', candidates: [name] }),
+      findingOf(middle, targets[1], { text: '示例名', nth: 0, verdict: 'verified_constraint', targetText: 'Sample Name', candidates: [name] }),
+      findingOf(middle, targets[1], { text: '示例物', nth: 0, verdict: 'needs_review', candidates: [itemA, itemB] }),
+      findingOf(middle, targets[1], { text: '示例名', nth: 1, verdict: 'needs_review', candidates: [name] }),
     ];
     choices = [
-      choiceAt(middle, '示例名', 0, 'official_pair', [name], name, B),
-      choiceAt(middle, '示例物', 0, 'not_a_term', [itemA, itemB], null, B),
-      // Made under the previous dictionary at an occurrence the current report no longer has: needs reconfirmation.
-      choiceAt(middle, '示例城', 0, 'official_pair', [oldCity], oldCity, B_OLD),
+      choiceAt(middle, '示例名', 0, 'official_pair', [name], name, true),
+      choiceAt(middle, '示例物', 0, 'not_a_term', [itemA, itemB], null, true),
+      // An old choice at an occurrence the current result has no finding for: it needs reconfirmation.
+      choiceAt(middle, '示例城', 0, 'official_pair', [oldCity], oldCity, false),
     ];
   }
-  const done = shell(1, 'done', structuredClone(B), reportOf(middle, targets[1], B, findings, `${variant}-1`), choices);
+  const done = shell(1, 'done', structuredClone(B), resultOf(findings), choices);
 
-  const staleFindings = [findingAt(sources[2], targets[2], { text: '示例物', verdict: 'needs_review', candidates: [candidateOf(TERMS.itemA, 'previous')] })];
-  const stale = shell(2, 'stale', structuredClone(B_OLD), reportOf(sources[2], targets[2], B_OLD, staleFindings, `${variant}-2`),
-    [choiceAt(sources[2], '示例物', 0, 'official_pair', [candidateOf(TERMS.itemA, 'previous')], candidateOf(TERMS.itemA, 'previous'), B_OLD)]);
+  const staleFindings = [findingOf(sources[2], targets[2], { text: '示例物', verdict: 'needs_review', candidates: [oldItem] })];
+  const stale = shell(2, 'stale', structuredClone(B_OLD), resultOf(staleFindings), [choiceAt(sources[2], '示例物', 0, 'official_pair', [oldItem], oldItem, true)]);
 
   return {
     format: V3_FORMAT, source, target, direction: 'en', alignments: null, choices: [], history: [],
     semantic_decisions: [], semantic_texts: [], semantic_history: [],
     segments: [pending, done, stale],
-    segment_choice_history: [{ source_hash: sha(OLD_CORE), ...choiceAt(OLD_CORE, '示例名', 0, 'official_pair', [oldName], oldName, B_OLD) }],
+    segment_choice_history: [historyEntryOf(OLD_CORE, '示例名', 'official_pair', [oldName], oldName)],
     progress: { current: 0, completed: [1] },
+  };
+}
+
+// A core of exactly `length` scalars: it starts with `lead`, repeats `unit(n)` and ends with `last`.
+function coreOf(lead, length, unit, last) {
+  let chars = scalars(lead);
+  for (let n = 1; chars.length < length; n++) chars.push(...scalars(unit(n)));
+  chars = chars.slice(0, length);
+  chars[length - 1] = last;
+  return chars.join('');
+}
+
+/**
+ * Boundary of "both cores have 1 to 2,000 scalars" (step 8.1). `exact`: a done record with 2,000-scalar cores and a confirmed
+ * not_a_term choice that offers 8 candidates. `source-2001`: the same file with a 2,001-scalar source core. `empty-source`: a done
+ * record with an empty source core and a result with no findings. In all three the hashes agree with the cores, so only the core
+ * length can fail. The ranges are not a segmentation-v1 result (its cores stop at 1,800 scalars).
+ */
+function boundaryPayload(variant) {
+  const sourceCore = variant === 'empty-source' ? '' : coreOf('示例名在示例城里停下了。', variant === 'source-2001' ? 2001 : 2000, () => '示例文字。', '。');
+  const targetCore = coreOf('Sample Name met the Sample Item.', 2000, n => ` ${FILLER(n)}`, '.');
+  const nextSource = '示例物静静地躺着。';
+  const nextTarget = 'The Sample Item lay still.';
+  const sourceLength = scalars(sourceCore).length;
+  assert.equal(sourceLength, { exact: 2000, 'source-2001': 2001, 'empty-source': 0 }[variant]);
+  assert.equal(scalars(targetCore).length, 2000);
+
+  const candidates = Array.from({ length: 8 }, (_, k) => candidateOf({ zh: '示例名', en: `Sample Name ${k + 1}`, category: 'character' }, 'boundary'));
+  const findings = variant === 'empty-source' ? [] : [findingOf(sourceCore, targetCore, { text: '示例名', verdict: 'needs_review', candidates })];
+  const choices = variant === 'empty-source' ? [] : [choiceAt(sourceCore, '示例名', 0, 'not_a_term', candidates, null, true)];
+  if (variant === 'exact') {
+    assert.equal(findings[0].candidates.length, 8);
+    assert.equal(choices[0].offered.length, 8);
+  }
+
+  const record = (i, start, core, targetStart, targetText, status, basis, result, choiceList) => ({
+    index: i, segmentation_version: 'segmentation-v1', source_start: start, source_end: start + scalars(core).length,
+    target_start: targetStart, target_end: targetStart + scalars(targetText).length, source_hash: sha(core), target_hash: sha(targetText),
+    status, basis, result, choices: choiceList,
+  });
+  return {
+    format: V3_FORMAT, source: [sourceCore, nextSource].join('\n\n'), target: [targetCore, nextTarget].join('\n\n'), direction: 'en', alignments: null,
+    choices: [], history: [], semantic_decisions: [], semantic_texts: [], semantic_history: [],
+    segments: [
+      record(0, 0, sourceCore, 0, targetCore, 'done', structuredClone(B), resultOf(findings), choices),
+      record(1, sourceLength + 2, nextSource, 2002, nextTarget, 'pending', null, null, []),
+    ],
+    segment_choice_history: [], progress: { current: 0, completed: [0] },
   };
 }
 
@@ -245,7 +280,7 @@ function pendingPayload(n) {
     const record = {
       index: i, segmentation_version: 'segmentation-v1', source_start: sourcePos, source_end: sourcePos + scalars(core).length,
       target_start: targetPos, target_end: targetPos + scalars(targets[i]).length, source_hash: sha(core), target_hash: sha(targets[i]),
-      status: 'pending', basis: null, report: null, choices: [],
+      status: 'pending', basis: null, result: null, choices: [],
     };
     sourcePos = record.source_end + 2;
     targetPos = record.target_end + 2;
@@ -261,94 +296,117 @@ function historyChoices(n) {
   return Array.from({ length: n }, (_, i) => {
     const core = `示例旧段落${i}里的示例名。`;
     const old = candidateOf(TERMS.name, `previous-${i}`);
-    return { source_hash: sha(core), ...choiceAt(core, '示例名', 0, 'official_pair', [old], old, B_OLD) };
+    return historyEntryOf(core, '示例名', 'official_pair', [old], old);
   });
 }
 
+// A v1 file keeps the full review-v2 report (with sources and ids) in its history.
+const withSources = c => ({
+  zh: c.zh, en: c.en, category: c.category, candidate_id: c.candidate_id,
+  sources: [{ source_file: 'Synthetic/Terms.json', source_id: `term_${c.candidate_id.slice(0, 8)}` }, { source_file: 'Synthetic/Labels.json', source_id: `label_${c.candidate_id.slice(0, 8)}` }],
+});
 function validV1() {
   const source = '示例名来到示例地。';
   const target = 'Sample Name came to the Sample Place.';
-  const name = candidateOf(TERMS.name);
-  const findings = [
-    findingAt(source, target, { text: '示例名', verdict: 'verified_constraint', targetText: 'Sample Name', candidates: [name] }),
-    findingAt(source, target, { text: '示例地', verdict: 'verified_constraint', targetText: 'Sample Place', candidates: [candidateOf(TERMS.place)] }),
-  ];
-  const report = reportOf(source, target, B, findings, 'v1');
+  const finding = (text, targetText, term) => {
+    const span = spanOf(source, text);
+    return {
+      id: `${span.start}:${span.end}:${text}`, rule_id: 'review.term_pair', verdict: 'verified_constraint', source_span: span, target_span: spanOf(target, targetText),
+      candidates: [withSources(candidateOf(term))], candidates_truncated: false,
+    };
+  };
+  const findings = [finding('示例名', 'Sample Name', TERMS.name), finding('示例地', 'Sample Place', TERMS.place)];
+  const report = {
+    request_id: sha('request:v1').slice(0, 32), source_revision: sha(source), target_revision: sha(target), rule_version: B.rule_version,
+    matcher_revision: B.matcher_revision, dictionary: structuredClone(B.dictionary),
+    coverage: { evaluated: 2, not_evaluated: 0, rules: ['review.term_pair'] }, findings, truncated: false,
+  };
   const choice = makeChoice({ source, direction: 'en', alignments: null, report, finding: findings[0], candidate: findings[0].candidates[0] });
   return serializeWorkfile({ source, target, direction: 'en', alignments: null, choices: [choice], history: [{ source, target, direction: 'en', alignments: null, report }] });
 }
 
 // ---- size models (SPEC "Size arithmetic") ----
 
-const MODEL_SEGMENTS = 128;
-const MODEL_REPORT_CAP = 65_536;
+export const MODEL_KINDS = ['small', 'medium', 'dense', 'limit', 'extreme'];
+const MODELS = {
+  small: { segments: 12, length: 1667, shape: 'typical' },
+  medium: { segments: 60, length: 1667, shape: 'typical' },
+  dense: { segments: 128, length: 1800, shape: 'dense' },
+  limit: { segments: 128, length: 1800, shape: 'limit' },
+  extreme: { segments: 128, length: 1800, shape: 'extreme' },
+};
 const CJK_DIGITS = '〇一二三四五六七八九';
 
-function modelCores(i) {
-  const source = Array.from({ length: 1800 }, () => '示');
-  const target = Array.from({ length: 1800 }, () => 'x');
+function modelCores(i, length) {
+  const source = Array.from({ length }, () => '示');
+  const target = Array.from({ length }, () => 'x');
   for (let k = 0; k < 32; k++) {
     source.splice(k * 50, 4, ...'示例名称');
-    target.splice(k * 55, 20, ...'Sample Official Name');
+    target.splice(k * 50, 20, ...'Sample Official Name');
   }
-  source.splice(1700, 3, ...Array.from(String(i).padStart(3, '0'), d => CJK_DIGITS[Number(d)]));
-  target.splice(1780, 3, ...String(i).padStart(3, '0'));
+  source.splice(length - 8, 3, ...Array.from(String(i).padStart(3, '0'), d => CJK_DIGITS[Number(d)]));
+  target.splice(length - 8, 3, ...String(i).padStart(3, '0'));
   return { source: source.join(''), target: target.join('') };
 }
 
-function modelFinding(k, candidateCount, sourceCount) {
-  return {
-    id: `${k * 50}:${k * 50 + 4}:示例名称`, rule_id: 'review.term_pair', verdict: 'needs_review',
-    source_span: { start: k * 50, end: k * 50 + 4, text: '示例名称' }, target_span: { start: k * 55, end: k * 55 + 20, text: 'Sample Official Name' },
-    candidates: Array.from({ length: candidateCount }, (_, j) => ({
-      zh: `示例名称${j}`, en: `Sample Official Name ${j}`, category: 'character',
-      sources: Array.from({ length: sourceCount }, (_, s) => ({ source_file: 'TextMap/zh-Hans/MultiText.json', source_id: `ItemInfo_Synthetic_Name_${String(s).padStart(6, '0')}` })),
-      candidate_id: sha(`model-candidate:${k}:${j}`),
-    })),
-    candidates_truncated: false,
+const modelCandidate = (k, j, extraBoth = 0, extraEn = 0) => ({
+  candidate_id: sha(`model-candidate:${k}:${j}`), zh: `示例名称${j}${'示'.repeat(extraBoth)}`,
+  en: `Sample Official Name ${j}${'x'.repeat(extraBoth + extraEn)}`, category: 'character',
+});
+const modelFinding = (k, candidates) => ({ verdict: 'needs_review', source: [k * 50, k * 50 + 4], target: [k * 50, k * 50 + 20], candidates, candidates_truncated: false });
+
+// Findings of the extreme model: 32 findings x 8 candidates, the candidate strings lengthened until the minified result is as close
+// to Core's 65,536-byte response cap as it can get without passing it. The compact result is a subset of the response.
+function extremeFindings() {
+  const build = (both, en, fine) => {
+    let counter = 0;
+    return Array.from({ length: 32 }, (_, k) => modelFinding(k, Array.from({ length: 8 }, (_, j) => modelCandidate(k, j, both, en + (counter++ < fine ? 1 : 0)))));
   };
+  const size = findings => bytesOf(minify(resultOf(findings)));
+  assert.ok(size(build(0, 0, 0)) <= REVIEW_MAX_JSON_BYTES, 'the extreme result must start under the cap');
+  let both = 0; let en = 0; let fine = 0;
+  while (size(build(both + 1, en, 0)) <= REVIEW_MAX_JSON_BYTES) both++;
+  while (size(build(both, en + 1, 0)) <= REVIEW_MAX_JSON_BYTES) en++;
+  while (size(build(both, en, fine + 1)) <= REVIEW_MAX_JSON_BYTES) fine++;
+  return build(both, en, fine);
 }
 
-function modelFindings(kind) {
-  if (kind === 'typical') return Array.from({ length: 16 }, (_, k) => modelFinding(k, k % 4 === 0 ? 2 : 1, 2));
-  if (kind === 'dense') return Array.from({ length: 32 }, (_, k) => modelFinding(k, 2, 2));
-  const size = findings => bytesOf(JSON.stringify(reportOf('', '', B, findings, 'model')));
-  const findings = [];
-  while (findings.length < 32) {
-    const next = modelFinding(findings.length, 8, 8);
-    if (size([...findings, next]) > MODEL_REPORT_CAP) break;
-    findings.push(next);
-  }
-  for (let sources = 7; sources >= 1 && findings.length < 32; sources--) {
-    const next = modelFinding(findings.length, 8, sources);
-    if (size([...findings, next]) <= MODEL_REPORT_CAP) { findings.push(next); break; }
-  }
-  return findings;
+function modelFindings(shape) {
+  if (shape === 'typical') return Array.from({ length: 16 }, (_, k) => modelFinding(k, Array.from({ length: k % 4 === 0 ? 2 : 1 }, (_, j) => modelCandidate(k, j))));
+  if (shape === 'dense') return Array.from({ length: 32 }, (_, k) => modelFinding(k, [modelCandidate(k, 0), modelCandidate(k, 1)]));
+  if (shape === 'limit') return Array.from({ length: 32 }, (_, k) => modelFinding(k, Array.from({ length: 8 }, (_, j) => modelCandidate(k, j))));
+  return extremeFindings();
 }
 
-/** A model manuscript: 128 done records, each with a full-size report and its choices. It need not pass a reader. */
-export function budgetManuscript(kind) {
-  const [choiceCount, offeredCount] = { typical: [4, 1], dense: [8, 2], extreme: [32, 8] }[kind];
-  const findings = modelFindings(kind);
-  const choices = Array.from({ length: choiceCount }, (_, j) => {
-    const finding = findings[j % findings.length];
-    const offered = finding.candidates.slice(0, offeredCount);
+// Half of the choices are not_a_term with every candidate id of their finding offered; all are confirmed.
+const MODEL_CHOICES = { typical: 4, dense: 8, limit: 32, extreme: 32 };
+function modelChoices(shape, findings) {
+  return Array.from({ length: MODEL_CHOICES[shape] }, (_, j) => {
+    const finding = findings[j];
+    const notATerm = j % 2 === 0;
     return {
-      source_span: { start: j * 50, end: j * 50 + 4, text: '示例名称' }, choice: 'official_pair', candidate: orderChoiceCandidate(offered[0]),
-      offered: offered.map(c => c.candidate_id).sort(), basis: B,
+      source_span: { start: finding.source[0], end: finding.source[1], text: '示例名称' }, choice: notATerm ? 'not_a_term' : 'official_pair',
+      candidate: notATerm ? null : orderCandidate(finding.candidates[0]), offered: notATerm ? finding.candidates.map(c => c.candidate_id).sort() : [], confirmed: true,
     };
   });
+}
+
+/** A model manuscript: done records with full-size results and choices. `kind` is one of MODEL_KINDS. */
+export function budgetManuscript(kind) {
+  const { segments: count, length, shape } = MODELS[kind];
+  const findings = modelFindings(shape);
+  const result = resultOf(findings);
+  const choices = modelChoices(shape, findings);
   const sources = []; const targets = []; const segments = [];
   let position = 0;
-  for (let i = 0; i < MODEL_SEGMENTS; i++) {
-    const cores = modelCores(i);
+  for (let i = 0; i < count; i++) {
+    const cores = modelCores(i, length);
     sources.push(cores.source); targets.push(cores.target);
     segments.push({
-      index: i, segmentation_version: 'segmentation-v1', source_start: position, source_end: position + 1800, target_start: position, target_end: position + 1800,
-      source_hash: sha(cores.source), target_hash: sha(cores.target), status: 'done', basis: B,
-      report: reportOf(cores.source, cores.target, B, findings, `model-${kind}-${i}`), choices,
+      index: i, segmentation_version: 'segmentation-v1', source_start: position, source_end: position + length, target_start: position, target_end: position + length,
+      source_hash: sha(cores.source), target_hash: sha(cores.target), status: 'done', basis: B, result, choices,
     });
-    position += 1802;
+    position += length + 2;
   }
   return {
     format: V3_FORMAT, source: sources.join('\n\n'), target: targets.join('\n\n'), direction: 'en', alignments: null, choices: [], history: [],
@@ -371,8 +429,8 @@ export async function buildFixtures() {
 
   const valid = canonicalV3(documentPayload());
   const base = JSON.parse(valid);
-  assert.equal(emit(base), valid);
-  const mutate = fn => { const x = structuredClone(base); fn(x); return emit(x); };
+  assert.equal(minify(base), valid);
+  const mutate = fn => { const x = structuredClone(base); fn(x); return minify(x); };
 
   const files = new Map();
   const cases = { format: V3_FORMAT, spec: 'SPEC.md', codes: CODES, limits: LIMITS, valid: [], invalid: [] };
@@ -386,47 +444,58 @@ export async function buildFixtures() {
   };
 
   // valid
-  ok('valid-v3-all-parts.json', valid, 'three ready segments: pending with a carried choice, done with a verified and a needs_review finding, stale under the previous basis; one history choice; progress', UNSUPPORTED);
-  ok('valid-v3-integral-numbers.json', replaceOnce(replaceOnce(valid, '"index": 1,', '"index": 1.0,'), '"source_start": 0,', '"source_start": 0.0,'),
+  ok('valid-v3-all-parts.json', valid, 'three ready segments: pending with an unconfirmed choice, done with a verified and a needs_review finding, stale under the previous basis; one history choice; progress', UNSUPPORTED);
+  ok('valid-v3-integral-numbers.json', replaceOnce(replaceOnce(valid, '"index":1,', '"index":1.0,'), '"source_start":0,', '"source_start":0.0,'),
     'integer fields written as 1.0 and 0.0 are accepted; the canonical form writes plain integers', UNSUPPORTED, 'valid-v3-all-parts.json');
   const otherHash = sha('hash-not-current: other core');
-  ok('valid-v3-hash-not-current.json', mutate(x => { x.segments[1].source_hash = otherHash; x.segments[1].report.source_revision = otherHash; }),
-    'record 1 hash and report.source_revision agree but differ from the current core: a valid file whose result the runtime treats as not current', UNSUPPORTED);
+  ok('valid-v3-hash-not-current.json', mutate(x => { x.segments[1].source_hash = otherHash; }),
+    'record 1 source_hash differs from the current core: a valid file whose result the runtime treats as not current', UNSUPPORTED);
   ok('valid-v3-with-semantic.json', mutate(x => {
     x.semantic_decisions = v2Parsed.semantic_decisions; x.semantic_texts = v2Parsed.semantic_texts; x.semantic_history = v2Parsed.semantic_history;
   }), 'segment state together with the v2 semantic decisions, stored text and history snapshot', UNSUPPORTED);
-  const fromV2 = emit({
+  const fromV2 = minify({
     format: V3_FORMAT, source: v2Parsed.source, target: v2Parsed.target, direction: v2Parsed.direction, alignments: v2Parsed.alignments,
     choices: v2Parsed.choices, history: v2Parsed.history, semantic_decisions: v2Parsed.semantic_decisions, semantic_texts: v2Parsed.semantic_texts,
     semantic_history: v2Parsed.semantic_history, segments: [], segment_choice_history: [], progress: { current: null, completed: [] },
   });
   ok('valid-v3-from-v2.json', fromV2, 'a v3 file without segment state; the writer emits it as the v2 file named in canonical', UNSUPPORTED, 'valid-v2-all-parts.json');
-  const hundred = pendingPayload(128);
-  ok('valid-v3-128-segments.json', canonicalV3(hundred), '128 pending records over 128 short paragraphs; the ranges are paragraph ranges, not a segmentation-v1 result', UNSUPPORTED);
+  ok('valid-v3-128-segments.json', canonicalV3(pendingPayload(128)), '128 pending records over 128 short paragraphs; the ranges are paragraph ranges, not a segmentation-v1 result', UNSUPPORTED);
   const many = canonicalV3(documentPayload('many'));
   const manyBase = JSON.parse(many);
   ok('valid-v3-32-choices.json', many, 'a done record with 32 findings and 32 confirmed choices', UNSUPPORTED);
   ok('valid-v3-128-history.json', mutate(x => { x.segment_choice_history = historyChoices(128); }), '128 history choices', UNSUPPORTED);
+  ok('valid-v3-2000-core-8-offered.json', canonicalV3(boundaryPayload('exact')),
+    'a done record with 2,000-scalar cores and a confirmed not_a_term whose finding offers 8 candidates; not a segmentation-v1 result', UNSUPPORTED);
   ok('valid-v1.json', validV1(), 'a v1 file with one choice and one history report, as the v2 writer emits it', null);
   ok('valid-v2-all-parts.json', v2Valid, 'byte-identical to contracts/manuscript-v2/valid-all-parts.json', null);
   cases.valid.push({ file: 'valid-v3-all-parts.json', pad_to_bytes: MAX_V3_BYTES, canonical: 'valid-v3-all-parts.json', legacy_error: 'workfile_too_large',
-    note: 'padded with spaces to exactly 16 MiB: accepted by a v3 reader; an old client stops at its 1 MiB check' });
+    note: 'padded with spaces to exactly 12 MiB: accepted by a v3 reader; an old client stops at its 1 MiB check' });
   cases.valid.push({ file: 'valid-v2-all-parts.json', pad_to_bytes: MAX_V2_BYTES, canonical: 'valid-v2-all-parts.json', legacy_error: null,
     note: 'a v2 file padded with spaces to exactly 1 MiB is accepted' });
 
   // invalid: size and tree caps
   const tooLarge = (file, pad, note, legacy) => cases.invalid.push({ file, pad_to_bytes: pad, error: 'workfile_too_large', legacy_error: legacy, note });
-  tooLarge('valid-v3-all-parts.json', MAX_V3_BYTES + 1, 'a v3 file one byte over 16 MiB', 'workfile_too_large');
+  tooLarge('valid-v3-all-parts.json', MAX_V3_BYTES + 1, 'a v3 file one byte over 12 MiB', 'workfile_too_large');
   tooLarge('valid-v2-all-parts.json', MAX_V2_BYTES + 1, 'a v2 file one byte over 1 MiB: non-v3 input keeps the 1 MiB cap', 'workfile_too_large');
   bad('invalid-v3-129-segments.json', canonicalV3(pendingPayload(129)), 'workfile_too_many_entries', '129 records: the generic array cap is 128',
     'workfile_too_many_entries');
-  bad('invalid-v3-33-choices.json', emit((() => { const x = structuredClone(manyBase); x.segments[1].choices.push(structuredClone(x.segments[1].choices[0])); return x; })()),
+  bad('invalid-v3-33-choices.json', minify((() => { const x = structuredClone(manyBase); x.segments[1].choices.push(structuredClone(x.segments[1].choices[0])); return x; })()),
     'workfile_too_many_entries', '33 choices in one record (32 plus a repeat of the first)');
+  bad('invalid-v3-33-findings.json', minify((() => {
+    const x = structuredClone(manyBase);
+    x.segments[1].result.findings.push({ verdict: 'needs_review', source: [0, 2], target: null, candidates: [], candidates_truncated: false });
+    return x;
+  })()), 'workfile_too_many_entries', '33 findings in one result (the 32-choices file plus one more at another span)');
+  bad('invalid-v3-9-candidates.json', mutate(x => {
+    const extra = Array.from({ length: 8 }, (_, k) => candidateOf({ zh: '示例名', en: `Sample Name extra ${k}`, category: 'character' }, 'extra'));
+    x.segments[1].result.findings[2].candidates.push(...extra);
+    assert.equal(x.segments[1].result.findings[2].candidates.length, 9);
+  }), 'workfile_too_many_entries', 'a finding with 9 candidates (the finding has no choice)');
   bad('invalid-v3-129-history.json', mutate(x => { x.segment_choice_history = historyChoices(129); }), 'workfile_too_many_entries',
     '129 history choices: the generic array cap is 128', 'workfile_too_many_entries');
   bad('invalid-v3-9-offered.json', mutate(x => {
     x.segments[0].choices[0].offered = Array.from({ length: 9 }, (_, i) => sha(`offered:${i}`)).sort();
-  }), 'workfile_too_many_entries', 'a choice offering 9 candidate ids, ascending and distinct');
+  }), 'workfile_too_many_entries', 'a not_a_term choice offering 9 candidate ids, ascending and distinct');
   bad('invalid-v3-depth-17.json', mutate(x => {
     let nested = [];
     for (let i = 0; i < 15; i++) nested = [nested];
@@ -436,7 +505,7 @@ export async function buildFixtures() {
     for (let i = 1; i <= 21; i++) x.segments[0][`extra_${String(i).padStart(2, '0')}`] = 0;
     assert.equal(Object.keys(x.segments[0]).length, 33);
   }), 'workfile_too_many_fields', 'a record with 33 fields', 'workfile_too_many_fields');
-  bad('invalid-v3-forbidden-key.json', replaceOnce(valid, '"index": 0,', '"__proto__": 0,\n      "index": 0,'), 'workfile_forbidden_field',
+  bad('invalid-v3-forbidden-key.json', replaceOnce(valid, '"index":0,', '"__proto__":0,"index":0,'), 'workfile_forbidden_field',
     'a record with a __proto__ key, inserted in the JSON text', 'workfile_forbidden_field');
 
   // invalid: top level and the v1/v2 parts
@@ -447,8 +516,8 @@ export async function buildFixtures() {
 
   // invalid: record structure (step 6)
   bad('invalid-v3-unknown-status.json', mutate(x => { x.segments[1].status = 'paused'; }), 'workfile_segment_invalid', 'status is not pending, done or stale');
-  bad('invalid-v3-pending-with-report.json', mutate(x => { x.segments[1].status = 'pending'; }), 'workfile_segment_invalid', 'a pending record that still holds a basis and a report');
-  bad('invalid-v3-done-without-report.json', mutate(x => { x.segments[1].report = null; }), 'workfile_segment_invalid', 'a done record whose report is null');
+  bad('invalid-v3-pending-with-result.json', mutate(x => { x.segments[1].status = 'pending'; }), 'workfile_segment_invalid', 'a pending record that still holds a basis and a result');
+  bad('invalid-v3-done-without-result.json', mutate(x => { x.segments[1].result = null; }), 'workfile_segment_invalid', 'a done record whose result is null');
   bad('invalid-v3-segmentation-version.json', mutate(x => { x.segments[0].segmentation_version = 'segmentation-v2'; }), 'workfile_segment_invalid', 'an unknown segmentation version');
   bad('invalid-v3-hash-uppercase.json', mutate(x => {
     const upper = x.segments[0].source_hash.toUpperCase();
@@ -456,21 +525,19 @@ export async function buildFixtures() {
     x.segments[0].source_hash = upper;
   }), 'workfile_segment_invalid', 'a content hash written in uppercase hex');
   bad('invalid-v3-range-beyond-text.json', mutate(x => { x.segments[2].target_end = scalars(x.target).length + 1; }), 'workfile_segment_invalid',
-    'a target range that ends past the text; later checks fail too, the first failure is the range');
-  bad('invalid-v3-basis-no-matcher.json', mutate(x => { delete x.segments[1].basis.matcher_revision; }), 'workfile_segment_invalid',
-    'a record basis without matcher_revision; a later check would give basis_mismatch, the first failure is the basis shape');
-  bad('invalid-v3-basis-null-schema.json', mutate(x => { x.segments[0].choices[0].basis.dictionary.schema_version = null; }), 'workfile_segment_invalid',
-    'a choice basis with a null schema_version');
+    'a target range that ends past the text; the first failure is the range');
+  bad('invalid-v3-basis-no-matcher.json', mutate(x => { delete x.segments[1].basis.matcher_revision; }), 'workfile_segment_invalid', 'a record basis without matcher_revision');
+  bad('invalid-v3-basis-null-schema.json', mutate(x => { x.segments[2].basis.dictionary.schema_version = null; }), 'workfile_segment_invalid', 'a record basis with a null schema_version');
   bad('invalid-v3-unknown-record-key.json', mutate(x => { x.segments[0].extra = true; }), 'workfile_segment_invalid', 'a record with an unknown key');
-  bad('invalid-v3-candidate-not-offered.json', mutate(x => { x.segments[1].choices[2].offered = [sha('candidate-not-offered: another candidate')]; }), 'workfile_segment_invalid',
-    'an official_pair whose candidate id is not in offered');
+  bad('invalid-v3-unknown-verdict.json', mutate(x => { x.segments[1].result.findings[0].verdict = 'maybe'; }), 'workfile_segment_invalid', 'a finding with a verdict outside the four known ones');
+  bad('invalid-v3-official-pair-offered.json', mutate(x => {
+    assert.equal(x.segments[1].choices[0].choice, 'official_pair');
+    x.segments[1].choices[0].offered = [x.segments[1].choices[0].candidate.candidate_id];
+  }), 'workfile_segment_invalid', 'an official_pair with a non-empty offered: only a not_a_term lists offered ids');
+  bad('invalid-v3-pending-confirmed-choice.json', mutate(x => { x.segments[0].choices[0].confirmed = true; }), 'workfile_segment_invalid',
+    'a confirmed choice in a pending record: no choice is confirmed without a result');
   bad('invalid-v3-non-integral-index.json', mutate(x => { x.segments[1].index = 1.5; }), 'workfile_segment_invalid',
-    'index 1.5 is not an integer; later checks fail too, the first failure is the type');
-  bad('invalid-v3-report-span-mismatch.json', mutate(x => {
-    const span = x.segments[1].report.findings[0].target_span;
-    assert.equal(span.text, 'Sample Name');
-    span.text = 'Sample Nome';
-  }), 'workfile_segment_invalid', 'a finding target span that does not read the same in the target core: the report is not valid for its cores');
+    'index 1.5 is not an integer; a later check fails too, the first failure is the type');
   bad('invalid-v3-history-bad-entry.json', mutate(x => { x.segment_choice_history[0].candidate = null; }), 'workfile_segment_invalid',
     'a history choice that is an official_pair without a candidate');
 
@@ -478,16 +545,25 @@ export async function buildFixtures() {
   bad('invalid-v3-duplicate-index.json', mutate(x => { x.segments[1].index = 0; }), 'workfile_segment_order', 'two records with index 0');
   bad('invalid-v3-overlapping-ranges.json', mutate(x => { x.segments[0].source_end = x.segments[1].source_start + 2; }), 'workfile_segment_order',
     'record 0 ends after record 1 starts');
-  bad('invalid-v3-report-revision-mismatch.json', mutate(x => { x.segments[1].report.target_revision = sha('report-revision-mismatch: other target'); }),
-    'workfile_segment_hash_mismatch', 'the report target_revision differs from the record target_hash');
-  bad('invalid-v3-basis-mismatch.json', mutate(x => { x.segments[1].basis.dictionary.revision = sha('basis-mismatch: other dictionary'); }),
-    'workfile_segment_basis_mismatch', 'the record basis dictionary revision differs from the report dictionary revision');
+  bad('invalid-v3-core-2001.json', canonicalV3(boundaryPayload('source-2001')), 'workfile_segment_invalid',
+    'valid-v3-2000-core-8-offered.json with a 2,001-scalar source core in a done record; the hashes agree with the cores, only the core length fails');
+  bad('invalid-v3-done-empty-core.json', canonicalV3(boundaryPayload('empty-source')), 'workfile_segment_invalid',
+    'a done record with an empty source core (start equals end, hash of the empty string, a result without findings): the ranges pass step 6, step 8.1 requires 1 to 2,000 scalars');
+  bad('invalid-v3-result-span-outside-core.json', mutate(x => {
+    const finding = x.segments[1].result.findings[2];
+    assert.deepEqual(finding.source, [10, 13]);
+    finding.source = [18, 25];
+  }), 'workfile_segment_invalid', 'a finding source that ends beyond the 20-scalar source core; the finding has no choice');
+  bad('invalid-v3-duplicate-finding.json', mutate(x => {
+    const findings = x.segments[1].result.findings;
+    findings[2].source = [...findings[0].source];
+  }), 'workfile_segment_invalid', 'two findings with the same source span');
   bad('invalid-v3-choice-outside-core.json', mutate(x => { Object.assign(x.segments[0].choices[0].source_span, { start: 7, end: 10 }); }),
     'workfile_segment_anchor_invalid', 'a choice span that starts at the end of its core');
   bad('invalid-v3-choice-text-differs.json', mutate(x => { x.segments[0].choices[0].source_span.text = '示例乙'; }), 'workfile_segment_anchor_invalid',
     'a choice span whose text is not what the core holds there');
-  bad('invalid-v3-confirmed-choice-not-reported.json', mutate(x => { x.segments[1].choices[2].basis = structuredClone(x.segments[1].basis); }),
-    'workfile_segment_anchor_invalid', 'a confirmed choice at an occurrence the report has no finding for');
+  bad('invalid-v3-confirmed-choice-not-reported.json', mutate(x => { x.segments[1].choices[2].confirmed = true; }),
+    'workfile_segment_anchor_invalid', 'a confirmed choice at an occurrence the result has no finding for');
   bad('invalid-v3-duplicate-choice.json', mutate(x => { x.segments[0].choices.push(structuredClone(x.segments[0].choices[0])); }), 'workfile_duplicate_choices',
     'two choices with the same start and end in one record');
   bad('invalid-v3-progress-current-missing.json', mutate(x => { x.progress.current = 3; }), 'workfile_progress_invalid', 'progress.current names a record that does not exist');
@@ -509,6 +585,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     let current = null;
     try { current = readFileSync(join(root, name), 'utf8'); } catch { /* missing */ }
     if (current !== content) { stale++; console.error(`stale: contracts/manuscript-v3/${name}`); }
+  }
+  // A fixture the generator no longer produces must not linger in the directory.
+  for (const name of readdirSync(root).filter(n => n.endsWith('.json') && !files.has(n))) {
+    if (write) unlinkSync(join(root, name)); else { stale++; console.error(`unexpected: contracts/manuscript-v3/${name}`); }
   }
   if (stale) { console.error('Run: node scripts/build-manuscript-v3-fixtures.mjs --write'); process.exit(1); }
   console.log(write ? `wrote ${files.size} files` : `ok: ${files.size} files`);
