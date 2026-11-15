@@ -97,6 +97,15 @@ function semicolon(lang: UiLanguage): string {
   return lang === 'zh' ? '；' : '; ';
 }
 
+/**
+ * Whether a text file is a Markdown report this site exported (its first line is the report title in either language). A report
+ * export is not a manuscript and not a backup (Finding 2026-10-06), so it is never imported as source text.
+ */
+export function isMarkdownReportExport(text: string): boolean {
+  const first = text.replace(/^\uFEFF/u, '').split(/\r?\n/u, 1)[0] ?? '';
+  return (['zh', 'en'] as const).some(lang => first === '# ' + msg(lang).md.title);
+}
+
 export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguage): string {
   const m = msg(lang);
   const md = m.md;

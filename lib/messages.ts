@@ -158,6 +158,15 @@ const zh = {
     semantic_review_unavailable: '此服务暂不支持语义审校。术语审校仍可使用。',
     llm_budget_exhausted: '整句翻译暂时达到服务额度，术语查询仍可尝试。',
   },
+  // Extra lines under a failed translation or check: what kind of failure, what to do, the wait and the request id.
+  failure: {
+    causeTimeout: '原因：等待上游服务超时。',
+    causeUnavailable: '原因：上游服务暂不可用。',
+    adviceTranslation: '可以稍后重试；较长的文本请按段翻译（在审校工作台逐段翻译）。',
+    adviceReview: '可以稍后重试。',
+    wait: '服务要求等待约 {n} 秒后再发送。',
+    requestId: '请求编号：{id}',
+  },
   review: {
     kicker: '03 / REVIEW',
     title: '双语稿件工作台',
@@ -173,6 +182,9 @@ const zh = {
     dialogBody: '将替换当前稿件、术语选择、对应范围和报告，并停止等待当前检查。可以撤销此次替换；需要续作时请先保存稿件文件。',
     dialogKeep: '保留当前稿件',
     dialogReplace: '替换稿件',
+    importReplaceTitle: '用这个文件替换当前稿件？',
+    importReplaceBody: '当前稿件有未保存的工作。导入的文本会成为新的原文，并清空译文、术语选择和报告；可以撤销此次替换。需要续作时请先保存稿件文件。',
+    importReplaceConfirm: '导入并替换',
     save: '保存稿件',
     import: '导入稿件',
     importFileAria: '选择稿件文件',
@@ -366,6 +378,7 @@ const zh = {
     responseBasisMismatch: '响应依据与当前文本不一致，未采用此报告。',
     requestFailed: '请求失败，稿件已保留。',
     importInvalid: '文件无效；当前稿件未被替换。',
+    importReportExport: '这是 WuwaTerm 导出的审校报告，不是稿件，不能导入续作；当前稿件未被替换。请导入“保存稿件”生成的 .json 稿件文件。',
     saveFailed: '无法保存，请检查稿件内容。',
   },
   md: {
@@ -728,6 +741,14 @@ const en: typeof zh = {
     semantic_review_unavailable: 'Semantic review is not available on this service. Term review still works.',
     llm_budget_exhausted: 'Sentence translation has temporarily reached the service quota; term lookup may still work.',
   },
+  failure: {
+    causeTimeout: 'Cause: the upstream service timed out.',
+    causeUnavailable: 'Cause: the upstream service is unavailable.',
+    adviceTranslation: 'You can retry later; translate a long text segment by segment (in the review workbench).',
+    adviceReview: 'You can retry later.',
+    wait: 'The service asks to wait about {n} seconds before sending again.',
+    requestId: 'Request id: {id}',
+  },
   review: {
     kicker: '03 / REVIEW',
     title: 'Bilingual manuscript workbench',
@@ -743,6 +764,9 @@ const en: typeof zh = {
     dialogBody: 'This replaces the current manuscript, term choices, alignments and reports, and stops waiting for the current check. You can undo the replacement; save a manuscript file first if you want to resume later.',
     dialogKeep: 'Keep current manuscript',
     dialogReplace: 'Replace manuscript',
+    importReplaceTitle: 'Replace the current manuscript with this file?',
+    importReplaceBody: 'The current manuscript has unsaved work. The imported text becomes the new source and clears the translation, term choices and reports; you can undo this. Save the manuscript file first if you want to continue it later.',
+    importReplaceConfirm: 'Import and replace',
     save: 'Save manuscript',
     import: 'Import manuscript',
     importFileAria: 'Choose a manuscript file',
@@ -936,6 +960,7 @@ const en: typeof zh = {
     responseBasisMismatch: 'The response basis does not match the current text; this report was not adopted.',
     requestFailed: 'The request failed; the manuscript is kept.',
     importInvalid: 'The file is invalid; the current manuscript was not replaced.',
+    importReportExport: 'This is a WuwaTerm review report export, not a manuscript, so it cannot be imported to continue work; the current manuscript was not replaced. Import the .json manuscript file made by “Save manuscript”.',
     saveFailed: 'Could not save; please check the manuscript content.',
   },
   md: {
@@ -1263,6 +1288,26 @@ export function msg(lang: UiLanguage): Messages {
 
 export function fill(template: string, params: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/gu, (_, key: string) => (key in params ? String(params[key]) : `{${key}}`));
+}
+
+const TIMEOUT_REASONS = ['upstream_timeout'];
+const UNAVAILABLE_REASONS = ['llm_unavailable', 'upstream_unavailable', 'upstream_network_error', 'internal'];
+
+/**
+ * The lines under a failed translation or term check, after the reason's own text: the cause class (upstream timeout or an
+ * unavailable service), what to do, the wait the service asked for, and the request id when the response carried one.
+ */
+export function failureDetails(lang: UiLanguage, { kind, reason, requestId, retryAfter }: { kind: 'translation' | 'review'; reason?: string | null; requestId?: string | null; retryAfter?: number | null }): string[] {
+  const f = msg(lang).failure;
+  const lines: string[] = [];
+  const timeout = !!reason && TIMEOUT_REASONS.includes(reason);
+  const unavailable = !!reason && UNAVAILABLE_REASONS.includes(reason);
+  if (timeout) lines.push(f.causeTimeout);
+  if (unavailable) lines.push(f.causeUnavailable);
+  if (timeout || unavailable) lines.push(kind === 'translation' ? f.adviceTranslation : f.adviceReview);
+  if (typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter > 0) lines.push(fill(f.wait, { n: Math.ceil(retryAfter) }));
+  if (requestId) lines.push(fill(f.requestId, { id: requestId }));
+  return lines;
 }
 
 type SummaryParts = {

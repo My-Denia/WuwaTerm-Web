@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { categoryLabel, reasonLabel } from '../../lib/dictionary-labels';
-import { fill, msg } from '../../lib/messages';
+import { failureDetails, fill, msg } from '../../lib/messages';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
@@ -268,7 +268,7 @@ function TranslationView({ state, copied, copyFailed, onCopy, source }: { state:
   if (state.kind === 'idle') return <p className="translation-placeholder">{m.translation.idlePlaceholder}</p>;
   if (state.kind === 'loading') return <p className="notice-state" role="status">{m.translation.loadingStatus}</p>;
   if (state.kind === 'cancelled') return <p className="notice-state" role="status">{m.translation.cancelledStatus}</p>;
-  if (state.kind === 'error') return <FailureView value={state.error} />;
+  if (state.kind === 'error') return <FailureView value={state.error} translation />;
   if (state.kind !== 'success') return null;
   const result = state.data;
   function sendToReview() {
@@ -276,10 +276,12 @@ function TranslationView({ state, copied, copyFailed, onCopy, source }: { state:
   }
   return <div className="translation-result" aria-live="polite"><div className="result-meta"><span>{({ exact: m.translation.kindExact, fuzzy: m.translation.kindFuzzy, noop: m.translation.kindNoop, llm: m.translation.kindLlm })[result.kind]}</span><span>{result.direction === 'en' ? m.translation.directionEn : m.translation.directionZh}</span></div>{result.dictionary_miss && <p className="field-hint">{m.translation.dictionaryMiss}</p>}<p className="translated-text">{result.text}</p><button type="button" className="secondary-button" onClick={onCopy}>{copied ? m.translation.copied : m.translation.copy}</button><button type="button" className="secondary-button" onClick={sendToReview}>{m.translation.sendToReview}</button>{copyFailed && <p role="status">{m.translation.copyFailed}</p>}<RequestId value={result.request_id} /></div>;
 }
-function FailureView({ value }: { value: Failure }) {
+function FailureView({ value, translation = false }: { value: Failure; translation?: boolean }) {
   const { lang } = useUiLanguage();
   const m = msg(lang);
-  return <div className="error-panel" role="status"><p>{(m.tMsg as Record<string, string>)[value.reason] ?? m.translation.failureFallback}</p>{value.retry_after_seconds !== undefined && <p>{fill(value.retry_after_seconds >= 3600 ? m.translation.retryHours : m.translation.retrySeconds, { n: value.retry_after_seconds >= 3600 ? Math.ceil(value.retry_after_seconds / 3600) : Math.ceil(value.retry_after_seconds) })}</p>}{value.request_id && <RequestId value={value.request_id} />}</div>;
+  // The cause and what to do; the wait and the request id have their own lines below.
+  const details = failureDetails(lang, { kind: translation ? 'translation' : 'review', reason: value.reason });
+  return <div className="error-panel" role="status"><p>{(m.tMsg as Record<string, string>)[value.reason] ?? m.translation.failureFallback}</p>{translation && details.map(line => <p key={line} className="error-detail">{line}</p>)}{value.retry_after_seconds !== undefined && <p>{fill(value.retry_after_seconds >= 3600 ? m.translation.retryHours : m.translation.retrySeconds, { n: value.retry_after_seconds >= 3600 ? Math.ceil(value.retry_after_seconds / 3600) : Math.ceil(value.retry_after_seconds) })}</p>}{value.request_id && <RequestId value={value.request_id} />}</div>;
 }
 function RequestId({ value }: { value: string }) {
   const { lang } = useUiLanguage();

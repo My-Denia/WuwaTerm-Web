@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { renderMarkdownReport, markdownStructure } from '../lib/markdown-report.ts';
+import { isMarkdownReportExport, renderMarkdownReport, markdownStructure } from '../lib/markdown-report.ts';
 import { compareReports, makeChoice } from '../lib/manuscript.js';
 import { candidate, echo, fixture } from './fixtures/manuscript.mjs';
 import { msg } from '../lib/messages.ts';
@@ -346,4 +346,14 @@ test('model text in the semantic section cannot become report structure', () => 
   assert.equal(out.headings.some(h => h.includes('Forged')), false);
   // the section heading plus one heading per issue
   assert.equal(out.headings.length, base.headings.length + 1 + semanticItems.length);
+});
+
+test('a Markdown report this site exported is recognised in either language, with CRLF or a BOM, and plain text is not', () => {
+  for (const lang of ['zh', 'en']) {
+    const markdown = renderMarkdownReport(inputFor(snapshotFor()), lang);
+    assert.equal(isMarkdownReportExport(markdown), true, lang);
+    assert.equal(isMarkdownReportExport(`﻿${markdown.replace(/\n/gu, '\r\n')}`), true, `${lang} CRLF BOM`);
+  }
+  assert.equal(isMarkdownReportExport('今汐来了。\n# WuwaTerm 术语审校报告'), false);
+  assert.equal(isMarkdownReportExport('# 我的稿件\n正文。'), false);
 });
