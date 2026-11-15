@@ -157,6 +157,32 @@ test('the second pair translation still carries the previous pair as its before 
   expect(rec.translations).toEqual([{ text: '甲二。', to: 'en', context: { before: { source: '甲一。', target } } }]);
 });
 
+test('translating one untranslated pair clears the alignments, so the next untranslated paragraph has to be marked again', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: [] });
+  // A partly translated manuscript reopened: the first paragraph is aligned, the other two are marked as having no translation.
+  const source = '甲一。\n\n甲二。\n\n甲三。';
+  const target = 'Alpha one.';
+  const file = serializeWorkfile({
+    source, target, direction: 'en', choices: [], history: [],
+    alignments: [
+      { source: { start: 0, end: 3, text: '甲一。' }, target: { start: 0, end: 10, text: target } },
+      { source: { start: 5, end: 8, text: '甲二。' }, target: null },
+      { source: { start: 10, end: 13, text: '甲三。' }, target: null },
+    ],
+  });
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'manuscript.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+  await expect(page.locator('#review-source')).toHaveValue(source);
+  const untranslated = chips(page).filter({ hasText: S.segUntranslated });
+  await expect(untranslated).toHaveCount(2);
+  await untranslated.first().getByRole('button', { name: S.segTranslate, exact: true }).click();
+  await expect(page.locator('#review-target')).toContainText('Translated 1.', { timeout: 30_000 });
+  // The edit cleared the explicit alignments, as the stopped-translation hint tells the user: the third paragraph is no longer marked.
+  await expect(page.locator('.alignment-recovery')).toBeVisible();
+  await expect(untranslated).toHaveCount(0);
+  expect(rec.translations).toHaveLength(1);
+  expect(S.translateStopped).toContain('每译完一段，分段对应会被清空，需重新标记');
+});
+
 test('without the context capability the segment translation sends no context', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: [] });
   await page.locator('#review-source').fill(longPair(2).source);

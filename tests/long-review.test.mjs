@@ -239,6 +239,22 @@ test('Runtime step 6: a target-only edit in the session is one request with the 
   assert.deepEqual([written.status, written.choices.map(c => c.confirmed)], ['pending', [false, false, false]]);
 });
 
+test('Runtime step 6: after a target-only edit the re-check never confirms a choice that was unconfirmed before, even when it matches', () => {
+  // Record 1 with its official_pair at 0:3 unconfirmed: it matches its finding, but the user has not confirmed it.
+  const base = L.longFromWorkfile(ALL);
+  const choices = base.records[1].choices.map((c, i) => (i === 0 ? { ...c, confirmed: false } : c));
+  const opened = { ...base, records: base.records.map((r, i) => (i === 1 ? { ...r, choices } : r)) };
+  const after = edit(DRAFT, 'target', 'returned to', 'went back to');
+  const long = L.reconcileLong(opened, DRAFT, after);
+  assert.deepEqual(long.records[1].choices.map(c => c.confirmed), [false, true, false]);
+  const { long: checked, sent } = check(long, 1, ctx(after, B));
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].resolutions, [{ mention_id: '6:9:示例物', choice: 'not_a_term' }]);
+  assert.deepEqual(checked.records[1].choices.map(c => c.confirmed), [false, true, false]);
+  const written = L.workfileParts(checked, after, { basis: B }).segments[1];
+  assert.deepEqual([written.status, written.choices.map(c => c.confirmed)], ['done', [false, true, false]]);
+});
+
 test('Runtime step 6: after save and reopen the same record is checked without resolutions, then once more with the kept choices', () => {
   const after = edit(DRAFT, 'target', 'returned to', 'went back to');
   const file = save(ALL, L.reconcileLong(L.longFromWorkfile(ALL), DRAFT, after), after, B);

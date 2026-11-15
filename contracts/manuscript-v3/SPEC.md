@@ -641,10 +641,15 @@ rest. v1 and v2 files themselves stay pretty-printed, exactly as today.
    The stored result is always the compact form of the last response, together with
    that request's direction and alignment input.
 
-   Allowed difference: within one session, a client may still treat a segment whose
-   target alone was edited as unchanged in source, hash, direction and basis, and
-   re-check it in one request (Web), or treat it as pending and use two requests
-   (Windows). The file written after the run is the same either way.
+   A segment whose target alone was edited within the session keeps its choices with
+   their `confirmed` values until it is re-checked. That re-check never confirms a
+   choice that was unconfirmed before the edit: a confirmed choice stays confirmed only
+   while it still matches its finding, and an unconfirmed one stays unconfirmed even
+   when it matches. Allowed difference: a client may re-check such a segment in one
+   request with the confirmed choices as resolutions (Web), or first without
+   resolutions and then once more with the choices that were confirmed before the edit
+   and still match (two requests). Only the request count differs; the file written
+   after the run is the same.
 7. **Realignment** is by occurrence and candidate, against the new result:
    - An `official_pair` is kept if the finding at the same source span still has a
      candidate with the same `candidate_id`, `zh`, `en` and `category`.

@@ -154,7 +154,8 @@ session it can continue from the failed segment. After the manuscript is reopene
 the whole-text translation cannot be continued, because it needs an empty
 translation; the remaining segments can only be translated one at a time, after the
 segment alignments mark the untranslated source paragraphs ("Leave selected source
-unevaluated"). Every run keeps
+unevaluated"); each translated segment clears the alignments, so they are marked again
+before the next one. Every run keeps
 the direction it started with: a reply for another direction is not used.
 Edits during a run never abort a request that is already charged; a result whose segment
 text changed meanwhile is not used.
