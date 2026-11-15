@@ -571,3 +571,29 @@ test('Runtime step 6: a re-check planned with resolutions but no confirmed choic
   assert.deepEqual(after.records[1].choices.map(c => c.confirmed), [false, false]);
   assert.deepEqual(L.recordView(after, 1, context).choices.map(c => c.view), ['needs_reconfirmation', 'needs_reconfirmation']);
 });
+
+test('Runtime step 2 in a session: an edit that makes one segment equal another keeps each record and its choices at its own occurrence', () => {
+  // Two segments with the same source core and different targets and choices: an official_pair in the first, a not_a_term in the
+  // second. Editing the first target to read like the second must not hand either segment the other's record.
+  const S = `今汐来了。${Array.from({ length: 130 }, (_, k) => `第${k + 1}句是合成句子。`).join('')}`;
+  const en = tail => `Jinhsi came. ${Array.from({ length: 30 }, (_, k) => `Line ${k + 1} is ${tail}.`).join(' ')}`;
+  const [T1, T2] = [en('first'), en('second')];
+  const draft = { source: `${S}\n\n${S}`, target: `${T1}\n\n${T2}`, direction: 'en', alignments: null };
+  assert.deepEqual(L.segmentInputs(draft).items.map(it => [it.pair.status, it.sourceCore === S]), [['ready', true], ['ready', true]]);
+  const K = { candidate_id: sha('candidate:今汐'), zh: '今汐', en: 'Jinhsi', category: 'character' };
+  const result = { truncated: false, evaluated: 1, not_evaluated: 0,
+    findings: [{ verdict: 'verified_constraint', source: [0, 2], target: [0, 6], candidates: [K], candidates_truncated: false }] };
+  const context = ctx(draft, B);
+  let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
+  for (const index of [0, 1]) ({ long } = check(long, index, context, result));
+  long = L.chooseTerm(long, { index: 0, finding: { source: [0, 2] }, candidate: K }, context).long;
+  long = L.chooseTerm(long, { index: 1, finding: { source: [0, 2] }, candidate: null }, context).long;
+  for (const index of [0, 1]) ({ long } = check(long, index, context, result));
+  const after = { ...draft, target: `${T2}\n\n${T2}` };
+  const edited = L.reconcileLong(long, draft, after);
+  assert.deepEqual(edited.records.map(r => r.choices.map(c => [c.choice, c.confirmed])), [[['official_pair', true]], [['not_a_term', true]]]);
+  assert.deepEqual(edited.records.map(r => [r.status, r.result !== null, r.prior !== null]), [['pending', false, true], ['done', true, false]]);
+  const { segments } = L.workfileParts(edited, after, { basis: B });
+  assert.deepEqual(segments.map(r => [r.status, r.choices.map(c => [c.choice, c.confirmed])]),
+    [['pending', [['official_pair', false]]], ['done', [['not_a_term', true]]]]);
+});
