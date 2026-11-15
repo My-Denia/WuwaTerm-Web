@@ -77,7 +77,7 @@ type SegmentInput = { pair: Pair; range: { source_start: number; source_end: num
 type RecordState = 'pending' | 'saved' | 'current' | 'stale';
 type RecordView = { state: RecordState; ready: boolean; needsCheck: boolean; finished: boolean; choices: (LongChoice & { view: 'applies' | 'needs_reconfirmation' | 'waiting' })[] };
 type LongCtx = { draft: Draft; basis: SessionBasis };
-type ExportRow = { index: number; state: RecordState; stale: boolean; source_start: number; source_end: number; target_start: number; target_end: number; report: TermReport & Record<string, unknown>; findings: { verdict: string; source_span: Span; target_span: Span | null; candidates: { zh: string; en: string }[] }[] };
+type ExportRow = { index: number; state: RecordState; stale: boolean; truncated: boolean; source_start: number; source_end: number; target_start: number; target_end: number; report: TermReport & Record<string, unknown>; findings: { verdict: string; source_span: Span; target_span: Span | null; candidates: { zh: string; en: string }[]; candidates_truncated: boolean }[] };
 const inputsOf = (draft: Draft) => segmentInputs(draft) as { long: boolean; items: SegmentInput[] };
 const viewOf = (long: LongState, index: number, ctx: LongCtx) => recordView(long, index, ctx) as RecordView | null;
 const rowsOf = (long: LongState, ctx: LongCtx) => exportSegments(long, ctx) as ExportRow[];
@@ -1243,7 +1243,7 @@ export function semanticExport(draft: Draft, semantic: SemanticState, basis: Ses
   const terms = segments.length ? {
     segment_term_reports: segments.map(({ index, stale, source_start, source_end, target_start, target_end, report }) => ({ segment: index + 1, stale, source_start, source_end, target_start, target_end, report })),
   } : {};
-  const markdownTerms = segments.length ? segments.map(({ index, state, stale, findings }) => ({ index, state, stale, findings })) : null;
+  const markdownTerms = segments.length ? segments.map(({ index, state, stale, truncated, findings }) => ({ index, state, stale, truncated, findings })) : null;
   if (!semantic.placed.length && !semantic.decisions.length) return { result: terms, markdown: null, segmentTerms: markdownTerms };
   // Keyed by occurrence (the placed issue), not by issue id: two identical
   // segments report the same id for different places with different statuses.

@@ -357,3 +357,28 @@ test('a Markdown report this site exported is recognised in either language, wit
   assert.equal(isMarkdownReportExport('今汐来了。\n# WuwaTerm 术语审校报告'), false);
   assert.equal(isMarkdownReportExport('# 我的稿件\n正文。'), false);
 });
+
+test('a truncated segment report says so in the Markdown export, for the result and for a finding\'s candidates', () => {
+  const md = msg('zh').md;
+  const finding = (start, candidatesTruncated) => ({ verdict: 'needs_review', source_span: { start, end: start + 2, text: '今汐' }, target_span: null,
+    candidates: [{ zh: '今汐', en: 'Jinhsi' }], candidates_truncated: candidatesTruncated });
+  const segmentTerms = [
+    { index: 0, state: 'current', stale: false, truncated: true, findings: [finding(0, false), finding(5, true)] },
+    { index: 1, state: 'current', stale: false, truncated: false, findings: [finding(0, false)] },
+  ];
+  const markdown = renderMarkdownReport({ ...inputFor(null, { currency: 'current', draft: { source: '今汐。', target: 'Jinhsi.', direction: 'en' } }), segmentTerms }, 'zh');
+  const [first, second] = markdown.split('### ').slice(1);
+  assert.equal(first.includes(md.truncatedLine), true);
+  assert.equal(first.split(md.candidatesTruncatedLine).length - 1, 1);
+  assert.equal(second.includes(md.truncatedLine) || second.includes(md.candidatesTruncatedLine), false);
+});
+
+test('blank lines inside the fenced source and target are kept exactly; only the spacing between sections is normalized', () => {
+  const source = 'first\n\n\n\nsecond';
+  const target = 'one\n\n\n\n\ntwo';
+  const markdown = renderMarkdownReport(inputFor(null, { currency: 'none', draft: { source, target, direction: 'en' } }), 'zh');
+  assert.equal(markdown.includes(`\n${source}\n`), true);
+  assert.equal(markdown.includes(`\n${target}\n`), true);
+  // Outside the fences no run of more than one blank line is left.
+  assert.equal(markdown.replace(source, '').replace(target, '').includes('\n\n\n'), false);
+});

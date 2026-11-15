@@ -14,6 +14,7 @@ import { longFromWorkfile, recordView, segmentInputs, workfileParts } from '../.
 import { fragmentOccurrences, spliceOccurrence } from '../../lib/target-revision.js';
 import { validSpan } from '../../lib/manuscript.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
+import { CAPABILITY_TRANSLATION_CONTEXT } from '../../lib/semantic-review.js';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
@@ -123,6 +124,8 @@ export function ReviewWorkbench() {
   const basisRef = useRef<SessionBasis>(null);
   const setBasis = useCallback((next: SessionBasis) => { basisRef.current = next; setBasisState(next); }, []);
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
+  // The capability list while it loads, so a translation sent before it arrives still knows whether context is negotiated.
+  const capabilitiesLoaded = useRef<Promise<string[]> | null>(null);
   const [semanticReset, setSemanticReset] = useState(0);
   const [semanticRunActive, setSemanticRunActive] = useState(false);
   const historySerial = useRef(0);
@@ -375,13 +378,17 @@ export function ReviewWorkbench() {
     // An older service answers 404 here and the BFF reports an empty list: the
     // workbench then behaves as before, with term review only.
     const controller = new AbortController();
-    void (async () => {
+    capabilitiesLoaded.current = (async () => {
       try {
         const response = await fetch(workbenchPath('/api/capabilities'), { cache: 'no-store', signal: controller.signal });
         const value = await poolPayload(response) as { capabilities?: unknown } | null;
-        if (controller.signal.aborted) return;
-        setCapabilities(response.ok && Array.isArray(value?.capabilities) ? value.capabilities.filter((x): x is string => typeof x === 'string') : []);
-      } catch { if (!controller.signal.aborted) setCapabilities([]); }
+        const list = response.ok && Array.isArray(value?.capabilities) ? value.capabilities.filter((x): x is string => typeof x === 'string') : [];
+        if (!controller.signal.aborted) setCapabilities(list);
+        return list;
+      } catch {
+        if (!controller.signal.aborted) setCapabilities([]);
+        return [];
+      }
     })();
     return () => controller.abort();
   }, []);
@@ -503,11 +510,16 @@ export function ReviewWorkbench() {
     setTranslating(true);
     setNotice(null);
     try {
+      // With translation-context-v1 negotiated, the whole text goes out with context (even {}): Core then keeps its
+      // paragraphs, so review can pair them. Without it, nothing is added (MY-238).
+      const known = capabilities ?? await (capabilitiesLoaded.current ?? Promise.resolve([]));
+      if (abort.signal.aborted || generation.current !== mine) return;
+      const context = known.includes(CAPABILITY_TRANSLATION_CONTEXT) ? { context: {} } : {};
       const response = await fetch(workbenchPath('/api/translations'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         cache: 'no-store',
-        body: JSON.stringify({ text: source, to: direction }),
+        body: JSON.stringify({ text: source, to: direction, ...context }),
         signal: abort.signal,
       });
       const value = await response.json();
