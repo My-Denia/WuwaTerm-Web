@@ -79,6 +79,15 @@ function manuscriptBody(nextDraft: Draft, nextChoices: Choice[], nextReports: Sn
   const base = { ...nextDraft, choices: nextChoices, history: nextReports.map(cleanSnapshot), ...parts };
   return semanticWorkfileParts(base, semantic);
 }
+/**
+ * Whether the workbench holds work that replacing the manuscript would lose: the texts, alignments, choices and reports,
+ * semantic decisions and results, and the long-mode records, choices and choice history. One predicate for the save
+ * state, clearing and a received draft, so they cannot disagree.
+ */
+function workPresent(draft: Draft, choices: Choice[], reports: Snapshot[], semantic: SemanticState) {
+  return recoverableWorkPresent({ ...draft, choices, reports }) || semantic.decisions.length > 0 || semantic.results.length > 0
+    || longHoldsWork(semantic.long);
+}
 function canonicalOf(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState, basis: SessionBasis) {
   try { return canonicalManuscript(manuscriptBody(nextDraft, nextChoices, nextReports, semantic, basis)); } catch { return null; }
 }
@@ -176,8 +185,7 @@ export function ReviewWorkbench() {
   const comparison = latest && previous ? compareReports(previous, latest) : null;
   const basisChanged = !!latest?.trusted && choices.some(choice => !sameBasis(choice.basis, basisOf(latest.report)));
   const canonical = useMemo(() => canonicalOf(draft, choices, reports, semantic, basis), [draft, choices, reports, semantic, basis]);
-  const holdsWork = recoverableWorkPresent({ source, target, choices, alignments, reports }) || semantic.decisions.length > 0 || semantic.results.length > 0
-    || longHoldsWork(semantic.long);
+  const holdsWork = workPresent(draft, choices, reports, semantic);
   const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
   const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating || semanticRunActive });
   const m = msg(lang);
@@ -321,7 +329,7 @@ export function ReviewWorkbench() {
       if (before.draft.source === detail.source && before.draft.target === detail.target && before.draft.direction === detail.direction) return;
       cancelRevision(revisionRef.current ? 'revisionStale' : '');
       const next: Draft = { source: detail.source, target: detail.target, direction: detail.direction, alignments: null };
-      const empty = !recoverableWorkPresent({ ...before.draft, choices: before.choices, reports: before.reports });
+      const empty = !workPresent(before.draft, before.choices, before.reports, before.semantic);
       if (empty) receiveDraft(next);
       else {
         setPendingDraft(next);

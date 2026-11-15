@@ -367,3 +367,26 @@ test('a reused segment exports its rebuilt report, and an exported result cannot
   await expect(again.locator('#review-source')).toHaveValue(source);
   await expect(again.locator('#review-target')).toHaveValue(withTarget(n, 3, ' again'));
 });
+
+test('a sent draft asks before replacing a workbench that holds only the segment choice history', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: [] });
+  const { source, target } = termPair(2);
+  await fillPair(page, source, target);
+  await run(page, rec, 2);
+  await findingIn(page, 0).getByRole('button', { name: M.review.adopt, exact: true }).click();
+  // SPEC "Leaving long mode": emptying both boxes moves the choice to the segment choice history; it is still work.
+  await fillPair(page, '', '');
+  await expect(page.locator('.long-history summary')).toHaveText(fill(S.historyTitle, { n: 1 }));
+  await page.locator('#translation-source').fill('今汐。');
+  await page.getByRole('button', { name: '翻译整句', exact: true }).click();
+  await expect(page.locator('.translated-text')).toHaveText('Translated 1.');
+  await page.getByRole('button', { name: '送去审校', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: M.review.dialogTitle });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: M.review.dialogKeep, exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('#review-source')).toHaveValue('');
+  await expect(page.locator('.long-history summary')).toHaveText(fill(S.historyTitle, { n: 1 }));
+  const file = JSON.parse((await downloadFrom(page, '保存稿件')).text);
+  expect(file.segment_choice_history.map(e => [e.choice, e.source_span.text])).toEqual([['official_pair', '今汐']]);
+});
