@@ -5,6 +5,7 @@ import test from 'node:test';
 import { WORKFILE_FORMAT_V2, parseWorkfile, validAlignments } from '../lib/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
 import { pairSegments } from '../lib/segmentation.js';
+import { parseWorkfile as parseWorkfileWeb020 } from './legacy/web-0.2.0/manuscript.js';
 import {
   MAX_V3_BYTES, MODEL_NAMES, REVIEW_MAX_JSON_BYTES, V3_FORMAT, alignmentInput, alignmentList, budgetManuscript, buildFixtures, canonicalV3, padContent,
 } from '../scripts/build-manuscript-v3-fixtures.mjs';
@@ -181,7 +182,8 @@ function readV3(content) {
   return x;
 }
 
-const legacyCode = content => { try { parseWorkfile(content); return null; } catch (error) { return error.code; } };
+// The frozen Web 0.2.0 parser (tests/legacy/web-0.2.0): lib/manuscript.js now reads v3, so it cannot stand for old clients.
+const legacyCode = content => { try { parseWorkfileWeb020(content); return null; } catch (error) { return error.code; } };
 
 // ---- assertions a to h ----
 
@@ -228,7 +230,7 @@ test('d. every invalid case is rejected with its code, as the first failure', ()
   for (const c of cases.invalid) assert.throws(() => readV3(contentOf(c)), { code: c.error }, c.file);
 });
 
-test('e. today\'s parseWorkfile (Web 0.2.0) gives every case its legacy_error', () => {
+test('e. the frozen Web 0.2.0 parseWorkfile gives every case its legacy_error', () => {
   for (const c of [...cases.valid, ...cases.invalid]) assert.equal(legacyCode(contentOf(c)), c.legacy_error, c.file);
 });
 

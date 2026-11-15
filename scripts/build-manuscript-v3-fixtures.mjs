@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeChoice, serializeWorkfile } from '../lib/manuscript.js';
+// The frozen Web 0.2.0 writer: the generator's v1/v2 bytes stay independent of lib/manuscript.js (which writes v3 too).
+import { makeChoice, serializeWorkfile } from '../tests/legacy/web-0.2.0/manuscript.js';
 import { pairSegments } from '../lib/segmentation.js';
 import { buildFixtures as buildV2Fixtures } from './build-manuscript-v2-fixtures.mjs';
 
