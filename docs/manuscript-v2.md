@@ -57,8 +57,8 @@ dropped.
 ## What the web writer stores
 
 - `semantic_texts` holds only revisions that an `ignored` decision references and that
-  differ from the current text, newest first, at most 16, within 1 MiB. When they do not
-  fit, the oldest are dropped first. An `ignored` decision whose text was dropped gets
+  differ from the current text, newest first, at most 16; the oldest are dropped only
+  while the file would exceed 44 MiB (such a file is v3). An `ignored` decision whose text was dropped gets
   `old_text_unavailable` at the next re-review and returns to needing reconfirmation; the
   decision itself is kept.
 - A `semantic_history` snapshot includes only segments whose current slice still equals the

@@ -502,3 +502,56 @@ test('Long mode boundary: entering long mode gives a pending record per segment;
   console.log(`long-review: ${long.records.length} records, ${Array.from(x.source).length + Array.from(x.target).length} scalars opened and saved in ${ms.toFixed(0)} ms`);
   assert.equal(content, read('valid-v3-over-1mib.json'));
 });
+
+// ---- choices settled with the Windows client (SPEC steps 2, 4 and 6 and "Segment record") ----
+
+test('Segment record and Runtime step 2: a done record on a pair that is not ready opens and saves as pending, its choice unconfirmed and out of completed', () => {
+  // A 1,900-scalar paragraph pair whose sentence counts differ needs a manual split; the cores still fit a done record's 2,000.
+  const source = `${'甲'.repeat(949)}。${'乙'.repeat(949)}。\n\n${'丙'.repeat(199)}。`;
+  const target = `${'b'.repeat(1899)}.\n\n${'c'.repeat(199)}.`;
+  const draft = { source, target, direction: 'en', alignments: null };
+  const [first, second] = L.segmentInputs(draft).items;
+  assert.deepEqual([first.pair.status, second.pair.status], ['needs_manual_split', 'ready']);
+  const K = { candidate_id: sha('candidate:甲'), zh: '甲', en: 'Jia', category: 'item' };
+  const head = (i, it) => ({ index: i, segmentation_version: 'segmentation-v1', ...it.range, source_hash: it.sourceHash, target_hash: it.targetHash });
+  const done = { ...head(0, first), status: 'done', direction: 'en', alignment_input: 'automatic', basis: B,
+    result: { truncated: false, evaluated: 1, not_evaluated: 0, findings: [{ verdict: 'needs_review', source: [0, 1], target: null, candidates: [K], candidates_truncated: false }] },
+    choices: [{ source_span: { start: 0, end: 1, text: '甲' }, choice: 'official_pair', candidate: K, offered: [], confirmed: true }] };
+  const pending = { ...head(1, second), status: 'pending', direction: null, alignment_input: null, basis: null, result: null, choices: [] };
+  const opened = L.longFromWorkfile({ ...draft, segments: [done, pending], segment_choice_history: [], progress: { current: 0, completed: [0] } });
+  assert.deepEqual([opened.records[0].status, opened.records[0].result, opened.records[0].choices[0].confirmed], ['pending', null, false]);
+  assert.deepEqual(opened.progress, { current: 0, completed: [] });
+  // The writer applies the same rule to a runtime record that still holds a result for that pair.
+  const sent = JSON.stringify([{ mention_id: '0:1:甲', choice: 'official_pair', candidate_id: K.candidate_id }]);
+  const held = { records: [{ ...done, report: null, sent, prior: null }, { ...pending, report: null, sent: null, prior: null }], history: [], progress: { current: 0, completed: [0] } };
+  const { segments, progress } = L.workfileParts(held, draft, { basis: B });
+  assert.deepEqual([segments[0].status, segments[0].result, segments[0].choices[0].confirmed], ['pending', null, false]);
+  assert.deepEqual(progress.completed, []);
+});
+
+test('Runtime step 2: when records do not map by position, an unused current record moves to the pair holding its start', () => {
+  const parsed = { ...ALL, source: replaceOnce(ALL.source, '又回到', '又一次回到'), progress: { current: 1, completed: [1, 2] } };
+  const long = L.longFromWorkfile(parsed);
+  assert.deepEqual(long.records[1].choices, []);
+  assert.deepEqual(long.progress, { current: 1, completed: [2] });
+});
+
+test('Runtime step 4: when the live response carries no v3 basis, every done record is written stale (fail closed)', () => {
+  const long = L.longFromWorkfile(ALL);
+  assert.deepEqual(L.workfileParts(long, DRAFT, { basis: null }).segments.map(r => r.status), ['pending', 'done', 'stale']);
+  assert.deepEqual(L.workfileParts(long, DRAFT, { basis: false }).segments.map(r => r.status), ['pending', 'stale', 'stale']);
+});
+
+test('Runtime step 6: a re-check planned with resolutions but no confirmed choice keeps the unconfirmed choices unconfirmed', () => {
+  const base = L.longFromWorkfile(ALL);
+  // Record 1 with its two choices that hold in the result, both unconfirmed (they need reconfirmation).
+  const unconfirmed = base.records[1].choices.slice(0, 2).map(c => ({ ...c, confirmed: false }));
+  const long = { ...base, records: base.records.map((r, i) => (i === 1 ? { ...r, choices: unconfirmed } : r)) };
+  const context = ctx(DRAFT, B);
+  assert.equal(L.recheckPlan(long, 1, context), 'with_resolutions');
+  const { long: after, sent } = check(long, 1, context);
+  assert.equal(sent.length, 1);
+  assert.equal(Object.hasOwn(sent[0], 'resolutions'), false);
+  assert.deepEqual(after.records[1].choices.map(c => c.confirmed), [false, false]);
+  assert.deepEqual(L.recordView(after, 1, context).choices.map(c => c.view), ['needs_reconfirmation', 'needs_reconfirmation']);
+});

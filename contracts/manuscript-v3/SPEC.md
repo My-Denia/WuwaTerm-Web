@@ -125,8 +125,7 @@ pins). This PR leaves them untouched.
 
 ## Segment request
 
-Both clients send exactly this term check for a segment. Web today omits `alignments`
-in segment checks; it adopts this rule in M1.
+Both clients send exactly this term check for a segment.
 
 - `source` and `target` are the two cores, `direction` is the manuscript's
   `direction`, and `review_version` is `review-v2`. The request carries the header
@@ -454,7 +453,10 @@ parsers must report the same code for the same bytes.
    - a `__proto__`, `constructor` or `prototype` key: `workfile_forbidden_field`.
 4. If the top-level keys are not exactly the 13 v3 keys, the code is
    `workfile_unsupported_format`.
-5. Check the v1 and v2 parts with exactly the v2 checks and codes
+5. Check the v1 and v2 parts with exactly the v2 checks and codes. First the v2 array
+   cap: an array of more than 128 items anywhere in the v1 and v2 parts gives
+   `workfile_too_many_entries`, as it does in a v2 file (fixture
+   `invalid-v3-129-decisions.json`). Then the v2 content checks
    (`workfile_invalid_content`, `workfile_duplicate_choices`), including v2's own counts
    such as 32 `choices` and 128 `semantic_decisions`. The only exception is the text
    limits that v2 ties to the file size: `source`, `target`, `semantic_texts[].text`
@@ -582,7 +584,13 @@ rest. v1 and v2 files themselves stay pretty-printed, exactly as today.
      reused.
    - Every other segment is pending.
    - Choices of records left unused move to `segment_choice_history`.
-   - `progress` follows the mapping.
+   - `progress` follows the mapping. When the record at `progress.current` is left
+     unused, `current` moves to the segment whose region holds that record's
+     `source_start` (the last segment if none does).
+
+   A record whose segment is not ready now (for example `needs_manual_split`) keeps its
+   choices, unconfirmed, but not its result: it is pending, and its index leaves
+   `progress.completed`. The writer applies the same rule.
 3. **Content and input check, before any use.** The reader computes the hashes of the
    current cores, and the alignment input that a request would carry now (see
    "Segment request"). A result is a reuse candidate only if all of these hold:
@@ -599,7 +607,8 @@ rest. v1 and v2 files themselves stay pretty-printed, exactly as today.
    The probe costs one review admission, like any segment check. Its response basis is
    the current basis. If the response has no `matcher_revision`, or has a null
    `schema_version` or `source_commit`, there is no current basis, and no saved result
-   is reused in this session.
+   is reused in this session. This fails closed: the response is not stored, and the
+   writer writes every done record as `stale` for the rest of the session.
 
    The probe carries no resolutions, because the current basis is not known yet. What
    happens to its response depends on the probed record:
@@ -622,13 +631,20 @@ rest. v1 and v2 files themselves stay pretty-printed, exactly as today.
      or the alignment input changed, or when its choices changed. The
      `resolution_context` is
      `{source_revision: source core hash, rule_version, dictionary_revision, matcher_revision}`,
-     from the current basis.
+     from the current basis. A choice that is not confirmed stays unconfirmed after this
+     request, even when no choice is confirmed and the request carries no resolutions;
+     a confirmed choice that no longer matches its finding becomes unconfirmed.
    - Otherwise, the first request carries no resolutions, and the choices are realigned
      against its findings (step 7). If any choice was kept, the segment is checked once
      more with them.
 
    The stored result is always the compact form of the last response, together with
    that request's direction and alignment input.
+
+   Allowed difference: within one session, a client may still treat a segment whose
+   target alone was edited as unchanged in source, hash, direction and basis, and
+   re-check it in one request (Web), or treat it as pending and use two requests
+   (Windows). The file written after the run is the same either way.
 7. **Realignment** is by occurrence and candidate, against the new result:
    - An `official_pair` is kept if the finding at the same source span still has a
      candidate with the same `candidate_id`, `zh`, `en` and `category`.
@@ -673,11 +689,9 @@ These limits are accepted for v3, with no change now.
   - `workfile_unsupported_format` ("不支持此稿件格式或版本") otherwise.
 
   `cases.json` records each case's expected old-client code as `legacy_error`. Web's
-  test asserts it against `lib/manuscript.js`. When this spec was added, that file was
-  unchanged since tag `v0.2.0` (5aabe80), so the test checks the Web 0.2.0 parser.
-  Before M1 changes `lib/manuscript.js`, it must freeze a copy of the v0.2.0 parser for
-  this check. Windows `parse_workfile` (`src/wuwaterm_client/manuscript.py`, unchanged
-  since tag v0.4.2) gives every case its `legacy_error`: 61 of 61.
+  test asserts it against `tests/legacy/web-0.2.0/manuscript.js`, a frozen copy of the
+  parser at tag `v0.2.0` (5aabe80). Windows `parse_workfile` at tag v0.4.2
+  (`src/wuwaterm_client/manuscript.py`) gives every case its `legacy_error`: 62 of 62.
 - **v2 contract.** Every input that is not a v3 object is read exactly as before. Every
   case in `contracts/manuscript-v2/cases.json` keeps its code under a v3 reader, which
   Web's test asserts.

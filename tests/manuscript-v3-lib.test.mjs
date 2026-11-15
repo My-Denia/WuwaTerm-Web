@@ -73,12 +73,13 @@ test('lib: every v2 case keeps its result under the v3 reader', () => {
   for (const c of v2cases.invalid) assert.equal(codeOf(() => parseWorkfile(read(c.file, v2dir))), c.error, c.file);
 });
 
-test('lib: a v1/v2 array over its own count but within 512 items is invalid_content in a v3 file (SPEC "Reading", steps 3 and 5)', () => {
+test('lib: a v1/v2 array over 128 items is too_many_entries in a v3 file as in a v2 file; under 128 its own count gives invalid_content (SPEC "Reading", step 5)', () => {
   const v3 = JSON.parse(read('valid-v3-all-parts.json'));
   const v2 = JSON.parse(read('valid-all-parts.json', v2dir));
-  // 129 decisions: a v2 file stops at the 128-item array cap (workfile_too_many_entries); a v3 file's cap is 512, so v2's own count fails.
+  // 129 decisions: the v2 array cap of 128 applies to the v1/v2 part of either format, so both report the same code.
   assert.equal(codeOf(() => parseWorkfile(JSON.stringify({ ...v2, semantic_decisions: Array(129).fill(v2.semantic_decisions[0]) }))), 'workfile_too_many_entries');
-  assert.equal(codeOf(() => parseWorkfile(JSON.stringify({ ...v3, semantic_decisions: Array(129).fill(v2.semantic_decisions[0]) }))), 'workfile_invalid_content');
+  assert.equal(codeOf(() => parseWorkfile(JSON.stringify({ ...v3, semantic_decisions: Array(129).fill(v2.semantic_decisions[0]) }))), 'workfile_too_many_entries');
+  assert.equal(codeOf(() => parseWorkfile(JSON.stringify({ ...v3, history: Array(129).fill(null) }))), 'workfile_too_many_entries');
   assert.equal(codeOf(() => parseWorkfile(JSON.stringify({ ...v3, choices: Array(33).fill(null) }))), 'workfile_invalid_content');
   assert.equal(codeOf(() => parseWorkfile(JSON.stringify({ ...v3, semantic_decisions: Array(513).fill(null) }))), 'workfile_too_many_entries');
 });

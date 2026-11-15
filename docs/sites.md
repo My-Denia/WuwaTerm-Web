@@ -149,7 +149,12 @@ resent automatically: an upstream rate limit stops the run at that segment until
 user continues, a timeout or server error marks the segment failed for a manual
 retry, and two consecutive identical failures stop the run. A used-up daily quota
 pauses the run with finished segments kept. Segment translation assembles the text
-in order, so it stops at any failed segment instead of skipping it. Every run keeps
+in order, so it stops at any failed segment instead of skipping it. Within the same
+session it can continue from the failed segment. After the manuscript is reopened,
+the whole-text translation cannot be continued, because it needs an empty
+translation; the remaining segments can only be translated one at a time, after the
+segment alignments mark the untranslated source paragraphs ("Leave selected source
+unevaluated"). Every run keeps
 the direction it started with: a reply for another direction is not used.
 Edits during a run never abort a request that is already charged; a result whose segment
 text changed meanwhile is not used.

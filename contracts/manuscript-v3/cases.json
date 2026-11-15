@@ -233,6 +233,12 @@
       "note": "the v1/v2 part keeps its checks: direction must be en or zh"
     },
     {
+      "file": "invalid-v3-129-decisions.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "the v1/v2 part keeps the v2 array cap of 128 items: 129 semantic decisions (within the v3 tree cap of 512)"
+    },
+    {
       "file": "invalid-v3-unknown-status.json",
       "error": "workfile_segment_invalid",
       "legacy_error": "workfile_unsupported_format",

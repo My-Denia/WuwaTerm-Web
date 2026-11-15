@@ -40,17 +40,18 @@ const CHOICE_KEYS = ['source_span', 'choice', 'candidate', 'offered', 'confirmed
 const HISTORY_KEYS = ['source_hash', 'source_span', 'choice', 'candidate', 'offered'];
 const VERDICTS = ['verified_constraint', 'confirmed_conflict', 'needs_review', 'not_evaluated'];
 
-function checkTree(x, depth = 0) {
+// maxItems is 512 for the whole v3 tree (step 3) and 128 for the v1/v2 part (step 5).
+function checkTree(x, maxItems = 512, depth = 0) {
   if (depth > 16) throw fail('workfile_too_deep');
   if (Array.isArray(x)) {
-    if (x.length > 512) throw tooMany();
-    x.forEach(v => checkTree(v, depth + 1));
+    if (x.length > maxItems) throw tooMany();
+    x.forEach(v => checkTree(v, maxItems, depth + 1));
   } else if (isObject(x)) {
     const keys = Object.keys(x);
     if (keys.length > 32) throw fail('workfile_too_many_fields');
     for (const key of keys) {
       if (['__proto__', 'constructor', 'prototype'].includes(key)) throw fail('workfile_forbidden_field');
-      checkTree(x[key], depth + 1);
+      checkTree(x[key], maxItems, depth + 1);
     }
   }
 }
@@ -145,7 +146,10 @@ function checkRecordContent(r, sourceScalars, targetScalars) {
 // no choices, history or semantic data, what is left to check is the two texts, the direction and the alignments, which this does the
 // way lib/manuscript.js does, with the v3 text limit. Anything else over 1 MiB is a case this reference reader cannot check.
 function checkV2Part(x) {
-  const projection = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]])) });
+  const part = Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]]));
+  // The v1/v2 part keeps the v2 array cap of 128 items, at either size.
+  checkTree(part, 128, 1);
+  const projection = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...part });
   if (Buffer.byteLength(projection, 'utf8') <= MiB) { parseWorkfile(projection); return; }
   const parts = ['choices', 'history', 'semantic_decisions', 'semantic_texts', 'semantic_history'].map(k => x[k]);
   if (parts.some(p => !Array.isArray(p))) throw fail('workfile_invalid_content');
