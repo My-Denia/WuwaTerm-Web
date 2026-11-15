@@ -634,10 +634,6 @@ export function ReviewWorkbench() {
     replaceSemantic(freshSemantic(textDraft) as SemanticState);
     setNotice('importedSourceText');
   }
-  /** The current-result JSON this site exports (format wuwaterm-result-v2): a report, not a manuscript. */
-  function resultExport(text: string) {
-    try { const value = JSON.parse(text) as { format?: unknown } | null; return !!value && typeof value === 'object' && value.format === 'wuwaterm-result-v2'; } catch { return false; }
-  }
   async function importFile(file?: File) {
     if (!file) return;
     const attempt = ++importAttempt.current;
@@ -661,8 +657,16 @@ export function ReviewWorkbench() {
         replaceWithText(text);
         return;
       }
-      if (resultExport(text)) { setError({ code: 'importReportExport' }); return; }
-      const value = parseWorkfile(text);
+      let value;
+      try { value = parseWorkfile(text); } catch (cause) {
+        // The current-result JSON this site exports (format wuwaterm-result-v2) is a report, not a manuscript; its writer puts
+        // the format first, so the start of the file tells it apart without parsing the file a second time.
+        if ((cause as { code?: unknown } | null)?.code === 'workfile_unsupported_format' && /^\s*\{\s*"format"\s*:\s*"wuwaterm-result-v2"/u.test(text.slice(0, 256))) {
+          setError({ code: 'importReportExport' });
+          return;
+        }
+        throw cause;
+      }
       const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
       const nextChoices = value.choices as Choice[];
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({ ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '' }));
@@ -750,20 +754,26 @@ export function ReviewWorkbench() {
   function exportMarkdown() {
     // Read-only local snapshot: no requests, no state change; the document
     // renders the full report regardless of the UI's finding filter.
-    const currency: MarkdownCurrency = !latest ? 'none' : current ? 'current' : latest.trusted ? 'stale' : 'imported';
+    // Long mode follows the JSON export: the segment reports are the result, current only when every segment is, and a
+    // document report left from a shorter text is not rendered.
+    const long = (segmentInputs(draft) as { long: boolean }).long;
+    const parts = semanticExport(draft, semantic, basisRef.current);
+    const currency: MarkdownCurrency = long ? (!parts.segmentTerms?.length ? 'none' : longResultsCurrent() ? 'current' : 'stale')
+      : !latest ? 'none' : current ? 'current' : latest.trusted ? 'stale' : 'imported';
     const strip = (snapshot: Snapshot) => ({
       source: snapshot.source, target: snapshot.target, direction: snapshot.direction,
       report: snapshot.report, resolutions: snapshot.resolutions,
     });
     downloadFile('wuwaterm-report.md', renderMarkdownReport({
       draft: { source, target, direction },
-      latest: latest ? strip(latest) : null,
-      previous: previous ? strip(previous) : null,
+      latest: latest && !long ? strip(latest) : null,
+      previous: previous && !long ? strip(previous) : null,
       currency,
       choices,
       reconciled,
-      comparison,
-      ...(() => { const parts = semanticExport(draft, semantic, basisRef.current); return { semantic: parts.markdown, segmentTerms: parts.segmentTerms }; })(),
+      comparison: long ? null : comparison,
+      semantic: parts.markdown,
+      segmentTerms: parts.segmentTerms,
     }, lang), 'text/markdown;charset=utf-8');
     setNotice('exportMarkdown');
   }

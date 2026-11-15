@@ -418,3 +418,28 @@ test('a truncated segment result still takes choices on the findings it shows, a
   await expect.poll(() => rec.reviews.length).toBe(3);
   expect(rec.reviews[2].resolutions).toEqual([ADOPTED]);
 });
+
+test('the Markdown export follows the long-mode state like the JSON export, without a document report from a shorter text', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: [] });
+  // A document report of an earlier, shorter text.
+  await fillPair(page, '今汐。', 'Jinhsi.');
+  await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();
+  await expect.poll(() => rec.reviews.length).toBe(1);
+  await expect(page.locator('.review-current')).toBeVisible();
+  const { source, target } = termPair(2);
+  await fillPair(page, source, target);
+  await run(page, rec, 3);
+  const exports = async () => ({
+    md: (await downloadFrom(page, M.review.exportMarkdown)).text,
+    json: JSON.parse((await downloadFrom(page, '导出当前结果')).text),
+  });
+  const current = await exports();
+  expect([current.json.status, current.json.report]).toEqual(['current_terminology_check', null]);
+  expect(current.md).toContain(M.md.currencyCurrent);
+  expect(current.md).not.toContain('`fixture-request`');
+  await page.locator('#review-target').fill(withTarget(2, 2, ' again'));
+  const edited = await exports();
+  expect(edited.json.status).toBe('requires_recheck');
+  expect(edited.md).toContain(M.md.currencyStale);
+  expect(edited.md).not.toContain(M.md.currencyCurrent);
+});
