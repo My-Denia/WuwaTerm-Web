@@ -6,7 +6,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeChoice, serializeWorkfile } from '../lib/manuscript.js';
+// The frozen Web 0.2.0 writer: the generator's v1/v2 bytes stay independent of lib/manuscript.js (which writes v3 too).
+import { makeChoice, serializeWorkfile } from '../tests/legacy/web-0.2.0/manuscript.js';
 import { pairSegments } from '../lib/segmentation.js';
 import { buildFixtures as buildV2Fixtures } from './build-manuscript-v2-fixtures.mjs';
 
@@ -700,6 +701,8 @@ export async function buildFixtures() {
   bad('invalid-v3-missing-progress.json', mutate(x => { delete x.progress; }), 'workfile_unsupported_format', 'progress is missing, so the top-level keys are not the 13 v3 keys');
   bad('invalid-v3-format-v4.json', mutate(x => { x.format = 'wuwaterm-manuscript-v4'; }), 'workfile_unsupported_format', 'an unknown format version falls through to the v2 reader');
   bad('invalid-v3-v2-part.json', mutate(x => { x.direction = 'fr'; }), 'workfile_invalid_content', 'the v1/v2 part keeps its checks: direction must be en or zh');
+  bad('invalid-v3-129-decisions.json', mutate(x => { x.semantic_decisions = Array.from({ length: 129 }, () => structuredClone(v2Parsed.semantic_decisions[0])); }),
+    'workfile_too_many_entries', 'the v1/v2 part keeps the v2 array cap of 128 items: 129 semantic decisions (within the v3 tree cap of 512)', 'workfile_too_many_entries');
 
   // invalid: record structure (step 6)
   bad('invalid-v3-unknown-status.json', mutate(x => { x.segments[1].status = 'paused'; }), 'workfile_segment_invalid', 'status is not pending, done or stale');

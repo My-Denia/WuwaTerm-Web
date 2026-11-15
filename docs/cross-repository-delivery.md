@@ -12,11 +12,16 @@ pins a Web commit independently. A passing pair proves compatibility for those
 two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
-Current pins: `contracts/windows-ref.txt` is `9010190cd8dfbbb75c241a4caf21bacabc10826c`
-(WuwaTerm-Windows PR #3, which reads and writes `wuwaterm-manuscript-v2`), so the Web and
-Windows manuscript contract test now exchanges v2 files in both directions: every valid
-`contracts/manuscript-v2/` fixture, a Web-written file and a Windows-built file are read by
-the other side, and every invalid fixture is rejected by both. `contracts/backend-ref.txt`
+Current pins: `contracts/windows-ref.txt` is `e8880eb27b6117ff30d3bf134022303fe5f1a441`
+(WuwaTerm-Windows PR #20, the target-only-edit rule on top of PR #19, which reads and writes
+`wuwaterm-manuscript-v3`; raised from `9010190cd8dfbbb75c241a4caf21bacabc10826c`, PR #3,
+v2). The Web and Windows manuscript contract test exchanges v2 and v3 files in both
+directions: every valid `contracts/manuscript-v2/` and `contracts/manuscript-v3/` fixture is
+read alike by both and written back to its canonical bytes, every invalid fixture is
+rejected by both with its code, the explicit-alignments fixture gets the same alignment
+input digests, and a long manuscript with choices, a target-only edit and progress, built
+by each client's own runtime, gives the same v3 bytes and is kept unchanged by the other.
+`contracts/backend-ref.txt`
 is `d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core PR #199, the semantic review engine:
 semantic review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
 `translation-context-v1` is always listed when a model is configured). It was raised from
@@ -36,10 +41,18 @@ only while the paired versions remain compatible. Do not assume these two cases
 have the same deployment order.
 
 Keep the `/v1` API path, report `rule_version`, dictionary `schema_version`,
-opt-in `matcher_revision` hash and `wuwaterm-manuscript-v1` format distinct.
+opt-in `matcher_revision` hash and the `wuwaterm-manuscript-v1`, `-v2` and `-v3`
+formats distinct.
 The matcher hash is requested with `X-WuwaTerm-Matcher-Basis: 1`; it is not
 a report field named `matcher_basis`. Their actual validators and fixtures are the
-contracts; a manuscript import is not fresh certification against the live DB.
+contracts. A document-mode import (v1 choices and history, v2 semantic data) is not
+fresh certification against the live DB. A v3 segment result is reused only when
+its content hashes, request inputs and all six basis values equal the current ones,
+where the current basis comes from a live review-v2 request
+([contract](../contracts/manuscript-v3/SPEC.md)).
+
+Web 0.2.0 and Windows 0.4.2 reject v3 files. Cross-client v3 interchange is verified
+against the Windows client pinned in `contracts/windows-ref.txt`.
 
 ## Deployment receipt
 

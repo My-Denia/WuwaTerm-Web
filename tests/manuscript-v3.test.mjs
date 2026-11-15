@@ -5,6 +5,7 @@ import test from 'node:test';
 import { WORKFILE_FORMAT_V2, parseWorkfile, validAlignments } from '../lib/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
 import { pairSegments } from '../lib/segmentation.js';
+import { parseWorkfile as parseWorkfileWeb020 } from './legacy/web-0.2.0/manuscript.js';
 import {
   MAX_V3_BYTES, MODEL_NAMES, REVIEW_MAX_JSON_BYTES, V3_FORMAT, alignmentInput, alignmentList, budgetManuscript, buildFixtures, canonicalV3, padContent,
 } from '../scripts/build-manuscript-v3-fixtures.mjs';
@@ -39,17 +40,18 @@ const CHOICE_KEYS = ['source_span', 'choice', 'candidate', 'offered', 'confirmed
 const HISTORY_KEYS = ['source_hash', 'source_span', 'choice', 'candidate', 'offered'];
 const VERDICTS = ['verified_constraint', 'confirmed_conflict', 'needs_review', 'not_evaluated'];
 
-function checkTree(x, depth = 0) {
+// maxItems is 512 for the whole v3 tree (step 3) and 128 for the v1/v2 part (step 5).
+function checkTree(x, maxItems = 512, depth = 0) {
   if (depth > 16) throw fail('workfile_too_deep');
   if (Array.isArray(x)) {
-    if (x.length > 512) throw tooMany();
-    x.forEach(v => checkTree(v, depth + 1));
+    if (x.length > maxItems) throw tooMany();
+    x.forEach(v => checkTree(v, maxItems, depth + 1));
   } else if (isObject(x)) {
     const keys = Object.keys(x);
     if (keys.length > 32) throw fail('workfile_too_many_fields');
     for (const key of keys) {
       if (['__proto__', 'constructor', 'prototype'].includes(key)) throw fail('workfile_forbidden_field');
-      checkTree(x[key], depth + 1);
+      checkTree(x[key], maxItems, depth + 1);
     }
   }
 }
@@ -144,7 +146,10 @@ function checkRecordContent(r, sourceScalars, targetScalars) {
 // no choices, history or semantic data, what is left to check is the two texts, the direction and the alignments, which this does the
 // way lib/manuscript.js does, with the v3 text limit. Anything else over 1 MiB is a case this reference reader cannot check.
 function checkV2Part(x) {
-  const projection = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]])) });
+  const part = Object.fromEntries(V2_PART_KEYS.map(k => [k, x[k]]));
+  // The v1/v2 part keeps the v2 array cap of 128 items, at either size.
+  checkTree(part, 128, 1);
+  const projection = JSON.stringify({ format: WORKFILE_FORMAT_V2, ...part });
   if (Buffer.byteLength(projection, 'utf8') <= MiB) { parseWorkfile(projection); return; }
   const parts = ['choices', 'history', 'semantic_decisions', 'semantic_texts', 'semantic_history'].map(k => x[k]);
   if (parts.some(p => !Array.isArray(p))) throw fail('workfile_invalid_content');
@@ -181,7 +186,8 @@ function readV3(content) {
   return x;
 }
 
-const legacyCode = content => { try { parseWorkfile(content); return null; } catch (error) { return error.code; } };
+// The frozen Web 0.2.0 parser (tests/legacy/web-0.2.0): lib/manuscript.js now reads v3, so it cannot stand for old clients.
+const legacyCode = content => { try { parseWorkfileWeb020(content); return null; } catch (error) { return error.code; } };
 
 // ---- assertions a to h ----
 
@@ -228,7 +234,7 @@ test('d. every invalid case is rejected with its code, as the first failure', ()
   for (const c of cases.invalid) assert.throws(() => readV3(contentOf(c)), { code: c.error }, c.file);
 });
 
-test('e. today\'s parseWorkfile (Web 0.2.0) gives every case its legacy_error', () => {
+test('e. the frozen Web 0.2.0 parseWorkfile gives every case its legacy_error', () => {
   for (const c of [...cases.valid, ...cases.invalid]) assert.equal(legacyCode(contentOf(c)), c.legacy_error, c.file);
 });
 

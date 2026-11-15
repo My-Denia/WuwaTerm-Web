@@ -253,24 +253,28 @@ test('B invalid/unreadable/oversize supersedes pending A; current manuscript ret
   await expect(page.locator('#review-source')).toHaveValue(initialSource);
   await expect(page.locator('.error-panel')).toHaveText('无法读取 JSON 稿件文件。');
 
-  // 3. B oversized (>1 MiB)
+  // 3. B oversized (>1 MiB). manuscript-v3 SPEC "Limits" and "Reading" steps 1-2: the file gate is now 44 MiB, so a
+  // 1 MiB + 10 file is read, and the parser rejects it: a non-v3 input over 1 MiB is workfile_too_large, with the
+  // SPEC "Error codes" message and the note that the open manuscript was kept.
+  const tooLarge = '稿件文件超过大小上限（v1/v2 为 1 MiB，v3 为 44 MiB）；当前稿件未被替换。请把稿件拆成较小的几份。';
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-a3.json', mimeType: 'application/json', buffer: Buffer.from(savedManuscript(A)),
   });
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-a3.json');
 
-  // Select oversize B: size check happens synchronously
   const largeBuffer = Buffer.alloc(1024 * 1024 + 10, 0x20);
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-b3-huge.json', mimeType: 'application/json', buffer: largeBuffer,
   });
-  await expect(page.locator('.error-panel')).toHaveText('稿件文件不能超过 1 MiB；当前稿件未被替换。');
+  await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-b3-huge.json');
+  await page.evaluate(() => window.__resolveRead('file-b3-huge.json'));
+  await expect(page.locator('.error-panel')).toHaveText(tooLarge);
   await expect(page.locator('#review-source')).toHaveValue(initialSource);
 
   // Now A resolves: must NOT import
   await page.evaluate(() => window.__resolveRead('file-a3.json'));
   await expect(page.locator('#review-source')).toHaveValue(initialSource);
-  await expect(page.locator('.error-panel')).toHaveText('稿件文件不能超过 1 MiB；当前稿件未被替换。');
+  await expect(page.locator('.error-panel')).toHaveText(tooLarge);
 });
 
 test('the same file can be selected again and late A cannot clear later selection', async ({ page }) => {

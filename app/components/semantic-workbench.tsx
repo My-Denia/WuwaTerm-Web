@@ -5,23 +5,28 @@
 // component owns the serial run (its own AbortController, so ordinary edits
 // never abort an already charged request) and the issue navigation.
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import { guardPairForRequest, pairSegments, segmentText, SEGMENT_LIMIT } from '../../lib/segmentation.js';
+import { segmentText, SEGMENT_LIMIT } from '../../lib/segmentation.js';
 import {
-  classifyFailure, contextBefore, diffSplice, fitRequestBody, initialRun, mapRegion, mapSpan,
-  historySnapshot, nextToSend, placeSegmentIssues, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
+  classifyFailure, contextBefore, diffSplice, fitRequestBody, initialRun, itemDisplayState, mapRegion, mapSpan,
+  historySnapshot, nextToSend, placeSegmentIssues, runDisplayState, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../../lib/semantic-run.js';
+import {
+  applyResult, chooseTerm, exportSegments, probeIndex, reconfirmChoice, recheckPlan, recordView, removeChoice, removeHistoryEntry,
+  restorableHistory, restoreHistoryEntry, sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished,
+} from '../../lib/long-review.js';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES, SEMANTIC_REVIEW_VERSION,
   applySemanticSuggestion, validSemanticReviewResponse, verifySemanticReviewIdentity,
 } from '../../lib/semantic-review.js';
 import { makeSemanticDecision } from '../../lib/semantic-decisions.js';
 import {
-  addSegmentResult, addTermResult, decisionFor, emptySemantic, isHandled, issueStatus, occurrenceKey, placedOccurrence,
+  addSegmentResult, decisionFor, emptySemantic, isHandled, issueStatus, occurrenceKey, placedOccurrence,
   reconcileState, removeDecision, upsertDecision,
 } from '../../lib/semantic-state.js';
 import { insertParagraphBreak, linesToParagraphs, mergeParagraphs, pairShape, singleBreaks, splitLayout } from '../../lib/manual-split.js';
 import { recoverSpan, validReport } from '../../lib/manuscript.js';
+import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { highlightSegments, revisionOf } from '../../lib/review-report.js';
 import { compactScalarContext } from '../../lib/review-navigation.js';
 import { fill, msg } from '../../lib/messages';
@@ -59,8 +64,25 @@ export type Placed = {
   id: string; resultId: string; issue: Issue; occurrence: string; stale: boolean;
   live: { source_span: Span | null; target_span: Span | null; suggestion_span: Span | null };
 };
-type TermFinding = { id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: { candidate_id: string; zh: string; en: string; category: string }[] };
-export type TermResult = { id: string; segmentKey: string; index: number; report: { findings: TermFinding[] }; sourceOffset: number; targetOffset: number; region: { source: Region; target: Region } };
+// Long-manuscript term review (lib/long-review.js; contracts/manuscript-v3/SPEC.md).
+type TermCandidate = { candidate_id: string; zh: string; en: string; category: string };
+type TermFinding = { id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: TermCandidate[]; candidates_truncated: boolean };
+type TermReport = { findings: TermFinding[]; truncated: boolean };
+export type Basis = { rule_version: string; dictionary: { schema_version: string; source_commit: string; term_count: number; revision: string }; matcher_revision: string };
+/** The basis of the latest live segment response: null before one arrives, false when it carried none. Not user work. */
+export type SessionBasis = Basis | null | false;
+type LongChoice = import('../../lib/long-review.js').Choice;
+export type LongState = import('../../lib/long-review.js').LongState;
+type SegmentInput = { pair: Pair; range: { source_start: number; source_end: number; target_start: number; target_end: number }; sourceCore: string; targetCore: string; sourceHash: string; targetHash: string };
+type RecordState = 'pending' | 'saved' | 'current' | 'stale';
+type RecordView = { state: RecordState; ready: boolean; needsCheck: boolean; finished: boolean; choices: (LongChoice & { view: 'applies' | 'needs_reconfirmation' | 'waiting' })[] };
+type LongCtx = { draft: Draft; basis: SessionBasis };
+type ExportRow = { index: number; state: RecordState; stale: boolean; source_start: number; source_end: number; target_start: number; target_end: number; report: TermReport & Record<string, unknown>; findings: { verdict: string; source_span: Span; target_span: Span | null; candidates: { zh: string; en: string }[] }[] };
+const inputsOf = (draft: Draft) => segmentInputs(draft) as { long: boolean; items: SegmentInput[] };
+const viewOf = (long: LongState, index: number, ctx: LongCtx) => recordView(long, index, ctx) as RecordView | null;
+const rowsOf = (long: LongState, ctx: LongCtx) => exportSegments(long, ctx) as ExportRow[];
+/** Run item key of a long-mode term check: the segment index and the hashes of its cores when the run planned it. */
+const termKey = (index: number, item: SegmentInput) => `t:${index}:${item.sourceHash}:${item.targetHash}`;
 export type Decision = {
   issue_id: string; fingerprint: string; category: string; segment_index: number; source_revision: string; target_revision: string;
   source_span: Span | null; target_span: Span | null; decision: 'accepted' | 'adjusted' | 'ignored'; applied_text: string | null;
@@ -69,7 +91,7 @@ export type Decision = {
 type Outcome = { placedId: string; resultId: string; status: string; code: string; decision: Decision };
 export type SemanticState = {
   results: SegResult[]; placed: Placed[]; decisions: Decision[]; texts: { revision: string; text: string }[];
-  outcomes: Outcome[]; history: unknown[]; terms: TermResult[];
+  outcomes: Outcome[]; history: unknown[]; long: LongState;
 };
 type ChoiceLike = { source: string; source_span: Span; choice: string; candidate: { zh: string; en: string } | null };
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
@@ -94,7 +116,13 @@ type Props = {
   undo: () => void;
   locate: (side: 'source' | 'target', span: Span) => void;
   onRunActive: (active: boolean) => void;
-  termTrack: ReactNode;
+  /** The term section; long-mode term findings, choices and history are rendered into it. */
+  termTrack: (longTerms: ReactNode) => ReactNode;
+  basis: SessionBasis;
+  basisRef: MutableRefObject<SessionBasis>;
+  setBasis: (basis: SessionBasis) => void;
+  /** The workbench's own alignment reset (alignments null, undoable). */
+  resetAlignments: () => void;
 };
 
 const uid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -102,12 +130,17 @@ const chars = (text: string) => Array.from(text);
 const slice = (list: string[], start: number, end: number) => list.slice(start, end).join('');
 const sliceEquals = (text: string, span: Span | null) => !!span && slice(chars(text), span.start, span.end) === span.text;
 const overlaps = (a: Region, b: Region) => a.start < b.end && b.start < a.end;
-function safePairs(source: string, target: string, alignments: Draft['alignments']): Pair[] {
-  if (!source.trim() && !target.trim()) return [];
-  try {
-    const explicit = (alignments && alignments.length ? alignments : null) as never;
-    return (pairSegments(source, target, SEGMENT_LIMIT, explicit) as Pair[]).map(p => guardPairForRequest(p) as Pair);
-  } catch { return []; }
+/**
+ * What the term run would send: `due` segments need a check (pending or stale); `saved` ones wait for the live basis;
+ * `order` puts the probe first when the basis is unknown (SPEC "Runtime", step 4). `cost` is the number of first requests.
+ */
+function termPlan(long: LongState, ctx: LongCtx) {
+  const views = long.records.map((_, i) => viewOf(long, i, ctx));
+  const due = views.flatMap((v, i) => (v?.needsCheck ? [i] : []));
+  const saved = views.filter(v => v?.state === 'saved' && v.ready).length;
+  const probe = ctx.basis === null && (due.length > 0 || saved > 0) ? probeIndex(long, ctx) as number | null : null;
+  const order = probe === null ? due : [probe, ...due.filter(i => i !== probe)];
+  return { due: due.length, saved, probe, order, cost: order.length };
 }
 async function responseBody(response: Response): Promise<Record<string, unknown> | null> {
   try { const value = await response.json(); return value && typeof value === 'object' ? value as Record<string, unknown> : null; } catch { return null; }
@@ -120,8 +153,8 @@ function failureOf(response: Response, body: Record<string, unknown> | null) {
 }
 
 type PairView = {
-  pair: Pair; sCore: string; tCore: string; key: string; itemKey: string;
-  result: SegResult | null; term: TermResult | null; edited: boolean; termEdited: boolean;
+  pair: Pair; sCore: string; tCore: string; key: string; itemKey: string; termKey: string;
+  result: SegResult | null; edited: boolean; record: RecordView | null;
 };
 
 /** Text with the active issue (and quieter marks for others) highlighted. */
@@ -151,7 +184,7 @@ function Snippet({ text, span, missing }: { text: string; span: Span | null; mis
 }
 
 export function SemanticWorkbench(props: Props) {
-  const { lang, draft, semantic, setSemantic, commit, work, choices, pool, capabilities, resetSignal, locate, onRunActive } = props;
+  const { lang, draft, semantic, setSemantic, commit, work, choices, pool, capabilities, resetSignal, locate, onRunActive, basis, basisRef, setBasis } = props;
   const { source, target, direction } = draft;
   const s = semanticMsg(lang);
   const m = msg(lang);
@@ -170,7 +203,7 @@ export function SemanticWorkbench(props: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [choiceState, setChoiceState] = useState<{ id: string | null; value: 'suggestion' | 'alternative' }>({ id: null, value: 'suggestion' });
   const [adjusting, setAdjusting] = useState<{ placedId: string; text: string } | null>(null);
-  const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
+  const [localSegment, setLocalSegment] = useState<number | null>(null);
   const [splitOpen, setSplitOpen] = useState<number | null>(null);
   const [pendingCut, setPendingCut] = useState<{ side: 'source' | 'target'; offset: number; label: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -182,25 +215,30 @@ export function SemanticWorkbench(props: Props) {
   const semanticOn = !!capabilities?.includes(CAPABILITY_SEMANTIC_REVIEW);
   const contextOn = !!capabilities?.includes(CAPABILITY_TRANSLATION_CONTEXT);
   const sourceChars = useMemo(() => chars(source), [source]);
-  const targetChars = useMemo(() => chars(target), [target]);
-  const long = sourceChars.length > 2000 || targetChars.length > 2000;
-  const pairs = useMemo(() => safePairs(source, target, draft.alignments), [source, target, draft.alignments]);
+  // One pairing for the views, the records, the requests and the writer (lib/long-review.js corePairs), cached per draft.
+  const inputs = inputsOf(draft);
+  const long = inputs.long;
+  const pairs = useMemo(() => inputs.items.map(item => item.pair), [inputs]);
+  const longCtx: LongCtx = useMemo(() => ({ draft, basis }), [draft, basis]);
   const views: PairView[] = useMemo(() => {
     const seen = new Map<string, number>();
-    return pairs.map(pair => {
-      const sCore = slice(sourceChars, pair.source.core_start, pair.source.core_end);
-      const tCore = slice(targetChars, pair.target.core_start, pair.target.core_end);
+    return inputs.items.map((item, index) => {
+      const { pair, sourceCore: sCore, targetCore: tCore } = item;
       const key = segmentKey(direction, sCore, tCore) as string;
       const ordinal = seen.get(key) ?? 0; seen.set(key, ordinal + 1);
       const here = { start: pair.source.core_start, end: pair.source.core_end };
       const hereT = { start: pair.target.core_start, end: pair.target.core_end };
       const result = semantic.results.find(r => r.segmentKey === key && r.region.source.start === pair.source.core_start && r.region.target.start === pair.target.core_start) ?? null;
-      const term = semantic.terms.find(r => r.segmentKey === key && r.region.source.start === pair.source.core_start && r.region.target.start === pair.target.core_start) ?? null;
       const edited = !result && semantic.results.some(r => overlaps(r.region.source, here) || overlaps(r.region.target, hereT));
-      const termEdited = !term && semantic.terms.some(r => overlaps(r.region.source, here) || overlaps(r.region.target, hereT));
-      return { pair, sCore, tCore, key, itemKey: `${key}#${ordinal}`, result, term, edited, termEdited };
+      return { pair, sCore, tCore, key, itemKey: `${key}#${ordinal}`, termKey: termKey(index, item), result, edited, record: long ? viewOf(semantic.long, index, longCtx) : null };
     });
-  }, [pairs, sourceChars, targetChars, direction, semantic.results, semantic.terms]);
+  }, [inputs, long, direction, semantic.results, semantic.long, longCtx]);
+  // In long mode the selected segment is the manuscript's current position (progress.current), saved with it.
+  const selectedSegment = long ? semantic.long.progress.current : localSegment;
+  const selectSegment = (index: number | null) => {
+    if (long) commit({ semantic: state => ({ ...state, long: setCurrent(state.long, index) as LongState }), remember: false });
+    else setLocalSegment(index);
+  };
   const ready = views.filter(v => v.pair.status === 'ready');
   const runActive = run.phase === 'running' || run.phase === 'waiting' || (run.phase === 'paused' && run.items.some(i => i.status === 'sending'));
   useEffect(() => { onRunActive(runActive || pairTranslating !== null); }, [runActive, pairTranslating, onRunActive]);
@@ -210,7 +248,7 @@ export function SemanticWorkbench(props: Props) {
   const [resetSeen, setResetSeen] = useState(resetSignal);
   if (resetSeen !== resetSignal) {
     setResetSeen(resetSignal);
-    dispatch({ type: 'reset' }); setActiveId(null); setSelectedSegment(null); setSplitOpen(null); setLastAction(null);
+    dispatch({ type: 'reset' }); setActiveId(null); setLocalSegment(null); setSplitOpen(null); setLastAction(null);
   }
   useEffect(() => {
     runGeneration.current += 1; runAbort.current?.abort(); runAbort.current = null; inflight.current = null; translateRun.current = null;
@@ -232,12 +270,9 @@ export function SemanticWorkbench(props: Props) {
   function failRun(event: Record<string, unknown> & { now: number }) { setNow(event.now); dispatch(event); }
   const viewsFor = () => {
     const { draft: d } = work.current;
-    const list = safePairs(d.source, d.target, d.alignments);
-    const sc = chars(d.source); const tc = chars(d.target);
+    const segments = inputsOf(d).items;
     const seen = new Map<string, number>();
-    return { draft: d, pairs: list, items: list.map(pair => {
-      const sCore = slice(sc, pair.source.core_start, pair.source.core_end);
-      const tCore = slice(tc, pair.target.core_start, pair.target.core_end);
+    return { draft: d, pairs: segments.map(item => item.pair), items: segments.map(({ pair, sourceCore: sCore, targetCore: tCore }) => {
       const key = segmentKey(d.direction, sCore, tCore) as string;
       const ordinal = seen.get(key) ?? 0; seen.set(key, ordinal + 1);
       return { pair, sCore, tCore, key, itemKey: `${key}#${ordinal}` };
@@ -322,38 +357,77 @@ export function SemanticWorkbench(props: Props) {
     }
   };
 
+  // Long-mode term check of one segment (SPEC "Runtime", steps 4 to 9). The first request after opening carries no
+  // resolutions and supplies the live basis; after every response the session basis is the returned one, and records
+  // that it makes due join the run. One item sends at most two requests: a second one with the choices realignment kept
+  // (step 6), or a request without resolutions when Core rejects a stale resolution_context. A failure changes nothing.
   const sendTerm = async (item: RunItem, signal: AbortSignal, generation: number) => {
     const live = () => runGeneration.current === generation;
-    const { draft: d, items } = viewsFor();
-    const found = items.find(v => v.itemKey === item.key && v.pair.status === 'ready');
-    if (!found) { dispatch({ type: 'skip', key: item.key }); return; }
-    try {
-      const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', signal,
-        body: JSON.stringify({ source: found.sCore, target: found.tCore, direction: d.direction, review_version: 'review-v2' }) });
-      const body = await responseBody(response);
-      if (!live()) return;
-      requestPoolRefresh();
-      if (!response.ok) { failRun({ type: 'failed', key: item.key, ...failureOf(response, body), now: Date.now() }); return; }
-      if (!validReport(body, found.sCore, found.tCore) || body?.rule_version !== 'review-v2'
-        || body?.source_revision !== await revisionOf(found.sCore) || body?.target_revision !== await revisionOf(found.tCore)) {
-        if (live()) failRun({ type: 'failed', key: item.key, code: 'responseInvalid', classification: { action: 'segment_failed' }, now: Date.now() });
+    const fail = (code: string) => failRun({ type: 'failed', key: item.key, code, classification: { action: 'segment_failed' }, now: Date.now() });
+    const [, , sourceHash, targetHash] = item.key.split(':');
+    // The segment the run planned: still at its index, or moved by an edit with the same cores.
+    const locateItem = () => {
+      const { items } = inputsOf(work.current.draft);
+      const same = (x: SegmentInput | undefined) => !!x && x.sourceHash === sourceHash && x.targetHash === targetHash;
+      return same(items[item.index]) ? item.index : items.findIndex(same);
+    };
+    let at = locateItem();
+    let ctx: LongCtx = { draft: work.current.draft, basis: basisRef.current };
+    const first = at < 0 ? null : viewOf(work.current.semantic.long, at, ctx);
+    if (!first || !first.ready) { dispatch({ type: 'skip', key: item.key }); return; }
+    // Confirmed current by an earlier response of this run: nothing to send.
+    if (ctx.basis !== null && !first.needsCheck) { dispatch({ type: 'done', key: item.key }); return; }
+    let withResolutions = recheckPlan(work.current.semantic.long, at, ctx) === 'with_resolutions';
+    let sent = 0;
+    for (;;) {
+      const request = segmentRequest(work.current.semantic.long, at, ctx, { withResolutions }) as { index: number; body: Record<string, unknown>; alignmentInput: string; sentKey: string } | null;
+      if (!request) { dispatch({ type: 'skip', key: item.key }); return; }
+      if (new TextEncoder().encode(JSON.stringify(request.body)).length > 32768) { fail('bodyTooLarge'); return; }
+      sent += 1;
+      try {
+        const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', signal, body: JSON.stringify(request.body) });
+        const body = await responseBody(response);
+        if (!live()) return;
+        requestPoolRefresh();
+        if (!response.ok) {
+          const failure = failureOf(response, body);
+          // A resolution_context Core no longer accepts: ask again without resolutions, which also returns the basis.
+          if (Object.hasOwn(request.body, 'resolutions') && failure.code === 'invalid_request' && sent < 2) { withResolutions = false; continue; }
+          failRun({ type: 'failed', key: item.key, ...failure, now: Date.now() });
+          return;
+        }
+        if (!validReport(body, request.body.source, request.body.target) || body?.rule_version !== 'review-v2') { fail('responseInvalid'); return; }
+        const before = basisRef.current;
+        let out: { long: LongState; basis: SessionBasis; secondRequest: boolean; error: string | null } | null = null;
+        setSemantic(state => {
+          out = applyResult(state.long, { draft: work.current.draft, basis: before }, request, body) as typeof out;
+          return out && out.long !== state.long ? { ...state, long: out.long } : state;
+        });
+        const result = out as unknown as { long: LongState; basis: SessionBasis; secondRequest: boolean; error: string | null };
+        if (result.error === 'response_invalid') { fail('responseBasisMismatch'); return; }
+        setBasis(result.basis);
+        // A different basis re-evaluates every record (step 5): the ones it makes due are checked in this run too.
+        if (!sameV3Basis(before, result.basis)) {
+          const now = { draft: work.current.draft, basis: result.basis };
+          const { items } = inputsOf(now.draft);
+          const due = work.current.semantic.long.records.flatMap((_, i) => (viewOf(work.current.semantic.long, i, now)?.needsCheck ? [{ key: termKey(i, items[i]), index: i }] : []));
+          if (due.length) dispatch({ type: 'extend', items: due });
+        }
+        if (result.error === 'segment_changed') { dispatch({ type: 'skip', key: item.key }); return; }
+        if (result.error) { fail(result.error === 'no_basis' ? 'responseBasisMissing' : 'responseInvalid'); return; }
+        if (result.secondRequest && sent < 2) {
+          at = locateItem();
+          if (at < 0) { dispatch({ type: 'skip', key: item.key }); return; }
+          ctx = { draft: work.current.draft, basis: result.basis };
+          withResolutions = true;
+          continue;
+        }
+        dispatch({ type: 'done', key: item.key });
+        return;
+      } catch {
+        if (live() && !signal.aborted) fail('requestFailed');
         return;
       }
-      const current = work.current.draft;
-      if (current.direction !== d.direction) { dispatch({ type: 'skip', key: item.key }); return; }
-      const ss = diffSplice(d.source, current.source); const ts = diffSplice(d.target, current.target);
-      const region = {
-        source: ss ? mapRegion({ start: found.pair.source.core_start, end: found.pair.source.core_end }, ss) : { start: found.pair.source.core_start, end: found.pair.source.core_end },
-        target: ts ? mapRegion({ start: found.pair.target.core_start, end: found.pair.target.core_end }, ts) : { start: found.pair.target.core_start, end: found.pair.target.core_end },
-      };
-      if (slice(chars(current.source), region.source.start, region.source.end) !== found.sCore || slice(chars(current.target), region.target.start, region.target.end) !== found.tCore) {
-        dispatch({ type: 'skip', key: item.key }); return;
-      }
-      const result: TermResult = { id: uid(), segmentKey: found.key, index: found.pair.index, report: body as unknown as TermResult['report'], sourceOffset: found.pair.source.core_start, targetOffset: found.pair.target.core_start, region };
-      setSemantic(state => addTermResult(state, result) as SemanticState);
-      dispatch({ type: 'done', key: item.key });
-    } catch {
-      if (live() && !signal.aborted) failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'segment_failed' }, now: Date.now() });
     }
   };
 
@@ -423,11 +497,25 @@ export function SemanticWorkbench(props: Props) {
     });
   }, [run]);
 
-  function startRun(kind: 'term' | 'semantic', only?: PairView[]) {
+  function startRun(kind: 'semantic', only?: PairView[]) {
     runGeneration.current += 1; runAbort.current?.abort(); inflight.current = null;
-    const list = only ?? ready.filter(v => (kind === 'semantic' ? !v.result : !v.term));
-    setSelectedSegment(null);
+    const list = only ?? ready.filter(v => !v.result);
+    setLocalSegment(null);
     dispatch({ type: 'start', kind, items: list.map(v => ({ key: v.itemKey, index: v.pair.index })) });
+  }
+  /**
+   * The long-mode term run: every segment that needs a check, and before the live basis is known the probe first
+   * (SPEC "Runtime", step 4), so saved results are confirmed by one request. Segments that the probe's basis makes
+   * stale join the run as it goes.
+   */
+  function startTermRun() {
+    const { draft: d, semantic: state } = work.current;
+    const ctx: LongCtx = { draft: d, basis: basisRef.current };
+    const { items } = inputsOf(d);
+    const plan = termPlan(state.long, ctx);
+    if (!plan.order.length) return;
+    runGeneration.current += 1; runAbort.current?.abort(); inflight.current = null;
+    dispatch({ type: 'start', kind: 'term', items: plan.order.map(i => ({ key: termKey(i, items[i]), index: i })) });
   }
   function startTranslateRun() {
     const d = work.current.draft;
@@ -443,7 +531,7 @@ export function SemanticWorkbench(props: Props) {
   async function translatePair(view: PairView) {
     if (pairTranslating !== null || !view.sCore.trim()) return;
     const d = work.current.draft;
-    const list = safePairs(d.source, d.target, d.alignments);
+    const list = inputsOf(d).items.map(item => item.pair);
     const before = contextBefore({ pairs: list, segmentIndex: view.pair.index, source: d.source, target: d.target });
     const precedents = usePrecedents ? selectPrecedents({ items: precedentItems(d, work.current.semantic), source: d.source, pairs: list, segmentIndex: view.pair.index }) : [];
     // ADR 0019 decision 5: a negotiated context is always present, even as {} on the first pair.
@@ -655,16 +743,26 @@ export function SemanticWorkbench(props: Props) {
   // ---- derived view state ----
   const progress = runProgress(run) as { done: number; failed: number; skipped: number; total: number };
   const reviewedCount = ready.filter(v => v.result).length;
-  const termReviewed = ready.filter(v => v.term).length;
+  const termCounts = { current: 0, saved: 0, stale: 0, finished: 0 };
+  for (const v of ready) {
+    if (!v.record) continue;
+    if (v.record.state === 'current') termCounts.current += 1;
+    else if (v.record.state === 'saved') termCounts.saved += 1;
+    else if (v.record.state === 'stale') termCounts.stale += 1;
+    if (v.record.finished) termCounts.finished += 1;
+  }
+  const plan = useMemo(() => (long ? termPlan(semantic.long, longCtx) : null), [long, semantic.long, longCtx]);
   const sendingItem = run.items.find(i => i.status === 'sending') ?? null;
+  const runState = runDisplayState(run) as 'idle' | 'running' | 'retrying' | 'waiting' | 'paused' | 'failed' | 'done';
   const waitSeconds = run.waitUntil ? Math.max(0, Math.ceil((run.waitUntil - now) / 1000)) : 0;
   const poolData = pool.kind === 'success' ? pool.data : null;
   const pendingViews = ready.filter(v => !v.result);
   const estimateChars = pendingViews.reduce((n, v) => n + Math.max(chars(v.sCore).length, chars(v.tCore).length), 0);
-  const runItemFor = (view: PairView) => run.kind && run.kind !== 'translate' ? run.items.find(i => i.key === view.itemKey) ?? null : null;
+  const runItemFor = (view: PairView) => (run.kind === 'term' ? run.items.find(i => i.key === view.termKey) ?? null
+    : run.kind === 'semantic' ? run.items.find(i => i.key === view.itemKey) ?? null : null);
   const stopText = (code: string | null) => {
     if (!code) return s.stopGeneric;
-    if (['llm_unavailable', 'semantic_review_unavailable', 'site_not_configured'].includes(code)) return s.stopUnavailable;
+    if (['llm_unavailable', 'semantic_review_unavailable', 'site_not_configured'].includes(code)) return run.kind === 'semantic' ? s.stopUnavailable : (m.rMsg as Record<string, string>)[code] ?? s.stopGeneric;
     if (code === 'translateTargetChanged') return s.notices.translateTargetChanged;
     if (run.kind === 'translate') return `${(m.tMsg as Record<string, string>)[code] ?? s.stopGeneric} ${s.translateStopped}`;
     if (['upstream_rate_limited', 'rate_limited'].includes(code)) return `${(m.tMsg as Record<string, string>)[code] ?? s.stopGeneric} ${s.chargedNoResend}`;
@@ -676,37 +774,59 @@ export function SemanticWorkbench(props: Props) {
   const showSegments = pairs.length > 1 || long || semantic.results.length > 0 || pairs.some(p => p.status !== 'ready') || run.kind !== null;
   const translationClosed = !!poolData && (!poolData.translation_enabled || poolData.translations.remaining === 0 || poolData.characters.remaining === 0);
   const reviewsClosed = !!poolData && poolData.reviews.remaining === 0;
+  // Waiting, paused, failed and retrying each have their own words (and data-run-state) for every kind of run.
   const runPhaseLine = (() => {
-    if (run.kind === null || run.phase === 'idle') return null;
+    if (runState === 'idle') return null;
     const done = progress.done; const total = progress.total;
-    if (run.phase === 'running') return fill(s.phaseRunning, { i: (sendingItem?.index ?? 0) + 1 });
-    if (run.phase === 'waiting') return fill(s.phaseWaiting, { s: waitSeconds });
-    if (run.phase === 'paused') return run.stopCode ? fill(s.phaseQuota, { done, total }) : fill(s.phasePaused, { done, total });
-    if (run.phase === 'stopped') return fill(s.phaseStopped, { reason: stopText(run.stopCode) });
-    return s.phaseDone;
+    const i = (sendingItem?.index ?? 0) + 1;
+    if (runState === 'running') return fill(run.kind === 'term' ? s.phaseTermRunning : run.kind === 'translate' ? s.phaseTranslateRunning : s.phaseRunning, { i });
+    if (runState === 'retrying') return fill(s.phaseRetrying, { i, a: sendingItem?.attempt ?? 2 });
+    if (runState === 'waiting') return fill(s.phaseWaiting, { s: waitSeconds });
+    if (runState === 'paused') return run.stopCode ? fill(run.kind === 'term' ? s.phaseTermQuota : s.phaseQuota, { done, total }) : fill(s.phasePaused, { done, total });
+    if (runState === 'failed') return run.phase === 'stopped' ? fill(s.phaseStopped, { reason: stopText(run.stopCode) }) : fill(s.phaseDoneFailed, { n: progress.failed });
+    return run.kind === 'term' ? s.phaseTermDone : run.kind === 'translate' ? s.phaseTranslateDone : s.phaseDone;
   })();
   const issueRegion = activeView ?? null;
 
-  // Long manuscripts: per-segment term findings, read-only, in document coordinates.
-  const termRows = views.flatMap(v => (v.term ? v.term.report.findings.map(f => ({
-    view: v, finding: f,
-    source_span: { start: f.source_span.start + v.pair.source.core_start, end: f.source_span.end + v.pair.source.core_start, text: f.source_span.text },
-    target_span: f.target_span ? { start: f.target_span.start + v.pair.target.core_start, end: f.target_span.end + v.pair.target.core_start, text: f.target_span.text } : null,
-  })) : []));
+  // ---- long manuscripts: term findings, choices and history per segment (SPEC "Segment choice", "Runtime") ----
+  const termRows = useMemo(() => (long ? rowsOf(semantic.long, longCtx) : []), [long, semantic.long, longCtx]);
+  const restorable = useMemo(() => (long && semantic.long.history.length ? restorableHistory(semantic.long, longCtx) as (number | null)[] : []), [long, semantic.long, longCtx]);
+  // A user action on the long state: one undo step, nothing when the library refuses it (too_many_choices gets its notice).
+  const commitLong = (update: (state: LongState) => { long: LongState; error?: string | null } | LongState, notice: string | null = null) => {
+    const unwrap = (out: ReturnType<typeof update>) => ('records' in out ? { long: out, error: null } : { long: out.long, error: out.error ?? null });
+    const probe = unwrap(update(work.current.semantic.long));
+    if (probe.error) { if (probe.error === 'too_many_choices') commit({ notice: 'choiceLimit', remember: false }); return; }
+    if (probe.long === work.current.semantic.long) return;
+    commit({ semantic: state => { const out = unwrap(update(state.long)); return out.error || out.long === state.long ? state : { ...state, long: out.long }; }, notice });
+  };
+  const chooseLong = (index: number, finding: TermFinding, candidate: TermCandidate | null) =>
+    commitLong(state => chooseTerm(state, { index, finding, candidate }, { draft: work.current.draft, basis: basisRef.current }) as { long: LongState; error: string | null }, 'sem:longChoiceRecorded');
+  const choiceAt = (view: PairView | undefined, span: Span) => view?.record?.choices.find(c => c.source_span.start === span.start && c.source_span.end === span.end) ?? null;
+  const choiceViewText = (v: 'applies' | 'needs_reconfirmation' | 'waiting') => ({ applies: s.choiceApplies, needs_reconfirmation: s.choiceNeedsReconfirm, waiting: s.choiceWaiting }[v]);
+  const termStateText = (record: RecordView) => {
+    const base = { pending: s.segTermPending, saved: s.segTermSaved, current: s.segTermChecked, stale: s.segTermStale }[record.state];
+    if (!record.finished) return base;
+    return record.state === 'current' ? s.segFinished : record.state === 'stale' ? s.segFinishedRecheck : `${s.segFinished} · ${base}`;
+  };
+  const LONG_ROWS = 100;
+  const visibleTermRows = termRows.filter(r => selectedSegment === null || r.index === selectedSegment);
+  const shownTermRows = selectedSegment === null ? visibleTermRows.slice(0, LONG_ROWS) : visibleTermRows;
+  const longChoices = long ? views.flatMap((v, index) => (v.record?.choices ?? []).map(c => ({ index, view: v, choice: c }))) : [];
 
   const segmentLabel = (view: PairView) => {
     const item = runItemFor(view);
     if (view.pair.status === 'needs_manual_split') return s.segManual;
     if (view.pair.status === 'untranslated') return s.segUntranslated;
     if (view.pair.status === 'unpaired_target') return s.segUnpaired;
-    if (item?.status === 'sending') return s.segSending;
-    if (item?.status === 'queued' && run.phase !== 'idle') return s.segQueued;
-    if (item?.status === 'failed') return s.segFailed;
-    if (item?.status === 'skipped') return s.segSkipped;
-    if (!semanticOn) return view.term ? s.segTermChecked : view.termEdited ? s.termSegmentStale : s.segTermPending;
-    if (view.result) return view.result.imported ? s.segImported : s.segReviewed;
-    if (view.edited) return s.segEdited;
-    return s.segPending;
+    const itemState = item ? itemDisplayState(run, item) as string : null;
+    const runText = itemState === null || itemState === 'done' ? null
+      : { queued: s.segQueued, sending: run.kind === 'term' ? s.segTermSending : s.segSending, retrying: s.segRetrying, waiting: s.segWaiting, paused: s.segPaused, failed: s.segFailed, skipped: s.segSkipped }[itemState] ?? null;
+    // A long-mode segment keeps showing its term state beside the run state (e.g. queued · finished · re-check pending).
+    const term = view.record ? termStateText(view.record) : null;
+    if (runText) return term ? `${runText} · ${term}` : runText;
+    if (!semanticOn) return term ?? s.segTermPending;
+    const semanticText = view.result ? (view.result.imported ? s.segImported : s.segReviewed) : view.edited ? s.segEdited : s.segPending;
+    return term ? `${semanticText} · ${term}` : semanticText;
   };
 
   const shape = (view: PairView) => pairShape(source, target, view.pair) as { sourceParagraphs: number; targetParagraphs: number; sourceSentences: number; targetSentences: number; sourceLength: number; targetLength: number };
@@ -714,6 +834,65 @@ export function SemanticWorkbench(props: Props) {
   // text it moves to the nearest pair that still needs a manual split.
   const manualViews = views.filter(v => v.pair.status === 'needs_manual_split');
   const splitView = splitOpen === null ? null : manualViews.find(v => v.pair.index === splitOpen) ?? manualViews.find(v => v.pair.index >= splitOpen) ?? manualViews.at(-1) ?? null;
+  const runTermLabel = !plan ? '' : plan.probe !== null && plan.saved > 0
+    ? (plan.due > 0 ? fill(s.runTermConfirmAnd, { n: plan.cost }) : s.runTermConfirm)
+    : fill(s.runTerm, { n: plan.cost });
+
+  // Shown in long mode, and in document mode while the choice history holds entries (leaving long mode moves every
+  // choice there; the user can remove them, SPEC "Leaving long mode").
+  const longTerms: ReactNode = long || semantic.long.history.length > 0 ? <div className="long-term-list" role="region" aria-label={s.longTermsTitle}>
+    <h4>{s.longTermsTitle}</h4>
+    {long && <p className="track-note">{s.longTermsNote}</p>}
+    {long && termRows.length === 0 && <p>{s.longTermsNone}</p>}
+    {long && selectedSegment !== null && <p className="track-note">{fill(s.longTermsFiltered, { n: selectedSegment + 1 })}</p>}
+    {shownTermRows.flatMap(r => {
+      const view = views[r.index];
+      const cores = inputs.items[r.index];
+      const truncated = r.report.truncated;
+      return r.report.findings.map((finding, k) => {
+        const placed = r.findings[k];
+        const chosen = choiceAt(view, finding.source_span);
+        return <article className="term-result long-term" key={`${r.index}:${finding.id}`} data-segment={r.index} data-mention-id={finding.id} data-term-state={r.state}>
+          <p className="result-summary"><span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span> · {fill(s.segmentLabel, { n: r.index + 1 })} · {finding.source_span.text}{r.state !== 'current' ? ` · ${{ pending: s.segTermPending, saved: s.segTermSaved, current: s.segTermChecked, stale: s.segTermStale }[r.state]}` : ''}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
+          {/* Excerpts come from the segment's cores (core-relative spans), so a long text is not scanned once per finding. */}
+          <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><Snippet text={cores?.sourceCore ?? ''} span={finding.source_span} missing={s.sourceMissing} /></div>
+          <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptTargetLabel}</span><Snippet text={cores?.targetCore ?? ''} span={finding.target_span} missing={m.review.excerptMissingTarget} /></div>
+          {finding.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
+            <div className="finding-actions"><button type="button" className="text-button" disabled={truncated} onClick={() => chooseLong(r.index, finding, c)}>{m.review.adopt}</button></div>
+          </div>)}
+          <div className="finding-actions">
+            <button type="button" className="text-button" disabled={truncated} onClick={() => chooseLong(r.index, finding, null)}>{m.review.notTerm}</button>
+            <button type="button" className="text-button" onClick={() => locate('source', placed.source_span)}>{m.review.jumpSource}</button>
+            <button type="button" className="text-button" disabled={!placed.target_span} onClick={() => { if (placed.target_span) locate('target', placed.target_span); }}>{m.review.jumpTarget}</button>
+          </div>
+          {chosen && <p className="long-choice-state" data-choice-view={chosen.view}>{chosen.candidate ? fill(m.review.choicePair, { span: chosen.source_span.text, zh: chosen.candidate.zh, en: chosen.candidate.en }) : fill(m.review.choiceNotTerm, { span: chosen.source_span.text })} — {choiceViewText(chosen.view)}</p>}
+        </article>;
+      });
+    })}
+    {selectedSegment === null && visibleTermRows.length > LONG_ROWS && <p className="track-note">{fill(s.longTermsMore, { n: visibleTermRows.length - LONG_ROWS })}</p>}
+    {longChoices.length > 0 && <div className="choice-records long-choices"><h4>{fill(s.longChoicesTitle, { n: longChoices.length })}</h4>
+      {longChoices.map(({ index, view, choice: c }) => {
+        const at = { index, start: c.source_span.start, end: c.source_span.end };
+        return <div className="choice-record" key={`${index}:${c.source_span.start}:${c.source_span.end}`} data-segment={index} data-choice-view={c.view}>
+          <p>{fill(s.segmentLabel, { n: index + 1 })} · {c.candidate ? fill(m.review.choicePair, { span: c.source_span.text, zh: c.candidate.zh, en: c.candidate.en }) : fill(m.review.choiceNotTerm, { span: c.source_span.text })} — {choiceViewText(c.view)}</p>
+          <div className="finding-actions">
+            {c.view === 'needs_reconfirmation' && view.record?.state !== 'pending' && <button type="button" className="text-button" onClick={() => commitLong(state => reconfirmChoice(state, at) as { long: LongState; error: string | null }, 'sem:longChoiceRecorded')}>{s.choiceReconfirm}</button>}
+            <button type="button" className="text-button" onClick={() => commitLong(state => removeChoice(state, at) as LongState)}>{m.review.choiceRemove}</button>
+          </div>
+        </div>;
+      })}
+    </div>}
+    {semantic.long.history.length > 0 && <details className="long-history"><summary>{fill(s.historyTitle, { n: semantic.long.history.length })}</summary>
+      <p className="track-note">{s.historyNote}</p>
+      {semantic.long.history.map((entry, position) => <div className="choice-record" key={`${position}:${entry.source_hash}:${entry.source_span.start}`}>
+        <p>{entry.candidate ? fill(m.review.choicePair, { span: entry.source_span.text, zh: entry.candidate.zh, en: entry.candidate.en }) : fill(m.review.choiceNotTerm, { span: entry.source_span.text })}</p>
+        <div className="finding-actions">
+          {restorable[position] !== null && restorable[position] !== undefined && <button type="button" className="text-button" onClick={() => commitLong(state => restoreHistoryEntry(state, position, restorable[position]!, { draft: work.current.draft, basis: basisRef.current }) as { long: LongState; error: string | null })}>{fill(s.historyRestore, { n: (restorable[position] ?? 0) + 1 })}</button>}
+          <button type="button" className="text-button" onClick={() => commitLong(state => removeHistoryEntry(state, position) as LongState)}>{s.historyRemove}</button>
+        </div>
+      </div>)}
+    </details>}
+  </div> : null;
 
   return <>
     {long && <div className="long-tools" role="group" aria-label={s.segmentsTitle}>
@@ -726,8 +905,11 @@ export function SemanticWorkbench(props: Props) {
       {!translateBlankLong && <div className="long-terms">
         <p>{s.runTermHint}</p>
         <div className="actions">
-          <button type="button" className="secondary-button" disabled={runActive || reviewsClosed || !ready.some(v => !v.term)} onClick={() => startRun('term')}>{s.runTerm}</button>
+          <button type="button" className="secondary-button" disabled={runActive || reviewsClosed || !plan?.cost} onClick={startTermRun}>{runTermLabel}</button>
         </div>
+      </div>}
+      {draft.alignments !== null && <div className="actions">
+        <button type="button" className="secondary-button" disabled={runActive} onClick={props.resetAlignments}>{s.useAutoAlignment}</button>
       </div>}
     </div>}
 
@@ -736,10 +918,10 @@ export function SemanticWorkbench(props: Props) {
         <h3>{s.segmentsTitle}</h3>
         {run.kind === 'translate'
           ? <p>{fill(s.translateProgress, { done: progress.done, total: progress.total })}</p>
-          : <p>{semanticOn ? fill(s.progress, { done: reviewedCount, total: ready.length }) : fill(s.termProgress, { done: termReviewed, total: ready.length })}{progress.failed ? fill(s.progressFailed, { n: progress.failed }) : ''}{progress.skipped ? fill(s.progressSkipped, { n: progress.skipped }) : ''}{semanticOn && long && termReviewed ? ` · ${fill(s.termProgress, { done: termReviewed, total: ready.length })}` : ''}</p>}
+          : <p>{semanticOn ? fill(s.progress, { done: reviewedCount, total: ready.length }) : fill(s.termProgress, { done: termCounts.current, total: ready.length })}{progress.failed ? fill(s.progressFailed, { n: progress.failed }) : ''}{progress.skipped ? fill(s.progressSkipped, { n: progress.skipped }) : ''}{semanticOn && long ? ` · ${fill(s.termProgress, { done: termCounts.current, total: ready.length })}` : ''}{long && termCounts.saved ? fill(s.termProgressSaved, { n: termCounts.saved }) : ''}{long && termCounts.stale ? fill(s.termProgressStale, { n: termCounts.stale }) : ''}{long && termCounts.finished ? fill(s.termProgressFinished, { n: termCounts.finished }) : ''}</p>}
       </div>
-      {run.kind !== null && run.phase !== 'idle' && <progress max={Math.max(1, progress.total)} value={progress.done} aria-label={runPhaseLine ?? ''} />}
-      {runPhaseLine && <p className="run-phase" role="status" aria-live="polite">{runPhaseLine}</p>}
+      {runState !== 'idle' && <progress max={Math.max(1, progress.total)} value={progress.done} aria-label={runPhaseLine ?? ''} />}
+      {runPhaseLine && <p className="run-phase" role="status" aria-live="polite" data-run-state={runState} data-run-kind={run.kind ?? undefined}>{runPhaseLine}</p>}
       {(semanticOn || contextOn) && <label className="inline-check"><input type="checkbox" checked={usePrecedents} onChange={e => setUsePrecedents(e.target.checked)} />{s.precedents}</label>}
       <div className="actions">
         {(run.phase === 'running' || run.phase === 'waiting') && <button type="button" className="secondary-button" onClick={() => dispatch({ type: 'pause' })}>{s.pause}</button>}
@@ -754,11 +936,15 @@ export function SemanticWorkbench(props: Props) {
         {views.map(view => {
           const label = segmentLabel(view);
           const item = runItemFor(view);
-          return <li key={view.itemKey + view.pair.index} className="segment-chip" data-status={view.pair.status} data-current={selectedSegment === view.pair.index ? 'true' : undefined}>
-            <button type="button" className="text-button" aria-pressed={selectedSegment === view.pair.index} onClick={() => { setSelectedSegment(selectedSegment === view.pair.index ? null : view.pair.index); setSegmentFilter(selectedSegment === view.pair.index ? 'all' : view.pair.index); }}>
+          const record = view.record;
+          return <li key={view.itemKey + view.pair.index} className="segment-chip" data-status={view.pair.status} data-current={selectedSegment === view.pair.index ? 'true' : undefined}
+            data-run-state={item ? itemDisplayState(run, item) as string : undefined} data-term-state={record?.state} data-finished={record?.finished ? 'true' : undefined}>
+            <button type="button" className="text-button" aria-pressed={selectedSegment === view.pair.index} onClick={() => { selectSegment(selectedSegment === view.pair.index ? null : view.pair.index); setSegmentFilter(selectedSegment === view.pair.index ? 'all' : view.pair.index); }}>
               {fill(s.segmentLabel, { n: view.pair.index + 1 })} · {label}{view.pair.hard_cut ? ` · ${s.segHardCut}` : ''}
             </button>
             {item?.status === 'failed' && !runActive && <button type="button" className="text-button" onClick={() => dispatch({ type: 'retry', key: item.key })}>{s.segRetry}</button>}
+            {record && (record.finished || record.state !== 'pending') && <button type="button" className="text-button" aria-pressed={record.finished}
+              onClick={() => commitLong(state => setFinished(state, view.pair.index, !record.finished) as LongState)}>{record.finished ? s.segUnmarkFinished : s.segMarkFinished}</button>}
             {semanticOn && view.pair.status === 'ready' && !runActive && (view.edited || (!view.result && item?.status !== 'failed')) && !translationClosed
               && <button type="button" className="text-button" onClick={() => startRun('semantic', [view])}>{s.segReview}</button>}
             {view.pair.status === 'untranslated' && <button type="button" className="text-button" disabled={pairTranslating !== null || runActive || translationClosed || chars(view.sCore).length > SEGMENT_LIMIT} onClick={() => void translatePair(view)}>{s.segTranslate}</button>}
@@ -767,7 +953,6 @@ export function SemanticWorkbench(props: Props) {
             {view.pair.status === 'untranslated' && <p className="segment-hint">{s.untranslatedHint}</p>}
             {view.pair.status === 'unpaired_target' && <p className="segment-hint">{s.unpairedHint}</p>}
             {view.pair.status === 'needs_manual_split' && (() => { const sh = shape(view); return <p className="segment-hint">{fill(s.manualHint, { sp: sh.sourceParagraphs, ss: sh.sourceSentences, sl: sh.sourceLength.toLocaleString(locale), tp: sh.targetParagraphs, ts: sh.targetSentences, tl: sh.targetLength.toLocaleString(locale) })}</p>; })()}
-            {semanticOn && long && view.termEdited && <p className="segment-hint">{s.termSegmentStale}</p>}
           </li>;
         })}
       </ol>
@@ -777,22 +962,7 @@ export function SemanticWorkbench(props: Props) {
         : <p className="split-helper" role="status">{s.splitResolved} <button type="button" className="text-button" onClick={() => setSplitOpen(null)}>{s.manualClose}</button></p>)}
     </section>}
 
-    {props.termTrack}
-
-    {long && termRows.length > 0 && <section className="term-track long-terms-list" aria-labelledby="long-terms-title">
-      <h3 id="long-terms-title">{s.termTrackTitle}</h3>
-      <p className="track-note">{s.longTermReadOnly}</p>
-      {termRows.filter(r => selectedSegment === null || r.view.pair.index === selectedSegment).map(r => <article className="term-result" key={`${r.view.itemKey}:${r.finding.id}`}>
-        <p className="result-summary"><span className={`verdict-badge verdict-${r.finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[r.finding.verdict]}</span> · {fill(s.segmentLabel, { n: r.view.pair.index + 1 })} · {r.source_span.text}</p>
-        <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><Snippet text={source} span={r.source_span} missing={s.sourceMissing} /></div>
-        <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptTargetLabel}</span><Snippet text={target} span={r.target_span} missing={m.review.excerptMissingTarget} /></div>
-        {r.finding.candidates.map(c => <p className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span></p>)}
-        <div className="finding-jumps">
-          <button type="button" className="text-button" onClick={() => locate('source', r.source_span)}>{m.review.jumpSource}</button>
-          <button type="button" className="text-button" disabled={!r.target_span} onClick={() => { if (r.target_span) locate('target', r.target_span); }}>{m.review.jumpTarget}</button>
-        </div>
-      </article>)}
-    </section>}
+    {props.termTrack(longTerms)}
 
     {semanticOn && <section className="semantic-track" aria-labelledby="semantic-title" ref={sectionRef}>
       <div className="track-head">
@@ -1002,8 +1172,14 @@ type WorkfileV2 = { source: string; target: string; direction: 'en' | 'zh'; sema
  * of exactly these texts, comes back as untrusted reference results.
  */
 export async function semanticFromWorkfile(parsed: WorkfileV2): Promise<SemanticState> {
-  const texts: { revision: string; text: string }[] = [];
-  for (const entry of parsed.semantic_texts) if (await revisionOf(entry.text) === entry.revision) texts.push({ revision: entry.revision, text: entry.text });
+  // The texts the manuscript was saved with come first (newest): a decision made on them needs them for the re-review
+  // merge once the text is edited. The writer leaves out texts equal to the current ones, so an unchanged save is unchanged.
+  const [savedSource, savedTarget] = await Promise.all([revisionOf(parsed.source), revisionOf(parsed.target)]);
+  const texts: { revision: string; text: string }[] = [{ revision: savedSource, text: parsed.source }];
+  if (savedTarget !== savedSource) texts.push({ revision: savedTarget, text: parsed.target });
+  for (const entry of parsed.semantic_texts) {
+    if (!texts.some(t => t.revision === entry.revision) && await revisionOf(entry.text) === entry.revision) texts.push({ revision: entry.revision, text: entry.text });
+  }
   let state: SemanticState = { ...(emptySemantic() as SemanticState), decisions: [...parsed.semantic_decisions], texts, history: [...parsed.semantic_history] };
   const last = parsed.semantic_history.at(-1);
   if (!last || last.source !== parsed.source || last.target !== parsed.target || last.direction !== parsed.direction) return state;
@@ -1041,41 +1217,17 @@ export function semanticWorkfileParts<T extends { source: string; target: string
   } catch { return payload; }
 }
 
-/** Per-segment term reports of a long manuscript in whole-text positions; `stale` when the segment changed since. */
-export function segmentTermsOf(draft: Draft, semantic: SemanticState) {
-  if (!semantic.terms.length) return [];
-  const sc = chars(draft.source); const tc = chars(draft.target);
-  const pairs = safePairs(draft.source, draft.target, draft.alignments);
-  // The manuscript's own segment number: the current pair this result covers, else
-  // the number it had when checked. Never a position in the list of finished results.
-  const numberOf = (t: TermResult) => {
-    let best: Pair | null = null; let most = 0;
-    for (const p of pairs) {
-      const shared = Math.min(p.source.core_end, t.region.source.end) - Math.max(p.source.core_start, t.region.source.start);
-      if (shared > most) { most = shared; best = p; }
-    }
-    return best ? best.index : t.index;
-  };
-  return [...semantic.terms].sort((a, b) => a.region.source.start - b.region.source.start).map(t => {
-    const index = numberOf(t);
-    const stale = segmentKey(draft.direction, slice(sc, t.region.source.start, t.region.source.end), slice(tc, t.region.target.start, t.region.target.end)) !== t.segmentKey;
-    const shift = (span: Span | null, offset: number) => span === null ? null : { start: span.start + offset, end: span.end + offset, text: span.text };
-    return {
-      index, stale,
-      source_start: t.region.source.start, source_end: t.region.source.end, target_start: t.region.target.start, target_end: t.region.target.end,
-      report: t.report,
-      findings: t.report.findings.map(f => ({ verdict: f.verdict, source_span: shift(f.source_span, t.region.source.start)!, target_span: shift(f.target_span, t.region.target.start), candidates: f.candidates.map(c => ({ zh: c.zh, en: c.en })) })),
-    };
-  });
-}
-
-/** Export parts: issue rows with their handling status; never a sentence-meaning certification. */
-export function semanticExport(draft: Draft, semantic: SemanticState) {
-  const segments = segmentTermsOf(draft, semantic);
+/**
+ * Export parts: the long manuscript's segment term reports and the semantic issue rows with their handling status;
+ * never a sentence-meaning certification. A segment term report is the live response when it was obtained in this
+ * session, else the report rebuilt from the saved record (SPEC "Compact term result": request_id null, no sources).
+ */
+export function semanticExport(draft: Draft, semantic: SemanticState, basis: SessionBasis) {
+  const segments = inputsOf(draft).long ? rowsOf(semantic.long, { draft, basis }) : [];
   const terms = segments.length ? {
     segment_term_reports: segments.map(({ index, stale, source_start, source_end, target_start, target_end, report }) => ({ segment: index + 1, stale, source_start, source_end, target_start, target_end, report })),
   } : {};
-  const markdownTerms = segments.length ? segments.map(({ index, stale, findings }) => ({ index, stale, findings })) : null;
+  const markdownTerms = segments.length ? segments.map(({ index, state, stale, findings }) => ({ index, state, stale, findings })) : null;
   if (!semantic.placed.length && !semantic.decisions.length) return { result: terms, markdown: null, segmentTerms: markdownTerms };
   // Keyed by occurrence (the placed issue), not by issue id: two identical
   // segments report the same id for different places with different statuses.
@@ -1086,7 +1238,7 @@ export function semanticExport(draft: Draft, semantic: SemanticState) {
     return semanticExportItems({ issues: [{ ...p.issue, stale: p.stale }], statuses: new Map([[p.issue.id, status]]) })[0];
   });
   const resolved = semanticIssuesResolved(statuses) as number;
-  const readyPairs = safePairs(draft.source, draft.target, draft.alignments).filter(p => p.status === 'ready');
+  const readyPairs = inputsOf(draft).items.map(item => item.pair).filter(p => p.status === 'ready');
   const reviewed = readyPairs.filter(p => semantic.results.some(r => r.region.source.start === p.source.core_start && r.region.target.start === p.target.core_start
     && r.region.source.end === p.source.core_end && r.region.target.end === p.target.core_end)).length;
   return {

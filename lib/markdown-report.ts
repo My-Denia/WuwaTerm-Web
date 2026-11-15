@@ -30,7 +30,9 @@ export type MarkdownSemanticItem = {
   suggestion: string | null; suggestion_withheld: string | null; status: string;
 };
 export type MarkdownSemantic = { items: MarkdownSemanticItem[]; resolved: number; segments: { total: number; reviewed: number } };
-export type MarkdownSegmentTerms = { index: number; stale: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[] }[] };
+// `state` (long-mode term review, manuscript v3): current, saved (restored, not yet confirmed with the live basis) or
+// stale (re-check pending); without it, `stale` alone decides the label.
+export type MarkdownSegmentTerms = { index: number; state?: 'pending' | 'saved' | 'current' | 'stale'; stale: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[] }[] };
 export type MarkdownCurrency = 'current' | 'stale' | 'imported' | 'none';
 
 export type MarkdownReportInput = {
@@ -251,7 +253,8 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
     heading(2, fill(md.segmentTermsHeading, { n: input.segmentTerms.length }));
     paragraph(md.segmentTermsNote);
     for (const segment of input.segmentTerms) {
-      out.push('### ' + fill(md.segmentTermsLabel, { n: segment.index + 1 }) + (segment.stale ? ' · ' + md.segmentTermsStale : ''), '');
+      const mark = segment.state === 'saved' ? md.segmentTermsSaved : segment.stale ? md.segmentTermsStale : '';
+      out.push('### ' + fill(md.segmentTermsLabel, { n: segment.index + 1 }) + (mark ? ' · ' + mark : ''), '');
       if (!segment.findings.length) { paragraph(md.segmentTermsNone); continue; }
       out.push(...bullets(segment.findings.map(finding => ((msg(lang).review.verdicts as Record<string, string>)[finding.verdict] ?? finding.verdict)
         + ' · ' + inline(finding.source_span.text) + ' · ' + fill(md.spanLabel, { start: finding.source_span.start + 1, end: finding.source_span.end })

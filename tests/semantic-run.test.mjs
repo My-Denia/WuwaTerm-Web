@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  classifyFailure, contextBefore, diffSplice, fitRequestBody, historySnapshot, initialRun, liveIssue, mapRegion, mapSpan,
-  nextQueued, placeSegmentIssues, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
+  classifyFailure, contextBefore, diffSplice, fitRequestBody, historySnapshot, initialRun, itemDisplayState, liveIssue, mapRegion, mapSpan,
+  nextQueued, placeSegmentIssues, runDisplayState, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../lib/semantic-run.js';
 import { parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
@@ -322,21 +322,30 @@ async function ignored(source, target, n) {
 }
 
 test('semanticTextsWithinBudget keeps only needed, non-current texts and drops the oldest until the file fits', async () => {
-  const big = c => `${c}${'x'.repeat(430_000)}`;
-  const [a, b, c, old] = [big('A'), big('B'), big('C'), 'old short text'];
-  const d1 = await ignored(a, b, 1);
-  const d2 = await ignored(c, old, 2);
+  const entry = async text => ({ revision: await revisionOf(text), text });
   const accepted = await makeSemanticDecision({ issue: { id: '3'.repeat(32), fingerprint: 'f'.repeat(32), category: 'omission', segment_index: 0, source_span: { start: 0, end: 1, text: 'x' }, target_span: null },
     segmentIndex: 0, source: 'unrelated source', target: 'unrelated target', termBasis: TB, decision: 'accepted', appliedText: 'y' });
-  const payload = { source: 'current source', target: 'current target', direction: 'en', alignments: null, choices: [], history: [],
-    semantic_decisions: [d1, d2, accepted], semantic_texts: [], semantic_history: [] };
-  const entry = async text => ({ revision: await revisionOf(text), text });
-  const candidates = [await entry(a), await entry(b), await entry(c), await entry(old), await entry('unrelated source'), await entry('current source')];
-  const { texts, dropped } = semanticTextsWithinBudget({ payload, candidates, currentTexts: { source: 'current source', target: 'current target' } });
-  // oldest first out: old, then c, until A+B (860 KB) fit
-  assert.deepEqual(texts.map(t => t.text === a ? 'a' : t.text === b ? 'b' : '?'), ['a', 'b']);
-  assert.equal(dropped, 2);
-  assert.equal(parseWorkfile(serializeWorkfile({ ...payload, semantic_texts: texts })).semantic_texts.length, 2);
+  const plan = async size => {
+    const big = c => `${c}${'x'.repeat(size)}`;
+    const [a, b, c, old] = [big('A'), big('B'), big('C'), 'old short text'];
+    const payload = { source: 'current source', target: 'current target', direction: 'en', alignments: null, choices: [], history: [],
+      semantic_decisions: [await ignored(a, b, 1), await ignored(c, old, 2), accepted], semantic_texts: [], semantic_history: [] };
+    const candidates = [await entry(a), await entry(b), await entry(c), await entry(old), await entry('unrelated source'), await entry('current source')];
+    const out = semanticTextsWithinBudget({ payload, candidates, currentTexts: { source: 'current source', target: 'current target' } });
+    const name = t => ({ [a]: 'a', [b]: 'b', [c]: 'c', [old]: 'old' })[t.text] ?? '?';
+    return { ...out, payload, names: out.texts.map(name) };
+  };
+  // manuscript-v3 SPEC "Writing", rule 2: texts over 1 MiB in total no longer have to go; the file is saved as v3 instead.
+  const kept = await plan(430_000);
+  assert.deepEqual(kept.names, ['a', 'b', 'c', 'old']);
+  assert.equal(kept.dropped, 0);
+  assert.equal(parseWorkfile(serializeWorkfile({ ...kept.payload, semantic_texts: kept.texts })).format, 'wuwaterm-manuscript-v3');
+  // Over the 44 MiB v3 cap the oldest go first: old, then c, until A+B (32 MB) fit.
+  const trimmed = await plan(16_000_000);
+  assert.deepEqual(trimmed.names, ['a', 'b']);
+  assert.equal(trimmed.dropped, 2);
+  assert.equal(parseWorkfile(serializeWorkfile({ ...trimmed.payload, semantic_texts: trimmed.texts })).semantic_texts.length, 2);
+  const { payload } = kept;
   // current texts are never stored
   const current = semanticTextsWithinBudget({ payload: { ...payload, semantic_decisions: [await ignored('current source', 'current target', 4)] },
     candidates: [await entry('current source'), await entry('current target')], currentTexts: { source: 'current source', target: 'current target' } });
@@ -414,4 +423,43 @@ test('nextToSend moves on as soon as the run state shows the last send finished,
   s = runReducer(runReducer(s, { type: 'sent', key: 'c' }), { type: 'done', key: 'c' });
   s = runReducer(s, { type: 'retry', key: 'b' });
   assert.equal(nextToSend(s, { key: 'c', attempt: 1 })?.key, 'b');
+});
+
+test('extend queues new keys of a long-mode term run in segment order and leaves every known item alone', () => {
+  // manuscript-v3 SPEC Runtime step 5: a new basis from the probe makes saved records due within the same run.
+  let state = runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'p', index: 2 }, { key: 'a', index: 0 }] });
+  state = runReducer(state, { type: 'sent', key: 'p' });
+  state = runReducer(state, { type: 'extend', items: [{ key: 'p', index: 2 }, { key: 'b', index: 1 }, { key: 'c', index: 3 }, { key: 'b', index: 1 }] });
+  assert.deepEqual(state.items.map(i => [i.key, i.status, i.attempt]), [['a', 'queued', 0], ['b', 'queued', 0], ['p', 'sending', 1], ['c', 'queued', 0]]);
+  state = runReducer(state, { type: 'done', key: 'p' });
+  assert.equal(nextQueued(state).key, 'a');
+  // A finished run is not reopened by a late extend.
+  const finished = runReducer(runReducer(runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'x', index: 0 }] }), { type: 'sent', key: 'x' }), { type: 'done', key: 'x' });
+  assert.equal(runReducer(finished, { type: 'extend', items: [{ key: 'y', index: 1 }] }), finished);
+});
+
+test('runDisplayState and itemDisplayState tell running, retrying, waiting, paused, failed and done apart', () => {
+  const start = runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'a', index: 0 }, { key: 'b', index: 1 }, { key: 'c', index: 2 }] });
+  assert.equal(runDisplayState(initialRun()), 'idle');
+  const sending = runReducer(start, { type: 'sent', key: 'a' });
+  assert.equal(runDisplayState(sending), 'running');
+  assert.equal(itemDisplayState(sending, sending.items[0]), 'sending');
+  const busy = runReducer(sending, { type: 'failed', key: 'a', code: 'shared_pool_busy', classification: { action: 'wait', seconds: 5 }, now: 0 });
+  assert.equal(runDisplayState(busy), 'waiting');
+  assert.deepEqual(busy.items.map(i => itemDisplayState(busy, i)), ['waiting', 'queued', 'queued']);
+  const resent = runReducer(runReducer(busy, { type: 'resume' }), { type: 'sent', key: 'a' });
+  assert.equal(runDisplayState(resent), 'retrying');
+  assert.equal(itemDisplayState(resent, resent.items[0]), 'retrying');
+  const paused = runReducer(runReducer(resent, { type: 'pause' }), { type: 'done', key: 'a' });
+  assert.equal(runDisplayState(paused), 'paused');
+  assert.deepEqual(paused.items.map(i => itemDisplayState(paused, i)), ['done', 'paused', 'paused']);
+  const stopped = runReducer(runReducer(runReducer(paused, { type: 'resume' }), { type: 'sent', key: 'b' }),
+    { type: 'failed', key: 'b', code: 'upstream_rate_limited', classification: { action: 'stop' }, now: 0 });
+  assert.equal(runDisplayState(stopped), 'failed');
+  assert.deepEqual(stopped.items.map(i => itemDisplayState(stopped, i)), ['done', 'failed', 'paused']);
+  const segmentFailed = runReducer(runReducer(runReducer(runReducer(stopped, { type: 'resume' }), { type: 'sent', key: 'b' }), { type: 'done', key: 'b' }),
+    { type: 'sent', key: 'c' });
+  const ended = runReducer(segmentFailed, { type: 'failed', key: 'c', code: 'upstream_network_error', classification: { action: 'segment_failed' }, now: 0 });
+  assert.deepEqual([ended.phase, runDisplayState(ended)], ['done', 'failed']);
+  assert.equal(runDisplayState(runReducer(runReducer(segmentFailed, { type: 'done', key: 'c' }), { type: 'resume' })), 'done');
 });

@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
-import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
+import * as L from '../../lib/long-review.js';
+import { FRESH_MATCHER_REVISION, dictionary, fixture, freshApiReport, hash } from '../fixtures/manuscript.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
 
 const windowsRoot = requireWindowsRoot();
@@ -68,6 +69,85 @@ def build_v2(module):
         'semantic_history': [{'source': source, 'target': old_target, 'direction': 'en', 'segments': [{
             'segment_index': 0, 'source_start': 0, 'source_end': 5, 'target_start': 0, 'target_end': 21, 'report': report}]}]}
     return {'payload': payload, 'content': module.serialize_workfile(payload)}
+
+
+def build_v3(module, scenario):
+    # A long manuscript run through the Windows client's own segment runtime, not read from a Web file:
+    # the probe on segment 0, a check of segment 1, a term choice in each, a re-check of segment 0 with
+    # its resolution; then a second choice in segment 0 that a changed result unconfirms and that matches
+    # again; a target-only edit of segment 0 and its re-check; and the user's position and finished marks.
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    payload = {'source': scenario['source'], 'target': scenario['target'], 'direction': 'en', 'alignments': None,
+               'choices': [], 'history': [], 'semantic_decisions': [], 'semantic_texts': [], 'semantic_history': []}
+    pairs = lambda value: segmentation.pair_segments(value['source'], value['target'])
+    payload = records.with_parts(payload, records.normalize(payload, pairs(payload)))
+    candidate, extra, size = scenario['candidate'], scenario['extra'], len(scenario['candidate']['zh'])
+    state = {'payload': payload, 'basis': None}
+
+    def second(core, text):
+        return core.index(text, core.index(text) + 1)
+
+    def report(index, variant):
+        record = records.parts_of(state['payload']).segments[index]
+        source_core = state['payload']['source'][record['source_start']:record['source_end']]
+        target_core = state['payload']['target'][record['target_start']:record['target_end']]
+        at, again = target_core.index(candidate['en']), second(target_core, candidate['en'])
+        both = [candidate, extra] if variant == 'extra' else [candidate]
+        found = lambda s, t, c: {'verdict': 'verified_constraint', 'source': [s, s + size], 'target': [t, t + len(candidate['en'])],
+                                 'candidates': c, 'candidates_truncated': False}
+        s2 = second(source_core, candidate['zh'])
+        result = {'truncated': False, 'evaluated': 2, 'not_evaluated': 0,
+                  'findings': [found(0, at, [candidate]), found(s2, again, both)]}
+        value = records.expand_result({**record, 'basis': scenario['basis'], 'result': result},
+                                      state['payload']['source'], state['payload']['target'])
+        return {**value, 'request_id': 'windows-built'}
+
+    def check(index, variants=()):
+        # One segment check as the client runs it: the planned request, then again while the runtime asks for it.
+        for n in range(3):
+            request = records.plan_request(state['payload'], index, state['basis'])
+            applied = records.apply_response(state['payload'], request, report(index, variants[n] if n < len(variants) else None), state['basis'])
+            if applied.outcome != 'stored':
+                raise RuntimeError('unexpected outcome ' + applied.outcome)
+            state['payload'], state['basis'] = records.with_parts(state['payload'], applied.parts), applied.basis
+            if not applied.again:
+                return n + 1
+        raise RuntimeError('the check did not settle')
+
+    def choose(*args):
+        state['payload'] = records.with_parts(state['payload'], records.choose(state['payload'], *args))
+
+    check(0)
+    check(1)
+    choose(0, 0, size, 'official_pair', candidate['candidate_id'])
+    choose(1, 0, size, 'not_a_term')
+    check(0)
+    s2 = second(state['payload']['source'], candidate['zh'])
+    choose(0, s2, s2 + size, 'not_a_term')
+    check(0, ['extra'])
+    # A target-only edit of segment 0, as the editor reports it, then normalized to the new pairing.
+    before, (old, new) = state['payload']['target'], scenario['target_edit']
+    start = before.index(old)
+    parts = records.apply_edit(records.parts_of(state['payload']), before, 'target', start, start + len(old), len(new))
+    edited = records.with_parts({**state['payload'], 'target': before.replace(old, new, 1)}, parts)
+    state['payload'] = records.with_parts(edited, records.normalize(edited, pairs(edited), state['basis']))
+    requests = check(0)
+    parts = records.parts_of(state['payload'])
+    payload = records.with_parts(state['payload'], parts._replace(progress={'current': 1, 'completed': [0, 1]}))
+    return {'content': module.serialize_workfile(payload), 'edit_requests': requests}
+
+
+def v3_runtime(operation, payload):
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    if operation == 'alignment_inputs':
+        return [records.alignment_input(payload['alignments'], payload['source'], payload['target'],
+                                        (r['source_start'], r['source_end']), (r['target_start'], r['target_end']))
+                for r in payload['segments']]
+    pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
+    parts = records.normalize(payload, pairs)
+    return {'segments': parts.segments, 'segment_choice_history': parts.history, 'progress': parts.progress}
 try:
     if request['operation'] == 'parse':
         result = module.parse_workfile(request['content'])
@@ -75,6 +155,10 @@ try:
         result = module.serialize_workfile(request['payload'])
     elif request['operation'] == 'build_v2':
         result = build_v2(module)
+    elif request['operation'] == 'build_v3':
+        result = build_v3(module, request['scenario'])
+    elif request['operation'] in ('alignment_inputs', 'normalize'):
+        result = v3_runtime(request['operation'], request['payload'])
     elif request['operation'] == 'groups':
         result = module.choice_conflict_groups(request['payload'])
     else:
@@ -88,7 +172,8 @@ json.dump(response, sys.stdout, ensure_ascii=False)
 function windows(request) {
   const result = spawnSync(process.env.WUWATERM_CONTRACT_PYTHON || 'python3',
     ['-I', '-B', '-c', pythonBridge, manuscriptPath],
-    { input: JSON.stringify(request), encoding: 'utf8', timeout: 30000 });
+    // A v3 file may be 44 MiB, so the pipes and the clock allow for one.
+    { input: JSON.stringify(request), encoding: 'utf8', timeout: 120000, maxBuffer: 256 * 1024 * 1024 });
   assert.equal(result.status, 0, `Windows manuscript process failed: ${result.error || result.stderr}`);
   const response = JSON.parse(result.stdout);
   assert.equal(response.format, WORKFILE_FORMAT, 'Windows and Web manuscript versions differ');
@@ -275,4 +360,137 @@ test('both consumers reject every invalid v2 fixture', () => {
   }
   // Both reject; the error code must match where the two ports define the same limit.
   assert.deepEqual(differing, [], 'Web and Windows report different codes for the same invalid file');
+});
+
+// ---- Manuscript v3: both directions -------------------------------------------------
+
+const v3Dir = fileURLToPath(new URL('../../contracts/manuscript-v3/', import.meta.url));
+const v3Cases = JSON.parse(readFileSync(join(v3Dir, 'cases.json'), 'utf8'));
+const readV3 = file => readFileSync(join(v3Dir, file), 'utf8');
+const contentOf = c => (c.pad_to_bytes ? readV3(c.file) + ' '.repeat(c.pad_to_bytes - Buffer.byteLength(readV3(c.file), 'utf8')) : readV3(c.file));
+const draftOf = x => ({ source: x.source, target: x.target, direction: x.direction, alignments: x.alignments });
+
+test('every valid v3 fixture is read alike by Web and Windows, and both write back its canonical bytes', () => {
+  for (const c of v3Cases.valid) {
+    const content = contentOf(c);
+    const web = parseWorkfile(content);
+    const fromWindows = windows({ operation: 'parse', content });
+    assert.ok(fromWindows.result, `${c.file}: Windows rejected it (${fromWindows.error})`);
+    assert.deepEqual(fromWindows.result, web, `${c.file}: Windows parse differs from Web parse`);
+    const canonical = readV3(c.canonical);
+    assert.equal(serializeWorkfile(web), canonical, `${c.file}: Web bytes`);
+    assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, canonical, `${c.file}: Windows bytes`);
+  }
+});
+
+test('both consumers reject every invalid v3 fixture with its code, including 129 decisions in the v2 part', () => {
+  assert.ok(v3Cases.invalid.some(c => c.file === 'invalid-v3-129-decisions.json' && c.error === 'workfile_too_many_entries'));
+  const differing = [];
+  for (const c of v3Cases.invalid) {
+    const content = contentOf(c);
+    let web = null;
+    try { parseWorkfile(content); } catch (cause) { web = cause.code; }
+    const fromWindows = windows({ operation: 'parse', content }).error ?? null;
+    if (web !== c.error || fromWindows !== c.error) differing.push(`${c.file}: expected ${c.error}, Web ${web}, Windows ${fromWindows}`);
+  }
+  assert.deepEqual(differing, []);
+});
+
+test('Windows computes the stored alignment input digest of the explicit-alignments fixture, as Web does', () => {
+  const x = parseWorkfile(readV3('valid-v3-explicit-alignments.json'));
+  assert.ok(Array.isArray(x.alignments) && x.alignments.length > 0);
+  const web = x.segments.map(r => L.alignmentInput(x.alignments, x.source, x.target, r));
+  assert.ok(web.every(value => /^[0-9a-f]{64}$/u.test(value)));
+  assert.deepEqual(windows({ operation: 'alignment_inputs', payload: x }).result, web);
+  const live = x.segments.filter(r => r.status !== 'pending');
+  assert.ok(live.length > 0);
+  for (const r of live) assert.equal(r.alignment_input, web[r.index], `record ${r.index}`);
+});
+
+// Three synthetic paragraphs per side, each starting with the term: a long manuscript of three ready segments.
+const SCENARIO = (() => {
+  const zh = i => `今汐在第${i}段。今汐又来了。${Array.from({ length: 80 }, (_, k) => `第${i}段第${k + 1}句是合成句子。`).join('')}`;
+  const en = i => `Jinhsi is in paragraph ${i}. Jinhsi came back. ${Array.from({ length: 34 }, (_, k) => `Paragraph ${i} line ${k + 1} is synthetic.`).join(' ')}`;
+  return {
+    source: [1, 2, 3].map(zh).join('\n\n'), target: [1, 2, 3].map(en).join('\n\n'),
+    candidate: { candidate_id: hash('candidate-jinhsi'), zh: '今汐', en: 'Jinhsi', category: 'character' },
+    // A second candidate that one response offers at the second occurrence, which unconfirms the not_a_term chosen there.
+    extra: { candidate_id: hash('candidate-jinhsi-extra'), zh: '今汐', en: 'Jinhsi Prime', category: 'character' },
+    basis: { rule_version: 'review-v2', dictionary: { ...dictionary }, matcher_revision: FRESH_MATCHER_REVISION },
+    target_edit: ['Paragraph 1 line 1 is synthetic.', 'Paragraph 1 line 1 is still synthetic.'],
+  };
+})();
+
+/** The same steps as build_v3 in the bridge, through the Web runtime (lib/long-review.js). */
+function webBuiltV3({ source, target, candidate, extra, basis: responseBasis, target_edit: [old, replacement] }) {
+  let draft = { source, target, direction: 'en', alignments: null };
+  let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
+  let basis = null;
+  const second = (core, text) => core.indexOf(text, core.indexOf(text) + 1);
+  const report = (index, variant) => {
+    const it = L.segmentInputs(draft).items[index];
+    const found = (s, t, candidates) => ({ verdict: 'verified_constraint', source: [s, s + candidate.zh.length], target: [t, t + candidate.en.length],
+      candidates, candidates_truncated: false });
+    const result = { truncated: false, evaluated: 2, not_evaluated: 0, findings: [
+      found(0, it.targetCore.indexOf(candidate.en), [candidate]),
+      found(second(it.sourceCore, candidate.zh), second(it.targetCore, candidate.en), variant === 'extra' ? [candidate, extra] : [candidate]),
+    ] };
+    return { ...L.expandResult({ source_hash: it.sourceHash, target_hash: it.targetHash, basis: responseBasis, result }, it.sourceCore, it.targetCore), request_id: 'web-built' };
+  };
+  // One segment check as the workbench runs it: the planned request, then at most one more when applyResult asks for it.
+  const check = (index, variants = []) => {
+    for (let n = 0; n < 2; n += 1) {
+      const ctx = { draft, basis };
+      const request = L.segmentRequest(long, index, ctx, { withResolutions: n > 0 || L.recheckPlan(long, index, ctx) === 'with_resolutions' });
+      const out = L.applyResult(long, ctx, request, report(index, variants[n]));
+      assert.equal(out.error, null);
+      ({ long, basis } = out);
+      if (!out.secondRequest) return n + 1;
+    }
+    assert.fail('the check did not settle');
+  };
+  const choose = (index, start, picked) => {
+    long = L.chooseTerm(long, { index, finding: { source: [start, start + candidate.zh.length] }, candidate: picked }, { draft, basis }).long;
+  };
+  check(0);
+  check(1);
+  choose(0, 0, candidate);
+  choose(1, 0, null);
+  check(0);
+  choose(0, second(source, candidate.zh), null);
+  check(0, ['extra']);
+  // A target-only edit of segment 0, then its re-check under the same basis.
+  const edited = { ...draft, target: draft.target.replace(old, replacement) };
+  long = L.reconcileLong(long, draft, edited);
+  draft = edited;
+  const requests = check(0);
+  long = L.setFinished(L.setFinished(L.setCurrent(long, 1), 0, true), 1, true);
+  const content = serializeWorkfile({ ...draft, choices: [], history: [], semantic_decisions: [], semantic_texts: [], semantic_history: [], ...L.workfileParts(long, draft, { basis }) });
+  return { content, requests };
+}
+
+test('a long manuscript with choices, a target-only edit and progress: Web and Windows write the same v3 bytes and keep each other\'s file', () => {
+  const web = webBuiltV3(SCENARIO);
+  const built = windows({ operation: 'build_v3', scenario: SCENARIO }).result;
+  assert.equal(JSON.parse(web.content).format, WORKFILE_FORMAT_V3);
+  assert.equal(built.content, web.content, 'the same runtime steps give different files');
+  // SPEC step 6: after the target-only edit only the request count may differ (Web 1, a realigning client 2).
+  assert.equal(web.requests, 1);
+  assert.ok([1, 2].includes(built.edit_requests), `${built.edit_requests} requests`);
+  const parsed = parseWorkfile(built.content);
+  assert.deepEqual(parsed.segments.map(r => r.status), ['done', 'stale', 'pending']);
+  // The not_a_term at the second occurrence matches again but was unconfirmed before the edit, so it stays unconfirmed.
+  assert.deepEqual(parsed.segments.map(r => r.choices.map(c => [c.choice, c.source_span.start, c.confirmed])),
+    [[['official_pair', 0, true], ['not_a_term', 7, false]], [['not_a_term', 0, true]], []]);
+  assert.ok(parsed.target.includes(SCENARIO.target_edit[1]));
+  assert.deepEqual(parsed.progress, { current: 1, completed: [0, 1] });
+  // Web opens the Windows file through its runtime and writes it back byte for byte.
+  const long = L.longFromWorkfile(parsed);
+  assert.equal(serializeWorkfile({ ...parsed, ...L.workfileParts(long, draftOf(parsed), { basis: null }) }), built.content);
+  // Windows reads the Web file as Web does, its normalize keeps every record, and it writes the file back byte for byte.
+  const fromWindows = windows({ operation: 'parse', content: web.content });
+  assert.deepEqual(fromWindows.result, parseWorkfile(web.content));
+  assert.deepEqual(windows({ operation: 'normalize', payload: fromWindows.result }).result,
+    { segments: parsed.segments, segment_choice_history: parsed.segment_choice_history, progress: parsed.progress });
+  assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, web.content);
 });

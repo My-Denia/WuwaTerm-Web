@@ -1,6 +1,10 @@
 # Manuscript v2 (semantic review decisions)
 
 The Web owns the local manuscript file format. `wuwaterm-manuscript-v1` is unchanged.
+`wuwaterm-manuscript-v3` adds per-segment term state for long manuscripts and carries the
+v1 and v2 parts unchanged; it is specified in
+[`contracts/manuscript-v3/SPEC.md`](../contracts/manuscript-v3/SPEC.md). This page
+covers v1 and v2, which keep their meaning.
 `wuwaterm-manuscript-v2` adds the user's decisions on model-backed semantic review
 issues (Core ADR 0018/0019). Cross-repository fixtures: `contracts/manuscript-v2/`
 (`cases.json` indexes them; regenerate with `node scripts/build-manuscript-v2-fixtures.mjs --write`,
@@ -9,7 +13,9 @@ default mode only checks). The Windows client ports against these.
 ## When v2 is written
 
 `serializeWorkfile` writes v2 only when there is at least one semantic decision or
-history snapshot; otherwise it writes exactly the v1 bytes. A v2 file cannot be
+history snapshot; otherwise it writes exactly the v1 bytes. A manuscript with
+long-manuscript segment state or segment choice history is written as v3 instead,
+whatever else it holds. A v2 file cannot be
 opened by Web 0.1.x or Windows 0.3.x (they reject the format); v1 files stay readable
 everywhere. `parseWorkfile` accepts both and returns the object as stored; its
 `format` field tells the caller which one. `semanticPartsOf(parsed)` returns the three
@@ -44,14 +50,15 @@ Top level (exact keys): the v1 keys (`format`, `source`, `target`, `direction`,
   `semantic-review-v1` report valid for those slices.
 
 Writing keeps the last 2 history snapshots. Over 1 MiB the oldest snapshots are dropped
-first; if the file is still too large the write fails with `workfile_too_large`. Decisions
-are never dropped.
+first; a payload still over 1 MiB is written as v3 instead, where snapshots are dropped only
+over 44 MiB and the write fails with `workfile_too_large` above that. Decisions are never
+dropped.
 
 ## What the web writer stores
 
 - `semantic_texts` holds only revisions that an `ignored` decision references and that
-  differ from the current text, newest first, at most 16, within 1 MiB. When they do not
-  fit, the oldest are dropped first. An `ignored` decision whose text was dropped gets
+  differ from the current text, newest first, at most 16; the oldest are dropped only
+  while the file would exceed 44 MiB (such a file is v3). An `ignored` decision whose text was dropped gets
   `old_text_unavailable` at the next re-review and returns to needing reconfirmation; the
   decision itself is kept.
 - A `semantic_history` snapshot includes only segments whose current slice still equals the

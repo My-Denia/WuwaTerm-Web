@@ -71,7 +71,7 @@ test('a reference that no longer matches is diverged', () => {
   assert.equal(manuscriptSaveView({ holdsWork: true, canonical: edited, importedCanonical: imported }), 'diverged');
 });
 
-test('a compact import under the size cap stays the baseline when indentation would exceed it', () => {
+test('a compact import under 1 MiB whose indented form would exceed it saves as v3 and stays the baseline', () => {
   const hash = value => createHash('sha256').update(value).digest('hex');
   const source = '今汐。'.repeat(32);
   const target = 'Jinhsi.'.repeat(32);
@@ -113,10 +113,13 @@ test('a compact import under the size cap stays the baseline when indentation wo
   const compact = JSON.stringify({ format: 'wuwaterm-manuscript-v1', ...payload });
   assert.ok(bytes(compact) <= MAX_WORKFILE_BYTES);
   const parsed = parseWorkfile(compact);
-  assert.throws(() => serializeWorkfile(parsed), error => error.code === 'workfile_too_large');
+  // manuscript-v3 SPEC "Writing", rule 2: the indented v1 form would exceed 1 MiB, so the save writes v3 instead of failing.
+  assert.ok(bytes(JSON.stringify({ format: 'wuwaterm-manuscript-v1', ...payload }, null, 2)) > MAX_WORKFILE_BYTES);
+  const saved = serializeWorkfile(parsed);
+  assert.equal(JSON.parse(saved).format, 'wuwaterm-manuscript-v3');
+  assert.deepEqual(parseWorkfile(saved).history, parsed.history);
   const canonical = canonicalManuscript(parsed);
-  assert.equal(typeof canonical, 'string');
-  assert.ok(bytes(canonical) > MAX_WORKFILE_BYTES);
+  assert.equal(canonical, saved);
   const view = manuscriptSaveView({ holdsWork: true, canonical, importedCanonical: canonical });
   assert.equal(view, 'matches-import');
   assert.equal(leaveGuardActive({ view }), false);

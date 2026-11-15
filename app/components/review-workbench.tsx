@@ -6,10 +6,11 @@ import {
 } from '../../lib/review-navigation.js';
 import { highlightSegments, revisionOf, scalarToUtf16, summarizeReviewParts } from '../../lib/review-report.js';
 import {
-  MAX_CHOICES, MAX_WORKFILE_BYTES, basisOf, canonicalManuscript, compareReports, leaveGuardActive,
+  MAX_CHOICES, MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, basisOf, canonicalManuscript, compareReports, leaveGuardActive,
   makeChoice, manuscriptSaveView, mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent,
-  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2,
+  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3,
 } from '../../lib/manuscript.js';
+import { longFromWorkfile, workfileParts } from '../../lib/long-review.js';
 import { fragmentOccurrences, spliceOccurrence } from '../../lib/target-revision.js';
 import { validSpan } from '../../lib/manuscript.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
@@ -19,8 +20,8 @@ import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
 import { renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
 import { useUiLanguage } from './ui-language-context';
-import { SemanticWorkbench, semanticFromWorkfile, semanticWorkfileParts, semanticExport, type Commit, type SemanticState } from './semantic-workbench';
-import { emptySemantic, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
+import { SemanticWorkbench, semanticFromWorkfile, semanticWorkfileParts, semanticExport, type Commit, type LongState, type SemanticState, type SessionBasis } from './semantic-workbench';
+import { emptySemantic, freshSemantic, longHoldsWork, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 
 type Span = { start: number; end: number; text: string };
@@ -67,9 +68,28 @@ function cleanSnapshot(snapshot: Snapshot) {
   const { source, target, direction, alignments, report } = snapshot;
   return { source, target, direction, alignments, report, ...(snapshot.resolutions === null ? {} : { resolutions: snapshot.resolutions }) };
 }
-function manuscriptBody(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState) {
-  const base = { ...nextDraft, choices: nextChoices, history: nextReports.map(cleanSnapshot) };
+/**
+ * The manuscript payload: the v1/v2 parts and, for long-mode term review, the v3 parts (manuscript-v3 SPEC "Writing").
+ * `basis` is the session basis, so a record whose result another live response superseded is written stale.
+ * Throws long_state_out_of_sync when the long state does not line up with the segments.
+ */
+function manuscriptBody(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState, basis: SessionBasis) {
+  // workfileParts takes the draft object itself: its per-draft caches are keyed by identity.
+  const parts = workfileParts(semantic.long, nextDraft, { basis });
+  const base = { ...nextDraft, choices: nextChoices, history: nextReports.map(cleanSnapshot), ...parts };
   return semanticWorkfileParts(base, semantic);
+}
+/**
+ * Whether the workbench holds work that replacing the manuscript would lose: the texts, alignments, choices and reports,
+ * semantic decisions and results, and the long-mode records, choices and choice history. One predicate for the save
+ * state, clearing and a received draft, so they cannot disagree.
+ */
+function workPresent(draft: Draft, choices: Choice[], reports: Snapshot[], semantic: SemanticState) {
+  return recoverableWorkPresent({ ...draft, choices, reports }) || semantic.decisions.length > 0 || semantic.results.length > 0
+    || longHoldsWork(semantic.long);
+}
+function canonicalOf(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState, basis: SessionBasis) {
+  try { return canonicalManuscript(manuscriptBody(nextDraft, nextChoices, nextReports, semantic, basis)); } catch { return null; }
 }
 function unloadUrl(anchor: HTMLAnchorElement): string | null {
   if (anchor.hasAttribute('download') || anchor.target === '_blank') return null;
@@ -90,6 +110,11 @@ export function ReviewWorkbench() {
   const [reports, setReports] = useState<Snapshot[]>([]);
   const [history, setHistory] = useState<Undo[]>([]);
   const [semantic, setSemanticState] = useState<SemanticState>(() => emptySemantic() as SemanticState);
+  // The basis of the latest live segment term response (manuscript-v3 SPEC "Runtime", step 4). It describes the
+  // service, not the work: kept out of undo and of the file, and back to null whenever a manuscript is installed.
+  const [basis, setBasisState] = useState<SessionBasis>(null);
+  const basisRef = useRef<SessionBasis>(null);
+  const setBasis = useCallback((next: SessionBasis) => { basisRef.current = next; setBasisState(next); }, []);
   const [capabilities, setCapabilities] = useState<string[] | null>(null);
   const [semanticReset, setSemanticReset] = useState(0);
   const [semanticRunActive, setSemanticRunActive] = useState(false);
@@ -137,7 +162,8 @@ export function ReviewWorkbench() {
     work.current = { ...work.current, semantic: next };
     setSemanticState(next);
     setSemanticReset(n => n + 1);
-  }, []);
+    setBasis(null);
+  }, [setBasis]);
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
   const visibleFindings = latest ? filterFindings(latest.report.findings, verdictFilter) : [];
@@ -158,8 +184,8 @@ export function ReviewWorkbench() {
   const sourceCompatible = !!latest?.trusted && latest.source === source && latest.direction === direction;
   const comparison = latest && previous ? compareReports(previous, latest) : null;
   const basisChanged = !!latest?.trusted && choices.some(choice => !sameBasis(choice.basis, basisOf(latest.report)));
-  const canonical = useMemo(() => canonicalManuscript(manuscriptBody(draft, choices, reports, semantic)), [draft, choices, reports, semantic]);
-  const holdsWork = recoverableWorkPresent({ source, target, choices, alignments, reports }) || semantic.decisions.length > 0 || semantic.results.length > 0;
+  const canonical = useMemo(() => canonicalOf(draft, choices, reports, semantic, basis), [draft, choices, reports, semantic, basis]);
+  const holdsWork = workPresent(draft, choices, reports, semantic);
   const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
   const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating || semanticRunActive });
   const m = msg(lang);
@@ -255,7 +281,7 @@ export function ReviewWorkbench() {
     // mistake an already received manuscript for an empty workbench.
     work.current = { draft: next, choices: [], imported: [], reports: [], history: nextHistory, semantic: before.semantic };
     setHistory(nextHistory); discardInFlight(); setChoices([]); setImported([]); setReports([]); setDraft(next); setSourceDirtyForTranslation(false);
-    replaceSemantic(emptySemantic() as SemanticState);
+    replaceSemantic(freshSemantic(next) as SemanticState);
     setNotice('receivedDraft');
     sourceBox.current?.focus();
     if (typeof document !== 'undefined') { document.getElementById('review-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -303,7 +329,7 @@ export function ReviewWorkbench() {
       if (before.draft.source === detail.source && before.draft.target === detail.target && before.draft.direction === detail.direction) return;
       cancelRevision(revisionRef.current ? 'revisionStale' : '');
       const next: Draft = { source: detail.source, target: detail.target, direction: detail.direction, alignments: null };
-      const empty = !recoverableWorkPresent({ ...before.draft, choices: before.choices, reports: before.reports });
+      const empty = !workPresent(before.draft, before.choices, before.reports, before.semantic);
       if (empty) receiveDraft(next);
       else {
         setPendingDraft(next);
@@ -555,6 +581,10 @@ export function ReviewWorkbench() {
     if (!validAlignments(next, source, target)) { setNotice('alignmentInvalid'); return; }
     edit({ ...draft, alignments: next }, 'alignmentRecorded');
   }
+  /** Back to automatic sentence correspondence: alignments null, as one undoable edit (also the long-mode tools' action). */
+  function resetAlignments() {
+    edit({ ...work.current.draft, alignments: null }, 'alignmentsReset');
+  }
   function undo() {
     const last = history.at(-1); if (!last) return;
     discardInFlight(); setSourceDirtyForTranslation(false); setDraft(last.draft); setChoices(last.choices); setImported(last.imported); setHistory(stack => stack.slice(0, -1));
@@ -567,7 +597,8 @@ export function ReviewWorkbench() {
     if (!file) return;
     const attempt = ++importAttempt.current;
     setError(curr => (curr && (curr.code === 'importInvalid' || curr.code?.startsWith('workfile_')) ? null : curr));
-    if (file.size > MAX_WORKFILE_BYTES) {
+    // A manuscript may be v3, up to 44 MiB (manuscript-v3 SPEC "Limits"); a plain-text source stays at 1 MiB.
+    if (file.size > (/\.(txt|md)$/iu.test(file.name) ? MAX_WORKFILE_BYTES : MAX_V3_WORKFILE_BYTES)) {
       if (importAttempt.current === attempt) setError({ code: 'workfile_too_large' });
       return;
     }
@@ -583,9 +614,11 @@ export function ReviewWorkbench() {
         setHistory([...before.history.slice(-19), saved]);
         discardInFlight();
         setSourceDirtyForTranslation(false);
-        setDraft({ source: text, target: '', direction: before.draft.direction, alignments: null });
+        const textDraft: Draft = { source: text, target: '', direction: before.draft.direction, alignments: null };
+        work.current = { ...work.current, draft: textDraft };
+        setDraft(textDraft);
         setChoices([]); setImported([]); setReports([]); setImportedCanonical(null);
-        replaceSemantic(emptySemantic() as SemanticState);
+        replaceSemantic(freshSemantic(textDraft) as SemanticState);
         setNotice('importedSourceText');
         return;
       }
@@ -595,10 +628,13 @@ export function ReviewWorkbench() {
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({ ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '' }));
       // Semantic decisions, the old texts they need and the reference history
       // come back with the manuscript; nothing in the file is trusted as current.
-      const nextSemantic = value.format === WORKFILE_FORMAT_V2 ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState;
+      // The long-mode records, choices, history and progress are matched to the
+      // current segments (SPEC "Runtime", step 2); no request is sent (step 1).
+      const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3;
+      const nextSemantic: SemanticState = { ...(withSemantic ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState), long: longFromWorkfile(value) as LongState };
       if (importAttempt.current !== attempt) return;
       if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
-      const importedBody = canonicalManuscript(manuscriptBody(nextDraft, nextChoices, nextReports, nextSemantic));
+      const importedBody = canonicalOf(nextDraft, nextChoices, nextReports, nextSemantic, null);
       // File reads can overlap a check finishing. Snapshot the accepted-time
       // work, including its reports; ordinary edit undo keeps its own semantics.
       const before = work.current;
@@ -634,7 +670,7 @@ export function ReviewWorkbench() {
   }
   function save() {
     try {
-      const content = serializeWorkfile(manuscriptBody(draft, choices, reports, semantic));
+      const content = serializeWorkfile(manuscriptBody(draft, choices, reports, semantic, basisRef.current));
       downloadFile('wuwaterm-manuscript.json', content);
       setDownloadedCanonical(content);
       setError(null);
@@ -657,7 +693,7 @@ export function ReviewWorkbench() {
       choices: choices.map((choice, i) => ({ ...choice, status: reconciled[i].status, reason: reconciled[i].reason })),
       changes: current && comparison ? { new: strip(comparison.new), resolved: strip(comparison.resolved), pending: strip(comparison.pending), incomparable: strip(comparison.incomparable) } : null,
       verified_stamp: { valid: false },
-      ...semanticExport(draft, semantic).result,
+      ...semanticExport(draft, semantic, basisRef.current).result,
     }, null, 2));
     setNotice(current ? 'exportCurrent' : 'exportStale');
   }
@@ -677,8 +713,7 @@ export function ReviewWorkbench() {
       choices,
       reconciled,
       comparison,
-      semantic: semanticExport(draft, semantic).markdown,
-      segmentTerms: semanticExport(draft, semantic).segmentTerms,
+      ...(() => { const parts = semanticExport(draft, semantic, basisRef.current); return { semantic: parts.markdown, segmentTerms: parts.segmentTerms }; })(),
     }, lang), 'text/markdown;charset=utf-8');
     setNotice('exportMarkdown');
   }
@@ -686,8 +721,10 @@ export function ReviewWorkbench() {
   const comparisonGroups = ([['new', m.review.comparisonNew], ['resolved', m.review.comparisonResolved], ['pending', m.review.comparisonPending], ['incomparable', m.review.comparisonIncomparable]] as const)
     .map(([key, label]) => ({ key, label, items: comparison ? comparison[key] : [] }));
   const semanticSummary = semanticCounts(semantic) as { total: number; pending: number; handled: number; reconfirm: number; stale: number };
-  const termTotal = (latest?.report.findings.length ?? 0) + semantic.terms.reduce((n, t) => n + t.report.findings.length, 0);
-  const termTrack: ReactNode = <section className="term-track" aria-labelledby="term-track-title">
+  const termTotal = (latest?.report.findings.length ?? 0) + semantic.long.records.reduce((n, r) => n + (r.result?.findings.length ?? 0), 0);
+  // The term section. In long mode the per-segment findings, choices and history are rendered into it (`longTerms`),
+  // apart from the semantic track.
+  const termTrack = (longTerms: ReactNode): ReactNode => <section className="term-track" aria-labelledby="term-track-title">
     <h3 id="term-track-title">{sm.termTrackTitle}</h3>
     <p className="track-note">{sm.termTrackNote}</p>
     {latest ? <>
@@ -741,7 +778,8 @@ export function ReviewWorkbench() {
           </article>;
         })}
       </div>
-    </> : <p className="translation-placeholder">{m.review.placeholder}</p>}
+    </> : sourceLength > 2000 || targetLength > 2000 ? null : <p className="translation-placeholder">{m.review.placeholder}</p>}
+    {longTerms}
   </section>;
   return <section className="workspace-card review-card" aria-labelledby="review-title">
     <dialog className="handoff-dialog revision-dialog" ref={revisionDialog} aria-labelledby="revision-title" aria-describedby="revision-description" onCancel={() => cancelRevision()}>
@@ -799,7 +837,6 @@ export function ReviewWorkbench() {
       </ol>
     )}
     <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
-    {semantic.terms.length > 0 && <p className="manuscript-save-state">{sm.segmentTermsNotSaved}</p>}
     <form onSubmit={submit}>
       <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => edit({ ...draft, direction: e.target.value as 'en' | 'zh', alignments: alignments === null ? null : [] }, 'directionChanged')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
       <textarea ref={sourceBox} id="review-source" value={source} onChange={e => editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />
@@ -814,7 +851,7 @@ export function ReviewWorkbench() {
           <button type="button" className="secondary-button" onClick={() => addAlignment(true)}>{m.review.alignmentOmit}</button>
           <button type="button" className="secondary-button" disabled={!validInput} onClick={() => addAlignment(false, true)}>{m.review.alignmentWhole}</button>
           <button type="button" className="secondary-button" onClick={() => edit({ ...draft, alignments: [] }, 'alignmentsCleared')}>{m.review.alignmentClear}</button>
-          <button type="button" className="secondary-button" onClick={() => edit({ ...draft, alignments: null }, 'alignmentsReset')}>{m.review.alignmentReset}</button>
+          <button type="button" className="secondary-button" onClick={resetAlignments}>{m.review.alignmentReset}</button>
         </div>
         {alignments?.map((a, i) => <div className="alignment-row" key={i}><p>{fill(m.review.alignmentRowSource, { start: a.source.start + 1, end: a.source.end, text: a.source.text })}</p><p>{a.target ? fill(m.review.alignmentRowTarget, { start: a.target.start + 1, end: a.target.end, text: a.target.text }) : m.review.alignmentRowOmit}</p><button type="button" className="text-button" onClick={() => edit({ ...draft, alignments: alignments.filter((_, j) => i !== j) }, 'alignmentRemoved')}>{m.review.alignmentRemove}</button></div>)}
       </details>
@@ -850,7 +887,7 @@ export function ReviewWorkbench() {
       <p>{m.review.alignmentEmptyPrompt}</p>
       <div className="actions">
         <button type="button" className="secondary-button" disabled={!validInput || phase === 'loading'} onClick={() => addAlignment(false, true)}>{m.review.alignmentReconfirmWhole}</button>
-        <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={() => edit({ ...draft, alignments: null }, 'alignmentsReset')}>{m.review.alignmentFallbackReset}</button>
+        <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={resetAlignments}>{m.review.alignmentFallbackReset}</button>
       </div>
     </div>}
     {error && <p className="error-panel" role="alert">{errorTextValue}</p>}
@@ -870,6 +907,6 @@ export function ReviewWorkbench() {
       choices={choices} pool={pool} capabilities={capabilities} resetSignal={semanticReset}
       canUndoLast={serial => history.at(-1)?.serial === serial} undo={undo}
       locate={(side, span) => side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span)}
-      onRunActive={setSemanticRunActive} termTrack={termTrack} />
+      onRunActive={setSemanticRunActive} termTrack={termTrack} basis={basis} basisRef={basisRef} setBasis={setBasis} resetAlignments={resetAlignments} />
   </section>;
 }
