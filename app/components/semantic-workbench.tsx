@@ -29,7 +29,7 @@ import { recoverSpan, validReport } from '../../lib/manuscript.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { highlightSegments, revisionOf } from '../../lib/review-report.js';
 import { compactScalarContext } from '../../lib/review-navigation.js';
-import { fill, msg } from '../../lib/messages';
+import { failureDetails, fill, msg } from '../../lib/messages';
 import { semanticMsg, type SemanticMessages } from '../../lib/semantic-messages';
 import { requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { workbenchPath } from '../../lib/ui-runtime';
@@ -95,8 +95,8 @@ export type SemanticState = {
 };
 type ChoiceLike = { source: string; source_span: Span; choice: string; candidate: { zh: string; en: string } | null };
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
-type RunItem = { key: string; index: number; status: string; code: string | null; attempt?: number };
-type RunState = { kind: 'term' | 'semantic' | 'translate' | null; phase: string; items: RunItem[]; waitUntil: number | null; stopCode: string | null };
+type RunItem = { key: string; index: number; status: string; code: string | null; attempt?: number; waited?: number | null };
+type RunState = { kind: 'term' | 'semantic' | 'translate' | null; phase: string; items: RunItem[]; waitUntil: number | null; stopCode: string | null; stopRequestId?: string | null };
 /** Applies a draft edit and/or semantic change; returns the serial of the undo entry it pushed, else null. */
 export type Commit = (next: { draft?: Draft; semantic?: (state: SemanticState) => SemanticState; notice?: string | null; remember?: boolean }) => number | null;
 export type WorkRef = MutableRefObject<{ draft: Draft; semantic: SemanticState }>;
@@ -149,7 +149,8 @@ function failureOf(response: Response, body: Record<string, unknown> | null) {
   const reason = typeof body?.reason === 'string' ? body.reason : 'fallback';
   const header = Number(response.headers.get('retry-after'));
   const retry = typeof body?.retry_after_seconds === 'number' ? body.retry_after_seconds : Number.isFinite(header) && header > 0 ? header : undefined;
-  return { code: reason, classification: classifyFailure({ status: response.status, reason, retryAfterSeconds: retry }) };
+  const requestId = typeof body?.request_id === 'string' && body.request_id ? body.request_id : undefined;
+  return { code: reason, ...(requestId ? { requestId } : {}), classification: classifyFailure({ status: response.status, reason, retryAfterSeconds: retry }) };
 }
 
 type PairView = {
@@ -543,7 +544,11 @@ export function SemanticWorkbench(props: Props) {
       const response = await fetch(workbenchPath('/api/translations'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(fitted.body) });
       const body = await responseBody(response);
       requestPoolRefresh();
-      if (!response.ok || typeof body?.text !== 'string') { commit({ semantic: x => x, notice: `t:${typeof body?.reason === 'string' ? body.reason : 'fallback'}`, remember: false }); return; }
+      if (!response.ok || typeof body?.text !== 'string') {
+        // The reason, then the request id after '#', so the notice can show both (review-workbench noticeText).
+        const id = typeof body?.request_id === 'string' && body.request_id ? `#${body.request_id}` : '';
+        commit({ semantic: x => x, notice: `t:${typeof body?.reason === 'string' ? body.reason : 'fallback'}${id}`, remember: false }); return;
+      }
       const latest = work.current.draft;
       const tc = chars(latest.target);
       const region = view.pair.target;
@@ -780,10 +785,18 @@ export function SemanticWorkbench(props: Props) {
     const done = progress.done; const total = progress.total;
     const i = (sendingItem?.index ?? 0) + 1;
     if (runState === 'running') return fill(run.kind === 'term' ? s.phaseTermRunning : run.kind === 'translate' ? s.phaseTranslateRunning : s.phaseRunning, { i });
-    if (runState === 'retrying') return fill(s.phaseRetrying, { i, a: sendingItem?.attempt ?? 2 });
+    if (runState === 'retrying') {
+      const waited = sendingItem?.waited;
+      return waited ? fill(s.phaseRetryingAfterWait, { i, a: sendingItem?.attempt ?? 2, w: waited }) : fill(s.phaseRetrying, { i, a: sendingItem?.attempt ?? 2 });
+    }
     if (runState === 'waiting') return fill(s.phaseWaiting, { s: waitSeconds });
     if (runState === 'paused') return run.stopCode ? fill(run.kind === 'term' ? s.phaseTermQuota : s.phaseQuota, { done, total }) : fill(s.phasePaused, { done, total });
-    if (runState === 'failed') return run.phase === 'stopped' ? fill(s.phaseStopped, { reason: stopText(run.stopCode) }) : fill(s.phaseDoneFailed, { n: progress.failed });
+    if (runState === 'failed') {
+      if (run.phase !== 'stopped') return fill(s.phaseDoneFailed, { n: progress.failed });
+      // The cause class, what to do and the request id of the response that stopped the run.
+      const details = failureDetails(lang, { kind: run.kind === 'translate' ? 'translation' : 'review', reason: run.stopCode, requestId: run.stopRequestId });
+      return [fill(s.phaseStopped, { reason: stopText(run.stopCode) }), ...details].join(' ');
+    }
     return run.kind === 'term' ? s.phaseTermDone : run.kind === 'translate' ? s.phaseTranslateDone : s.phaseDone;
   })();
   const issueRegion = activeView ?? null;
@@ -848,8 +861,11 @@ export function SemanticWorkbench(props: Props) {
     {shownTermRows.flatMap(r => {
       const view = views[r.index];
       const cores = inputs.items[r.index];
-      const truncated = r.report.truncated;
-      return r.report.findings.map((finding, k) => {
+      // A truncated result (Core's 32-finding cap) still takes choices on the findings it shows (SPEC "Segment choice").
+      const note = r.report.truncated
+        ? [<p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>]
+        : [];
+      return [...note, ...r.report.findings.map((finding, k) => {
         const placed = r.findings[k];
         const chosen = choiceAt(view, finding.source_span);
         return <article className="term-result long-term" key={`${r.index}:${finding.id}`} data-segment={r.index} data-mention-id={finding.id} data-term-state={r.state}>
@@ -858,16 +874,16 @@ export function SemanticWorkbench(props: Props) {
           <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><Snippet text={cores?.sourceCore ?? ''} span={finding.source_span} missing={s.sourceMissing} /></div>
           <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptTargetLabel}</span><Snippet text={cores?.targetCore ?? ''} span={finding.target_span} missing={m.review.excerptMissingTarget} /></div>
           {finding.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
-            <div className="finding-actions"><button type="button" className="text-button" disabled={truncated} onClick={() => chooseLong(r.index, finding, c)}>{m.review.adopt}</button></div>
+            <div className="finding-actions"><button type="button" className="text-button" onClick={() => chooseLong(r.index, finding, c)}>{m.review.adopt}</button></div>
           </div>)}
           <div className="finding-actions">
-            <button type="button" className="text-button" disabled={truncated} onClick={() => chooseLong(r.index, finding, null)}>{m.review.notTerm}</button>
+            <button type="button" className="text-button" onClick={() => chooseLong(r.index, finding, null)}>{m.review.notTerm}</button>
             <button type="button" className="text-button" onClick={() => locate('source', placed.source_span)}>{m.review.jumpSource}</button>
             <button type="button" className="text-button" disabled={!placed.target_span} onClick={() => { if (placed.target_span) locate('target', placed.target_span); }}>{m.review.jumpTarget}</button>
           </div>
           {chosen && <p className="long-choice-state" data-choice-view={chosen.view}>{chosen.candidate ? fill(m.review.choicePair, { span: chosen.source_span.text, zh: chosen.candidate.zh, en: chosen.candidate.en }) : fill(m.review.choiceNotTerm, { span: chosen.source_span.text })} — {choiceViewText(chosen.view)}</p>}
         </article>;
-      });
+      })];
     })}
     {selectedSegment === null && visibleTermRows.length > LONG_ROWS && <p className="track-note">{fill(s.longTermsMore, { n: visibleTermRows.length - LONG_ROWS })}</p>}
     {longChoices.length > 0 && <div className="choice-records long-choices"><h4>{fill(s.longChoicesTitle, { n: longChoices.length })}</h4>

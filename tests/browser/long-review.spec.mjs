@@ -223,9 +223,9 @@ test('the term run shows waiting, retrying, paused and failed apart', async ({ p
   await expect(chip(page, 1)).toHaveAttribute('data-run-state', 'waiting');
   await expect(chip(page, 1)).toContainText(S.segWaiting);
   await shot(page, testInfo, 'term-run-waiting');
-  // Resent on its own after the wait: the second attempt reads retrying, not sending.
+  // Resent on its own after the wait: the second attempt reads retrying, not sending, and says how long it waited (busy(): 5 s).
   await expect(status(page)).toHaveAttribute('data-run-state', 'retrying', { timeout: 15_000 });
-  await expect(status(page)).toHaveText(fill(S.phaseRetrying, { i: 2, a: 2 }));
+  await expect(status(page)).toHaveText(fill(S.phaseRetryingAfterWait, { w: 5, i: 2, a: 2 }));
   await expect(chip(page, 1)).toHaveAttribute('data-run-state', 'retrying');
   await expect(chip(page, 1)).toContainText(S.segRetrying);
   await shot(page, testInfo, 'term-run-retrying');
@@ -249,7 +249,7 @@ test('the term run shows waiting, retrying, paused and failed apart', async ({ p
 test('the segment translation run shows waiting, retrying, paused and failed apart', async ({ page }, testInfo) => {
   let release;
   const held = new Promise(resolve => { release = resolve; });
-  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateFailures: { 2: busy(), 4: failure(502, 'upstream_network_error') },
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateFailures: { 2: busy(), 4: failure(502, 'upstream_network_error', { request_id: 'synthetic-request-4' }) },
     translateHold: { 3: held }, translate: (body, n) => `T${n}.` });
   await page.locator('#review-source').fill(longPair(3).source);
   await page.getByRole('button', { name: S.translateLong, exact: true }).click();
@@ -257,7 +257,7 @@ test('the segment translation run shows waiting, retrying, paused and failed apa
   await expect(status(page)).toContainText('公共站正在限流，请等待约');
   await shot(page, testInfo, 'translate-run-waiting');
   await expect(status(page)).toHaveAttribute('data-run-state', 'retrying', { timeout: 15_000 });
-  await expect(status(page)).toHaveText(fill(S.phaseRetrying, { i: 2, a: 2 }));
+  await expect(status(page)).toHaveText(fill(S.phaseRetryingAfterWait, { w: 5, i: 2, a: 2 }));
   await shot(page, testInfo, 'translate-run-retrying');
   await page.getByRole('button', { name: S.pause, exact: true }).click();
   release();
@@ -267,6 +267,8 @@ test('the segment translation run shows waiting, retrying, paused and failed apa
   await page.getByRole('button', { name: S.resume, exact: true }).click();
   await expect(status(page)).toHaveAttribute('data-run-state', 'failed');
   await expect(status(page)).toContainText(S.translateStopped);
+  // The stop says what kind of failure it was, what to do and which request failed.
+  for (const line of [M.failure.causeUnavailable, M.failure.adviceTranslation, fill(M.failure.requestId, { id: 'synthetic-request-4' })]) await expect(status(page)).toContainText(line);
   await shot(page, testInfo, 'translate-run-failed');
   // Finished segments stay in order; the failed one is sent first on continue (SPEC step 9 for the translation run).
   await expect(page.locator('#review-target')).toHaveValue('T1.\n\nT3.\n\n');
@@ -342,16 +344,22 @@ test('a reused segment exports its rebuilt report, and an exported result cannot
   const rec = await openWorkbench(page, { capabilities: [] });
   await fillPair(page, source, target);
   await run(page, rec, 3);
-  const live = JSON.parse((await downloadFrom(page, '导出当前结果')).text).segment_term_reports;
+  const first = JSON.parse((await downloadFrom(page, '导出当前结果')).text);
+  // Every segment checked and current: the export says so (it used to read requires_recheck in long mode).
+  expect([first.status, first.report_is_current, first.report]).toEqual(['current_terminology_check', true, null]);
+  const live = first.segment_term_reports;
   expect(live.map(r => r.report.request_id)).toEqual(['fixture-request', 'fixture-request', 'fixture-request']);
   const saved = (await downloadFrom(page, '保存稿件')).text;
 
   const { page: again, rec: rec2 } = await reopen(context, saved);
   await run(again, rec2, 1);
   await again.locator('#review-target').fill(withTarget(n, 3, ' again'));
+  const edited = JSON.parse((await downloadFrom(again, '导出当前结果')).text);
+  expect([edited.status, edited.report_is_current]).toEqual(['requires_recheck', false]);
   await run(again, rec2, 2);
   const exported = (await downloadFrom(again, '导出当前结果')).text;
   const reports = JSON.parse(exported).segment_term_reports;
+  expect([JSON.parse(exported).status, JSON.parse(exported).report_is_current]).toEqual(['current_terminology_check', true]);
   expect(reports.map(r => [r.segment, r.stale])).toEqual([[1, false], [2, false], [3, false]]);
   // SPEC "Compact term result": a reused segment's report is the live response for the same cores with request_id null
   // and every candidate's sources empty; nothing else differs.
@@ -361,9 +369,9 @@ test('a reused segment exports its rebuilt report, and an exported result cannot
   expect(reports[2].report.request_id).toBe('fixture-request');
   expect(reports[2].report.findings[0].candidates[0].sources).toEqual(candidate.sources);
 
-  // A report export is not a resumable manuscript: importing it is rejected and the open manuscript is kept.
+  // A report export is not a resumable manuscript: importing it is rejected, plainly, and the open manuscript is kept.
   await again.getByLabel('选择稿件文件').setInputFiles(asFile(exported, 'wuwaterm-result.json'));
-  await expect(again.locator('.error-panel')).toHaveText(M.errors.workfile_unsupported_format);
+  await expect(again.locator('.error-panel')).toHaveText(M.errors.importReportExport);
   await expect(again.locator('#review-source')).toHaveValue(source);
   await expect(again.locator('#review-target')).toHaveValue(withTarget(n, 3, ' again'));
 });
@@ -389,4 +397,49 @@ test('a sent draft asks before replacing a workbench that holds only the segment
   await expect(page.locator('.long-history summary')).toHaveText(fill(S.historyTitle, { n: 1 }));
   const file = JSON.parse((await downloadFrom(page, '保存稿件')).text);
   expect(file.segment_choice_history.map(e => [e.choice, e.source_span.text])).toEqual([['official_pair', '今汐']]);
+});
+
+test('a truncated segment result still takes choices on the findings it shows, and says that more were left out', async ({ page }) => {
+  // SPEC "Segment choice": Core's 32-finding cap left findings out of segment 1's result.
+  const rec = await openWorkbench(page, { capabilities: [], reviewTruncated: body => body.source === termParagraph(1) });
+  const { source, target } = termPair(2);
+  await fillPair(page, source, target);
+  await run(page, rec, 2);
+  const note = page.locator('.long-term-truncated');
+  await expect(note).toHaveCount(1);
+  await expect(note).toHaveAttribute('data-segment', '0');
+  await expect(note).toHaveText(fill(S.longTermsTruncated, { n: 1, k: 1 }));
+  const adopt = findingIn(page, 0).getByRole('button', { name: M.review.adopt, exact: true });
+  await expect(adopt).toBeEnabled();
+  await adopt.click();
+  await expect(choiceRow(page, 0)).toHaveCount(1);
+  // The choice goes out with the segment's re-check like any other (SPEC "Runtime" step 6).
+  await runButton(page).click();
+  await expect.poll(() => rec.reviews.length).toBe(3);
+  expect(rec.reviews[2].resolutions).toEqual([ADOPTED]);
+});
+
+test('the Markdown export follows the long-mode state like the JSON export, without a document report from a shorter text', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: [] });
+  // A document report of an earlier, shorter text.
+  await fillPair(page, '今汐。', 'Jinhsi.');
+  await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();
+  await expect.poll(() => rec.reviews.length).toBe(1);
+  await expect(page.locator('.review-current')).toBeVisible();
+  const { source, target } = termPair(2);
+  await fillPair(page, source, target);
+  await run(page, rec, 3);
+  const exports = async () => ({
+    md: (await downloadFrom(page, M.review.exportMarkdown)).text,
+    json: JSON.parse((await downloadFrom(page, '导出当前结果')).text),
+  });
+  const current = await exports();
+  expect([current.json.status, current.json.report]).toEqual(['current_terminology_check', null]);
+  expect(current.md).toContain(M.md.currencyCurrent);
+  expect(current.md).not.toContain('`fixture-request`');
+  await page.locator('#review-target').fill(withTarget(2, 2, ' again'));
+  const edited = await exports();
+  expect(edited.json.status).toBe('requires_recheck');
+  expect(edited.md).toContain(M.md.currencyStale);
+  expect(edited.md).not.toContain(M.md.currencyCurrent);
 });

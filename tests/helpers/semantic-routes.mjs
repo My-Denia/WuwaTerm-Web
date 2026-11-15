@@ -34,12 +34,13 @@ export const busy = () => failure(429, 'shared_pool_busy', { retry_after_seconds
  *  reviewFailures / translateFailures: { [callNumber]: {status, body} }
  *  reviewHold / translateHold: { [callNumber]: Promise } holding that call open until it settles
  *  matcherRevision: the review-v2 matcher_revision the term reviews return (rec.matcherRevision can change it later)
+ *  reviewTruncated: (body, callNumber) => boolean; true marks that term review response truncated (Core's finding cap)
  * Returned recorder: semantic / translations / reviews (request bodies), maxInflight,
  * gate(n) -> {release} holding semantic call n open until released.
  */
 export async function installRoutes(page, options = {}) {
   const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate, translateFailures = {}, translateHold = {}, reviewFailures = {}, reviewHold = {},
-    matcherRevision = FRESH_MATCHER_REVISION } = options;
+    matcherRevision = FRESH_MATCHER_REVISION, reviewTruncated = () => false } = options;
   const rec = { semantic: [], translations: [], reviews: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map(), matcherRevision };
   rec.gate = n => {
     let release;
@@ -77,7 +78,8 @@ export async function installRoutes(page, options = {}) {
       if (reviewHold[n]) await reviewHold[n];
       const failed = reviewFailures[n];
       if (failed) return route.fulfill({ status: failed.status, json: failed.body });
-      return route.fulfill({ json: { ...freshApiReport(fixture(body.source, body.target, body.direction).report), matcher_revision: rec.matcherRevision } });
+      const report = { ...freshApiReport(fixture(body.source, body.target, body.direction).report), matcher_revision: rec.matcherRevision };
+      return route.fulfill({ json: reviewTruncated(body, n) ? { ...report, truncated: true } : report });
     }
     if (path === '/api/translations') {
       const body = route.request().postDataJSON();

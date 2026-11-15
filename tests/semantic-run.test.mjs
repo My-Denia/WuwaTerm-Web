@@ -463,3 +463,15 @@ test('runDisplayState and itemDisplayState tell running, retrying, waiting, paus
   assert.deepEqual([ended.phase, runDisplayState(ended)], ['done', 'failed']);
   assert.equal(runDisplayState(runReducer(runReducer(segmentFailed, { type: 'done', key: 'c' }), { type: 'resume' })), 'done');
 });
+
+test('runReducer keeps the wait a refused send was told while it is resent, and the request id of the response that stopped the run', () => {
+  let s = runReducer(initialRun(), { type: 'start', kind: 'term', items: [{ key: 'a', index: 0 }] });
+  s = runReducer(s, { type: 'sent', key: 'a' });
+  s = runReducer(s, { type: 'failed', key: 'a', code: 'shared_pool_busy', classification: { action: 'wait', seconds: 19 }, now: 0 });
+  assert.deepEqual([s.phase, s.items[0].waited], ['waiting', 19]);
+  s = runReducer(runReducer(s, { type: 'resume' }), { type: 'sent', key: 'a' });
+  assert.deepEqual([runDisplayState(s), s.items[0].waited, s.items[0].attempt], ['retrying', 19, 2]);
+  s = runReducer(s, { type: 'failed', key: 'a', code: 'rate_limited', requestId: 'synthetic-request-9', classification: { action: 'stop' }, now: 1 });
+  assert.deepEqual([s.phase, s.stopCode, s.stopRequestId, s.items[0].waited], ['stopped', 'rate_limited', 'synthetic-request-9', null]);
+  assert.equal(runReducer(s, { type: 'resume' }).stopRequestId, null);
+});

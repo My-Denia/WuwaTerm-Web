@@ -10,15 +10,15 @@ import {
   makeChoice, manuscriptSaveView, mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent,
   recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3,
 } from '../../lib/manuscript.js';
-import { longFromWorkfile, workfileParts } from '../../lib/long-review.js';
+import { longFromWorkfile, recordView, segmentInputs, workfileParts } from '../../lib/long-review.js';
 import { fragmentOccurrences, spliceOccurrence } from '../../lib/target-revision.js';
 import { validSpan } from '../../lib/manuscript.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
-import { fill, msg, summarySentence } from '../../lib/messages';
+import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
-import { renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
+import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
 import { useUiLanguage } from './ui-language-context';
 import { SemanticWorkbench, semanticFromWorkfile, semanticWorkfileParts, semanticExport, type Commit, type LongState, type SemanticState, type SessionBasis } from './semantic-workbench';
 import { emptySemantic, freshSemantic, longHoldsWork, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
@@ -40,7 +40,14 @@ type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Sna
 // each render, so switching interface language re-localizes a message that is
 // still on screen, including one stored by an async check or import.
 type NoticeState = string | null;
-type ErrorState = { reason?: string; code?: string; text?: string } | null;
+type ErrorState = { reason?: string; code?: string; text?: string; kind?: 'translation' | 'review'; requestId?: string; retryAfter?: number } | null;
+// What a failed request's body and headers say beyond its reason: the request id and the wait the service asked for.
+function failureFields(response: Response, value: unknown): { requestId?: string; retryAfter?: number } {
+  const body = value && typeof value === 'object' ? value as { request_id?: unknown; retry_after_seconds?: unknown } : {};
+  const header = Number(response.headers.get('retry-after'));
+  const retryAfter = typeof body.retry_after_seconds === 'number' ? body.retry_after_seconds : Number.isFinite(header) && header > 0 ? header : undefined;
+  return { ...(typeof body.request_id === 'string' && body.request_id ? { requestId: body.request_id } : {}), ...(retryAfter !== undefined ? { retryAfter } : {}) };
+}
 const EMPTY: Draft = { source: '', target: '', direction: 'en', alignments: null };
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
 async function poolPayload(response: Response): Promise<unknown> {
@@ -125,6 +132,10 @@ export function ReviewWorkbench() {
   const [notice, setNotice] = useState<NoticeState>(null);
   const [error, setError] = useState<ErrorState>(null);
   const [pendingDraft, setPendingDraft] = useState<Draft | null>(null);
+  // A source text file waiting for the user to confirm that it may replace unsaved work.
+  const [pendingText, setPendingText] = useState<string | null>(null);
+  const importDialog = useRef<HTMLDialogElement>(null);
+  const keepImportButton = useRef<HTMLButtonElement>(null);
   const [importedCanonical, setImportedCanonical] = useState<string | null>(null);
   const [downloadedCanonical, setDownloadedCanonical] = useState<string | null>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
@@ -201,9 +212,16 @@ export function ReviewWorkbench() {
   const reasonText = (item: { reason: string; code?: string }) =>
     ((m.choiceReasons as Record<string, string>)[item.code ?? ''] ?? item.reason);
   const sm = semanticMsg(lang);
+  // A failed single-pair translation: 't:<reason>' or 't:<reason>#<request id>' (semantic-workbench translatePair).
+  const translationNotice = (value: string) => {
+    const at = value.indexOf('#');
+    const reason = at < 0 ? value : value.slice(0, at);
+    const requestId = at < 0 ? null : value.slice(at + 1);
+    return [(m.tMsg as Record<string, string>)[reason] ?? m.rMsg.fallback, ...failureDetails(lang, { kind: 'translation', reason, requestId })].join(' ');
+  };
   const noticeText = !notice ? ''
     : notice.startsWith('sem:') ? (sm.notices[notice.slice(4)] ?? '')
-    : notice.startsWith('t:') ? ((m.tMsg as Record<string, string>)[notice.slice(2)] ?? m.rMsg.fallback)
+    : notice.startsWith('t:') ? translationNotice(notice.slice(2))
     : ((m.notices as Record<string, string>)[notice] ?? '');
   const errorTextValue = !error ? ''
     // Nullish (not falsy) check: an empty reason string from a reason-less
@@ -214,6 +232,8 @@ export function ReviewWorkbench() {
   // Library throws (parse/serialize) always carry stable codes; an uncoded
   // failure is a browser-level error (unreadable file and similar), whose
   // raw message is neither localizable nor fixed copy — use the catalog key.
+  const errorDetails = error?.kind ? failureDetails(lang, { kind: error.kind, reason: error.reason, requestId: error.requestId, retryAfter: error.retryAfter }) : [];
+  const detailOf = (cause: unknown) => (cause && typeof cause === 'object' && 'gahDetail' in cause ? (cause as { gahDetail: { requestId?: string; retryAfter?: number } }).gahDetail : {});
   const errorFrom = (cause: unknown, fallbackKey: string): ErrorState => {
     const code = cause instanceof Error && 'code' in cause ? String((cause as Error & { code?: unknown }).code) : '';
     return code && (msg(lang).errors as Record<string, string>)[code] ? { code } : { code: fallbackKey };
@@ -381,6 +401,12 @@ export function ReviewWorkbench() {
     } else handoffDialog.current?.close();
   }, [pendingDraft]);
   useEffect(() => {
+    if (pendingText !== null) {
+      if (!importDialog.current?.open) importDialog.current?.showModal();
+      keepImportButton.current?.focus();
+    } else importDialog.current?.close();
+  }, [pendingText]);
+  useEffect(() => {
     if (pendingLeaveUrl) {
       if (!leaveDialog.current?.open) leaveDialog.current?.showModal();
       stayLeaveButton.current?.focus();
@@ -442,7 +468,7 @@ export function ReviewWorkbench() {
       if (abort.signal.aborted || generation.current !== mine) return;
       if (!response.ok) {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof value.reason === 'string' ? value.reason : '';
-        throw Object.assign(new Error((m.rMsg as Record<string, string>)[reason] ?? m.rMsg.fallback), { gahReason: reason });
+        throw Object.assign(new Error((m.rMsg as Record<string, string>)[reason] ?? m.rMsg.fallback), { gahReason: reason, gahDetail: failureFields(response, value) });
       }
       if (!validReport(value, source, target)) throw Object.assign(new Error(m.errors.responseInvalid), { gahCode: 'responseInvalid' });
       const report = value as Report;
@@ -460,7 +486,7 @@ export function ReviewWorkbench() {
         // Unmarked failures here are network-layer rejections or malformed
         // JSON bodies; both use the fixed catalog copy instead of browser
         // error text (public UI errors stay fixed copy and re-localizable).
-        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason) }
+        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason), kind: 'review', ...detailOf(cause) }
           : cause instanceof Error && 'gahCode' in cause ? { code: String((cause as Error & { gahCode?: unknown }).gahCode) }
           : { code: 'requestFailed' });
         requestPoolRefresh();
@@ -488,7 +514,7 @@ export function ReviewWorkbench() {
       if (abort.signal.aborted || generation.current !== mine) return;
       if (!response.ok || !value || typeof value !== 'object' || typeof (value as { text?: unknown }).text !== 'string') {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof (value as { reason?: unknown }).reason === 'string' ? String((value as { reason: string }).reason) : '';
-        throw Object.assign(new Error(), { gahReason: reason });
+        throw Object.assign(new Error(), { gahReason: reason, gahDetail: failureFields(response, value) });
       }
       const translated = (value as { text: string }).text;
       remember();
@@ -501,7 +527,7 @@ export function ReviewWorkbench() {
     } catch (cause) {
       if (!abort.signal.aborted && generation.current === mine) {
         setTranslating(false);
-        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason) } : { code: 'requestFailed' });
+        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason), kind: 'translation', ...detailOf(cause) } : { code: 'requestFailed' });
         requestPoolRefresh();
       }
     } finally {
@@ -593,10 +619,25 @@ export function ReviewWorkbench() {
     if (last.reports) setReports(last.reports);
     setNotice(last.reports ? 'undoWithReports' : 'undoLocal');
   }
+  /** A plain source text replaces the manuscript as one undoable step. */
+  function replaceWithText(text: string) {
+    setPendingText(null);
+    const before = work.current;
+    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
+    setHistory([...before.history.slice(-19), saved]);
+    discardInFlight();
+    setSourceDirtyForTranslation(false);
+    const textDraft: Draft = { source: text, target: '', direction: before.draft.direction, alignments: null };
+    work.current = { ...work.current, draft: textDraft };
+    setDraft(textDraft);
+    setChoices([]); setImported([]); setReports([]); setImportedCanonical(null);
+    replaceSemantic(freshSemantic(textDraft) as SemanticState);
+    setNotice('importedSourceText');
+  }
   async function importFile(file?: File) {
     if (!file) return;
     const attempt = ++importAttempt.current;
-    setError(curr => (curr && (curr.code === 'importInvalid' || curr.code?.startsWith('workfile_')) ? null : curr));
+    setError(curr => (curr && (curr.code === 'importInvalid' || curr.code === 'importReportExport' || curr.code?.startsWith('workfile_')) ? null : curr));
     // A manuscript may be v3, up to 44 MiB (manuscript-v3 SPEC "Limits"); a plain-text source stays at 1 MiB.
     if (file.size > (/\.(txt|md)$/iu.test(file.name) ? MAX_WORKFILE_BYTES : MAX_V3_WORKFILE_BYTES)) {
       if (importAttempt.current === attempt) setError({ code: 'workfile_too_large' });
@@ -609,20 +650,23 @@ export function ReviewWorkbench() {
       if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       if (/\.(txt|md)$/iu.test(file.name)) {
-        const before = work.current;
-        const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
-        setHistory([...before.history.slice(-19), saved]);
-        discardInFlight();
-        setSourceDirtyForTranslation(false);
-        const textDraft: Draft = { source: text, target: '', direction: before.draft.direction, alignments: null };
-        work.current = { ...work.current, draft: textDraft };
-        setDraft(textDraft);
-        setChoices([]); setImported([]); setReports([]); setImportedCanonical(null);
-        replaceSemantic(freshSemantic(textDraft) as SemanticState);
-        setNotice('importedSourceText');
+        // A report this site exported is not a manuscript and not a backup (Finding 2026-10-06): say so, replace nothing.
+        if (isMarkdownReportExport(text)) { setError({ code: 'importReportExport' }); return; }
+        // Unsaved work is replaced only after the user confirms it.
+        if (leaveGuardActive({ view: saveView })) { setPendingText(text); return; }
+        replaceWithText(text);
         return;
       }
-      const value = parseWorkfile(text);
+      let value;
+      try { value = parseWorkfile(text); } catch (cause) {
+        // The current-result JSON this site exports (format wuwaterm-result-v2) is a report, not a manuscript; its writer puts
+        // the format first, so the start of the file tells it apart without parsing the file a second time.
+        if ((cause as { code?: unknown } | null)?.code === 'workfile_unsupported_format' && /^\s*\{\s*"format"\s*:\s*"wuwaterm-result-v2"/u.test(text.slice(0, 256))) {
+          setError({ code: 'importReportExport' });
+          return;
+        }
+        throw cause;
+      }
       const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
       const nextChoices = value.choices as Choice[];
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({ ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '' }));
@@ -683,37 +727,53 @@ export function ReviewWorkbench() {
     downloadFile('wuwaterm-translation.txt', target, 'text/plain;charset=utf-8');
     setNotice('exportTxt');
   }
+  /** Long mode: every segment is ready and its term result is current under the session basis (all confirmed). */
+  function longResultsCurrent() {
+    const ctx = { draft, basis: basisRef.current };
+    const { long, items } = segmentInputs(draft) as { long: boolean; items: { pair: { status: string } }[] };
+    return long && items.length > 0 && items.every((item, i) => item.pair.status === 'ready'
+      && (recordView(semantic.long, i, ctx) as { state: string } | null)?.state === 'current');
+  }
   function exportResult() {
     // The exported JSON keeps the lib's canonical Chinese reason/label strings
     // so the file format stays byte-stable regardless of interface language.
     const strip = (items: { label: string; reason: string }[]) => items.map(({ label, reason }) => ({ label, reason }));
+    // In long mode the per-segment reports are the result: a document report left from a shorter text is not exported.
+    const long = (segmentInputs(draft) as { long: boolean }).long;
+    const resultCurrent = long ? longResultsCurrent() : current;
     downloadFile('wuwaterm-result.json', JSON.stringify({ format: 'wuwaterm-result-v2', ...draft,
-      status: current ? 'current_terminology_check' : 'requires_recheck', sentence_meaning_evaluated: false,
-      report: latest ? cleanSnapshot(latest) : null, report_is_current: current,
+      status: resultCurrent ? 'current_terminology_check' : 'requires_recheck', sentence_meaning_evaluated: false,
+      report: latest && !long ? cleanSnapshot(latest) : null, report_is_current: resultCurrent,
       choices: choices.map((choice, i) => ({ ...choice, status: reconciled[i].status, reason: reconciled[i].reason })),
       changes: current && comparison ? { new: strip(comparison.new), resolved: strip(comparison.resolved), pending: strip(comparison.pending), incomparable: strip(comparison.incomparable) } : null,
       verified_stamp: { valid: false },
       ...semanticExport(draft, semantic, basisRef.current).result,
     }, null, 2));
-    setNotice(current ? 'exportCurrent' : 'exportStale');
+    setNotice(resultCurrent ? 'exportCurrent' : 'exportStale');
   }
   function exportMarkdown() {
     // Read-only local snapshot: no requests, no state change; the document
     // renders the full report regardless of the UI's finding filter.
-    const currency: MarkdownCurrency = !latest ? 'none' : current ? 'current' : latest.trusted ? 'stale' : 'imported';
+    // Long mode follows the JSON export: the segment reports are the result, current only when every segment is, and a
+    // document report left from a shorter text is not rendered.
+    const long = (segmentInputs(draft) as { long: boolean }).long;
+    const parts = semanticExport(draft, semantic, basisRef.current);
+    const currency: MarkdownCurrency = long ? (!parts.segmentTerms?.length ? 'none' : longResultsCurrent() ? 'current' : 'stale')
+      : !latest ? 'none' : current ? 'current' : latest.trusted ? 'stale' : 'imported';
     const strip = (snapshot: Snapshot) => ({
       source: snapshot.source, target: snapshot.target, direction: snapshot.direction,
       report: snapshot.report, resolutions: snapshot.resolutions,
     });
     downloadFile('wuwaterm-report.md', renderMarkdownReport({
       draft: { source, target, direction },
-      latest: latest ? strip(latest) : null,
-      previous: previous ? strip(previous) : null,
+      latest: latest && !long ? strip(latest) : null,
+      previous: previous && !long ? strip(previous) : null,
       currency,
       choices,
       reconciled,
-      comparison,
-      ...(() => { const parts = semanticExport(draft, semantic, basisRef.current); return { semantic: parts.markdown, segmentTerms: parts.segmentTerms }; })(),
+      comparison: long ? null : comparison,
+      semantic: parts.markdown,
+      segmentTerms: parts.segmentTerms,
     }, lang), 'text/markdown;charset=utf-8');
     setNotice('exportMarkdown');
   }
@@ -821,6 +881,14 @@ export function ReviewWorkbench() {
         <button type="button" className="secondary-button" onClick={() => { const url = pendingLeaveUrl; if (!url) { setPendingLeaveUrl(null); return; } leaveBypass.current = true; window.location.assign(url); }}>{m.review.leaveAnyway}</button>
       </div>
     </dialog>
+    <dialog className="handoff-dialog" ref={importDialog} aria-labelledby="import-replace-title" aria-describedby="import-replace-description" onCancel={() => setPendingText(null)}>
+      <h3 id="import-replace-title">{m.review.importReplaceTitle}</h3>
+      <p id="import-replace-description">{m.review.importReplaceBody}</p>
+      <div className="actions">
+        <button ref={keepImportButton} type="button" className="secondary-button" onClick={() => setPendingText(null)}>{m.review.dialogKeep}</button>
+        <button type="button" className="secondary-button" onClick={() => { if (pendingText !== null) replaceWithText(pendingText); }}>{m.review.importReplaceConfirm}</button>
+      </div>
+    </dialog>
     <dialog className="handoff-dialog" ref={handoffDialog} aria-labelledby="handoff-title" aria-describedby="handoff-description" onCancel={() => setPendingDraft(null)}>
       <h3 id="handoff-title">{m.review.dialogTitle}</h3>
       <p id="handoff-description">{m.review.dialogBody}</p>
@@ -890,7 +958,7 @@ export function ReviewWorkbench() {
         <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={resetAlignments}>{m.review.alignmentFallbackReset}</button>
       </div>
     </div>}
-    {error && <p className="error-panel" role="alert">{errorTextValue}</p>}
+    {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}</div>}
     {phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
     {basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
     {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>

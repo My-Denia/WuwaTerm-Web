@@ -469,6 +469,8 @@ test('plain-text import, clear-then-handoff, in-review translation, alignment re
   await expect(page.locator('#review-target')).toHaveValue(A.target);
 
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'raw-source.txt', mimeType: 'text/plain', buffer: Buffer.from(B.source) });
+  // The open manuscript holds unsaved work, so the text replaces it only after the user confirms.
+  await page.getByRole('dialog', { name: '用这个文件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await expect(page.locator('#review-target')).toHaveValue('');
   await page.getByRole('button', { name: '生成译文', exact: true }).click();

@@ -305,6 +305,11 @@ finding `id`. A choice therefore maps one to one onto a review-v2 resolution,
   applied.
 - In a pending record, no choice is confirmed. Its choices wait for the next check and
   are realigned against it ("Runtime", step 7).
+- A result with `truncated: true` (Core returned its 32-finding cap and left the rest out)
+  still takes choices on the findings it shows, made and confirmed like any other. The
+  client tells the user that the segment has more findings than it shows, and that
+  splitting the segment and checking it again shows the rest. Document mode keeps its
+  own rule.
 
 ### Segment choice history
 
