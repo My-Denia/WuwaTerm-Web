@@ -1,0 +1,3979 @@
+{
+  "format": "wuwaterm-manuscript-v3",
+  "source": "示例地很安静。\n\n示例名遇见了示例物，示例名又回到示例城。\n\n示例物静静地躺着。",
+  "target": "The Sample Place was quiet. Filler line 001 keeps this paragraph long. Filler line 002 keeps this paragraph long. Filler line 003 keeps this paragraph long. Filler line 004 keeps this paragraph long. Filler line 005 keeps this paragraph long. Filler line 006 keeps this paragraph long. Filler line 007 keeps this paragraph long. Filler line 008 keeps this paragraph long. Filler line 009 keeps this paragraph long. Filler line 010 keeps this paragraph long. Filler line 011 keeps this paragraph long. Filler line 012 keeps this paragraph long. Filler line 013 keeps this paragraph long. Filler line 014 keeps this paragraph long. Filler line 015 keeps this paragraph long. Filler line 016 keeps this paragraph long. Filler line 017 keeps this paragraph long. Filler line 018 keeps this paragraph long. Filler line 019 keeps this paragraph long. Filler line 020 keeps this paragraph long. Filler line 021 keeps this paragraph long. Filler line 022 keeps this paragraph long.\n\nSample Name met the Sample Item, and Sample Name returned to the Sample City. Filler line 001 keeps this paragraph long. Filler line 002 keeps this paragraph long. Filler line 003 keeps this paragraph long. Filler line 004 keeps this paragraph long. Filler line 005 keeps this paragraph long. Filler line 006 keeps this paragraph long. Filler line 007 keeps this paragraph long. Filler line 008 keeps this paragraph long. Filler line 009 keeps this paragraph long. Filler line 010 keeps this paragraph long. Filler line 011 keeps this paragraph long. Filler line 012 keeps this paragraph long. Filler line 013 keeps this paragraph long. Filler line 014 keeps this paragraph long. Filler line 015 keeps this paragraph long. Filler line 016 keeps this paragraph long. Filler line 017 keeps this paragraph long. Filler line 018 keeps this paragraph long. Filler line 019 keeps this paragraph long. Filler line 020 keeps this paragraph long. Filler line 021 keeps this paragraph long.\n\nThe Sample Item lay still. Filler line 001 keeps this paragraph long. Filler line 002 keeps this paragraph long. Filler line 003 keeps this paragraph long. Filler line 004 keeps this paragraph long. Filler line 005 keeps this paragraph long. Filler line 006 keeps this paragraph long. Filler line 007 keeps this paragraph long. Filler line 008 keeps this paragraph long. Filler line 009 keeps this paragraph long. Filler line 010 keeps this paragraph long. Filler line 011 keeps this paragraph long. Filler line 012 keeps this paragraph long. Filler line 013 keeps this paragraph long. Filler line 014 keeps this paragraph long. Filler line 015 keeps this paragraph long. Filler line 016 keeps this paragraph long. Filler line 017 keeps this paragraph long. Filler line 018 keeps this paragraph long. Filler line 019 keeps this paragraph long. Filler line 020 keeps this paragraph long.",
+  "direction": "en",
+  "alignments": null,
+  "choices": [],
+  "history": [],
+  "semantic_decisions": [],
+  "semantic_texts": [],
+  "semantic_history": [],
+  "segments": [
+    {
+      "index": 0,
+      "segmentation_version": "segmentation-v1",
+      "source_start": 0,
+      "source_end": 7,
+      "target_start": 0,
+      "target_end": 973,
+      "source_hash": "047fe21928408c068b03e7f743826220e96c2ad93c2089acecf7499ff79e424e",
+      "target_hash": "80b54b1452ba7b79f6f2c6facf8db2989c72706080176d31980ef5e4782c3db4",
+      "status": "pending",
+      "basis": null,
+      "report": null,
+      "choices": [
+        {
+          "source_span": {
+            "start": 0,
+            "end": 3,
+            "text": "示例地"
+          },
+          "choice": "not_a_term",
+          "candidate": null,
+          "offered": [
+            "3c5461b3b7fc4926ed238a919cae90620b82796d7b3c989f760cdd299724eea6"
+          ],
+          "basis": {
+            "rule_version": "review-v2",
+            "dictionary": {
+              "schema_version": "2",
+              "source_commit": "synthetic-commit-current",
+              "term_count": 1204,
+              "revision": "5a6c4f6110f2cb69ec00f5faa96eba21f478fee6d77ea8fd876d94a824992042"
+            },
+            "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+          }
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "segmentation_version": "segmentation-v1",
+      "source_start": 9,
+      "source_end": 29,
+      "target_start": 975,
+      "target_end": 1955,
+      "source_hash": "015e097bf03cfb415fd5fd983b4657c03b037044d72da336bf614af7dfcfd83d",
+      "target_hash": "0f9a07ed228a85e96c09a87f3ced4fe313bcae70e0aaa70ea7597b7c664bcc13",
+      "status": "done",
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-current",
+          "term_count": 1204,
+          "revision": "5a6c4f6110f2cb69ec00f5faa96eba21f478fee6d77ea8fd876d94a824992042"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      },
+      "report": {
+        "request_id": "14419a8371dd6774f5a7ced7972f6221",
+        "source_revision": "015e097bf03cfb415fd5fd983b4657c03b037044d72da336bf614af7dfcfd83d",
+        "target_revision": "0f9a07ed228a85e96c09a87f3ced4fe313bcae70e0aaa70ea7597b7c664bcc13",
+        "rule_version": "review-v2",
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-current",
+          "term_count": 1204,
+          "revision": "5a6c4f6110f2cb69ec00f5faa96eba21f478fee6d77ea8fd876d94a824992042"
+        },
+        "coverage": {
+          "evaluated": 3,
+          "not_evaluated": 0,
+          "rules": [
+            "review.term_pair"
+          ]
+        },
+        "findings": [
+          {
+            "id": "0:3:示例名",
+            "rule_id": "review.term_pair",
+            "verdict": "verified_constraint",
+            "source_span": {
+              "start": 0,
+              "end": 3,
+              "text": "示例名"
+            },
+            "target_span": {
+              "start": 0,
+              "end": 11,
+              "text": "Sample Name"
+            },
+            "candidates": [
+              {
+                "zh": "示例名",
+                "en": "Sample Name",
+                "category": "character",
+                "sources": [
+                  {
+                    "source_file": "Synthetic/Terms.json",
+                    "source_id": "term_6360e815"
+                  },
+                  {
+                    "source_file": "Synthetic/Labels.json",
+                    "source_id": "label_6360e815"
+                  }
+                ],
+                "candidate_id": "6360e8156cf16363591ea09fc5ee36bd4fd9fb75c52143612234ae7d76545569"
+              }
+            ],
+            "candidates_truncated": false
+          },
+          {
+            "id": "6:9:示例物",
+            "rule_id": "review.term_pair",
+            "verdict": "needs_review",
+            "source_span": {
+              "start": 6,
+              "end": 9,
+              "text": "示例物"
+            },
+            "target_span": null,
+            "candidates": [
+              {
+                "zh": "示例物",
+                "en": "Sample Item",
+                "category": "item",
+                "sources": [
+                  {
+                    "source_file": "Synthetic/Terms.json",
+                    "source_id": "term_ec4b5168"
+                  },
+                  {
+                    "source_file": "Synthetic/Labels.json",
+                    "source_id": "label_ec4b5168"
+                  }
+                ],
+                "candidate_id": "ec4b5168b9b971834ca43ef4d0f157096859afae88d1bf1da8df268577fe8bfe"
+              },
+              {
+                "zh": "示例物",
+                "en": "Sample Object",
+                "category": "item",
+                "sources": [
+                  {
+                    "source_file": "Synthetic/Terms.json",
+                    "source_id": "term_448e38cd"
+                  },
+                  {
+                    "source_file": "Synthetic/Labels.json",
+                    "source_id": "label_448e38cd"
+                  }
+                ],
+                "candidate_id": "448e38cdfd77ccf395d72ee94fd64f61fa405b72979f00eb91e2371d0aabe004"
+              }
+            ],
+            "candidates_truncated": false
+          },
+          {
+            "id": "10:13:示例名",
+            "rule_id": "review.term_pair",
+            "verdict": "needs_review",
+            "source_span": {
+              "start": 10,
+              "end": 13,
+              "text": "示例名"
+            },
+            "target_span": null,
+            "candidates": [
+              {
+                "zh": "示例名",
+                "en": "Sample Name",
+                "category": "character",
+                "sources": [
+                  {
+                    "source_file": "Synthetic/Terms.json",
+                    "source_id": "term_6360e815"
+                  },
+                  {
+                    "source_file": "Synthetic/Labels.json",
+                    "source_id": "label_6360e815"
+                  }
+                ],
+                "candidate_id": "6360e8156cf16363591ea09fc5ee36bd4fd9fb75c52143612234ae7d76545569"
+              }
+            ],
+            "candidates_truncated": false
+          }
+        ],
+        "truncated": false
+      },
+      "choices": [
+        {
+          "source_span": {
+            "start": 0,
+            "end": 3,
+            "text": "示例名"
+          },
+          "choice": "official_pair",
+          "candidate": {
+            "candidate_id": "6360e8156cf16363591ea09fc5ee36bd4fd9fb75c52143612234ae7d76545569",
+            "zh": "示例名",
+            "en": "Sample Name",
+            "category": "character"
+          },
+          "offered": [
+            "6360e8156cf16363591ea09fc5ee36bd4fd9fb75c52143612234ae7d76545569"
+          ],
+          "basis": {
+            "rule_version": "review-v2",
+            "dictionary": {
+              "schema_version": "2",
+              "source_commit": "synthetic-commit-current",
+              "term_count": 1204,
+              "revision": "5a6c4f6110f2cb69ec00f5faa96eba21f478fee6d77ea8fd876d94a824992042"
+            },
+            "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+          }
+        },
+        {
+          "source_span": {
+            "start": 6,
+            "end": 9,
+            "text": "示例物"
+          },
+          "choice": "not_a_term",
+          "candidate": null,
+          "offered": [
+            "448e38cdfd77ccf395d72ee94fd64f61fa405b72979f00eb91e2371d0aabe004",
+            "ec4b5168b9b971834ca43ef4d0f157096859afae88d1bf1da8df268577fe8bfe"
+          ],
+          "basis": {
+            "rule_version": "review-v2",
+            "dictionary": {
+              "schema_version": "2",
+              "source_commit": "synthetic-commit-current",
+              "term_count": 1204,
+              "revision": "5a6c4f6110f2cb69ec00f5faa96eba21f478fee6d77ea8fd876d94a824992042"
+            },
+            "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+          }
+        },
+        {
+          "source_span": {
+            "start": 16,
+            "end": 19,
+            "text": "示例城"
+          },
+          "choice": "official_pair",
+          "candidate": {
+            "candidate_id": "4384aafac6e397c7133fb2d1e997e91d768120084ca54f7655e3ad99d4d0639d",
+            "zh": "示例城",
+            "en": "Sample City",
+            "category": "place"
+          },
+          "offered": [
+            "4384aafac6e397c7133fb2d1e997e91d768120084ca54f7655e3ad99d4d0639d"
+          ],
+          "basis": {
+            "rule_version": "review-v2",
+            "dictionary": {
+              "schema_version": "2",
+              "source_commit": "synthetic-commit-previous",
+              "term_count": 1187,
+              "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+            },
+            "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+          }
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "segmentation_version": "segmentation-v1",
+      "source_start": 31,
+      "source_end": 40,
+      "target_start": 1957,
+      "target_end": 2843,
+      "source_hash": "d92a500a6455cc81b55c4b4373d62100f932040771852ed53d4978f85299b2ee",
+      "target_hash": "eb840bce88518b770ea1abe00a46b9ee81ea590e2ac4bce912194253cd268441",
+      "status": "stale",
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      },
+      "report": {
+        "request_id": "292285133aabe6bc1bb1fc0318d0424b",
+        "source_revision": "d92a500a6455cc81b55c4b4373d62100f932040771852ed53d4978f85299b2ee",
+        "target_revision": "eb840bce88518b770ea1abe00a46b9ee81ea590e2ac4bce912194253cd268441",
+        "rule_version": "review-v2",
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "coverage": {
+          "evaluated": 1,
+          "not_evaluated": 0,
+          "rules": [
+            "review.term_pair"
+          ]
+        },
+        "findings": [
+          {
+            "id": "0:3:示例物",
+            "rule_id": "review.term_pair",
+            "verdict": "needs_review",
+            "source_span": {
+              "start": 0,
+              "end": 3,
+              "text": "示例物"
+            },
+            "target_span": null,
+            "candidates": [
+              {
+                "zh": "示例物",
+                "en": "Sample Item",
+                "category": "item",
+                "sources": [
+                  {
+                    "source_file": "Synthetic/Terms.json",
+                    "source_id": "term_db07d5d2"
+                  },
+                  {
+                    "source_file": "Synthetic/Labels.json",
+                    "source_id": "label_db07d5d2"
+                  }
+                ],
+                "candidate_id": "db07d5d2a7736b3d5365e3f1c8cc0ae1376a973a0278f620d415e56c69629662"
+              }
+            ],
+            "candidates_truncated": false
+          }
+        ],
+        "truncated": false
+      },
+      "choices": [
+        {
+          "source_span": {
+            "start": 0,
+            "end": 3,
+            "text": "示例物"
+          },
+          "choice": "official_pair",
+          "candidate": {
+            "candidate_id": "db07d5d2a7736b3d5365e3f1c8cc0ae1376a973a0278f620d415e56c69629662",
+            "zh": "示例物",
+            "en": "Sample Item",
+            "category": "item"
+          },
+          "offered": [
+            "db07d5d2a7736b3d5365e3f1c8cc0ae1376a973a0278f620d415e56c69629662"
+          ],
+          "basis": {
+            "rule_version": "review-v2",
+            "dictionary": {
+              "schema_version": "2",
+              "source_commit": "synthetic-commit-previous",
+              "term_count": 1187,
+              "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+            },
+            "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+          }
+        }
+      ]
+    }
+  ],
+  "segment_choice_history": [
+    {
+      "source_hash": "c057a967eb7aa28ca529ee8e75f86c51f3f9077f95e764cc0b986c6cebc35b16",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "b20a6f21f9c8e96aa7148bd3177d63125fceaa2f96a0cf4fabaabbdbe6db3007",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "b20a6f21f9c8e96aa7148bd3177d63125fceaa2f96a0cf4fabaabbdbe6db3007"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "094870aa4beaa975012586400fadc81784a33192148bd3f79633fc3ea809cc46",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "b9aa03cc9c91e20101248e7597b51962e830b87dc019b3046946a7001459cfcd",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "b9aa03cc9c91e20101248e7597b51962e830b87dc019b3046946a7001459cfcd"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "d35a5a0a36a33dfbf9b82f6498f92e2abab359d95345158c96c37fc0d3c229f4",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ebbc72615666b4d5ed8c4cbbf6c0ea46cbab5e834540497396461d5582f29c26",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ebbc72615666b4d5ed8c4cbbf6c0ea46cbab5e834540497396461d5582f29c26"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a236d1a1f5d3ec565a7c518426ad99c0fa9a6bf994353f3e1e524c726b5d110a",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "31220db294dc5bfd16b54482685277462cff71ca4b1c606a7ab44acc7ccab77d",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "31220db294dc5bfd16b54482685277462cff71ca4b1c606a7ab44acc7ccab77d"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "94d624cc888411e5cfa7ae9dc74d8a4a1e77b83709bbec55b05fa46aa4e6b38b",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "041a123f589905cacdb032fe4210b2e1b266ac90c4cc37e0913f80392ae7eecc",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "041a123f589905cacdb032fe4210b2e1b266ac90c4cc37e0913f80392ae7eecc"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "bbc68290b24a8b81e8fc6d1b480f9183013e6571dce6ab19b3106e8202e7e6a5",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "526e1f0a608f1f80cfef2d98acef10986716b6f20e77e5c43d0d7c662cd192e4",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "526e1f0a608f1f80cfef2d98acef10986716b6f20e77e5c43d0d7c662cd192e4"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "7ea2bd17c6e7dc97c351bc2deecc22c94921b5198d3f24a901293d2f115955fc",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "120ba7332e0a938111de447301805862a73f035e26714b99bdc4651ee9bdb040",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "120ba7332e0a938111de447301805862a73f035e26714b99bdc4651ee9bdb040"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "378fdaf3a2ae049b47acfdf591b3b5267e9cc882004e54ef5a9d127a0a0c6bb7",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "2ac09acdc3b2a61efc45b86fdf65941d571743fc539b7d4293fb3726fec92bd4",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "2ac09acdc3b2a61efc45b86fdf65941d571743fc539b7d4293fb3726fec92bd4"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c9e71bd57ba1e61e5a43a8bd4f83d2e6d83ef60fec7037515e23d1ba4a86bf85",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "27ef93d019fe53a1683b149845da8efa514324fc02a392e8f02246e575de488b",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "27ef93d019fe53a1683b149845da8efa514324fc02a392e8f02246e575de488b"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "9136c537488974db9d369c128173551f093afaa19bbe15b39b825f2075603bf8",
+      "source_span": {
+        "start": 8,
+        "end": 11,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "52585c467da942dffac5f5f23f4b1076cdd33311a9a6cef7325aff8af8966d14",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "52585c467da942dffac5f5f23f4b1076cdd33311a9a6cef7325aff8af8966d14"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "41460b2e41913b2502cbd9715d3564f7065290c13252fa3c609e8df99363d03f",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a14b5d1fee8cc5e46fad7ad31c40470d53516cf76381128cb27902c47a76d94f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a14b5d1fee8cc5e46fad7ad31c40470d53516cf76381128cb27902c47a76d94f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "e145ddf1d273812fe71e53fcd8e99e23d019345f14f3f3b62023092dc9330bb2",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "9c14514fb2afa9bc28b108a7272991ac96ecc235c1a69fd830ab51896d5cc830",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "9c14514fb2afa9bc28b108a7272991ac96ecc235c1a69fd830ab51896d5cc830"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "75d512fecc3a2db67629a41eca649750ebb826a334ff560f694d6acac35c43e6",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "58daaa06ac906ecc3e4c3fb647753e50fa20790b035c64b628a3e9c4749c28f6",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "58daaa06ac906ecc3e4c3fb647753e50fa20790b035c64b628a3e9c4749c28f6"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "5affef225d7118ebe88af5f401bbaf11b399c1809b5b2f95cd2280bd5159763a",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c77bc00b31a0f390f7b665a0bed4e7c691a3c60c49527cf2bd1f0d83a9338591",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c77bc00b31a0f390f7b665a0bed4e7c691a3c60c49527cf2bd1f0d83a9338591"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "fed09d80628dfb52f446198a27a42fc40b9a6932e5c07043d7735ab4cc77a0cb",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a9cb57a9af2145777bc79d814104528f24594a3807a329e71059e91964b56eff",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a9cb57a9af2145777bc79d814104528f24594a3807a329e71059e91964b56eff"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "d5cdaa145e7a7a8329bec04f59f8436fc84d57f5850353356f9d147b07b8772c",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "959a7cce0d1847cd4931b337e01c1d794a271eb2006c26cd53777f0b8c1712e7",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "959a7cce0d1847cd4931b337e01c1d794a271eb2006c26cd53777f0b8c1712e7"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "879beae0bcbdf436a96031c329e4ee2ca27a03cd1875a05b5fe452d1a9c4dfb6",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "5f71e0bab97918a164e0ebc8b636a3a5a657d54c77dea2daf0cffecebebe3e9e",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "5f71e0bab97918a164e0ebc8b636a3a5a657d54c77dea2daf0cffecebebe3e9e"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "1ff29c90d675d283e92b37a31448ae2c34dd52eb3d27de4626db86f83bc8132c",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "0587c29343965a86e403b88fb36b2e7c3e398b1cf34135edbb0f013a44470702",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "0587c29343965a86e403b88fb36b2e7c3e398b1cf34135edbb0f013a44470702"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "92cd3d5dd128b2d6e919e679fdda1904d216170953dcca2e4cbf18a86f65c21d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "47a0988fa474abfd7997208587d0fa8f95a962fbb77a53aff583161f4d22d78e",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "47a0988fa474abfd7997208587d0fa8f95a962fbb77a53aff583161f4d22d78e"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "589ba8f39ded87cbb77c499e734ff0b4208b19798969c3ca9727aa1fa081f21d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "40ced0298844aa893dc9ff32fb0e875ef3af62f9e231b3928e7625b66e548aea",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "40ced0298844aa893dc9ff32fb0e875ef3af62f9e231b3928e7625b66e548aea"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "f9644689a1edc45e83b6c48ef6543543aa597b5aa7eead5aca89ad734f06c9cb",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "e8d48ad3cc98f1b9cddf9fc3cdddef0b35c3f74953caa9f17550f213f2045b21",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "e8d48ad3cc98f1b9cddf9fc3cdddef0b35c3f74953caa9f17550f213f2045b21"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c71a69eec419683a6ed568973dbbcd8b9041af42e2eba43e9815bede48e5ddf9",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "09baa69f8acf8164a1be995bc5d2fde23c43b682d1df4822652979b4d3941d79",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "09baa69f8acf8164a1be995bc5d2fde23c43b682d1df4822652979b4d3941d79"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a59f91c1ccd57b9d30f4f26bd3ef24a8fc3cbee1159a62341ae21a41a08eaf58",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "e45cf637a9f248952f0c0939d02f41a57e6421e3f99e66c6c21e5666432ba075",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "e45cf637a9f248952f0c0939d02f41a57e6421e3f99e66c6c21e5666432ba075"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "b3e1ad483b6c8e8292f29be618c155d10f18e4fc6fe5b2d478f4b026664f2579",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "948d81c3424f992d60116f207c3abf5db51cb3f8188e76c65b5f46d451dd282d",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "948d81c3424f992d60116f207c3abf5db51cb3f8188e76c65b5f46d451dd282d"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "3c8070a9e2305e338549ec2c94fe7c33b31756fc26c62018c447c2aefaa10a9a",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a6cb42695311ca865bf2472207b166562881fafd99d30fe9d40ddf0a17fb6773",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a6cb42695311ca865bf2472207b166562881fafd99d30fe9d40ddf0a17fb6773"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "92a93885843ecf6666061f38ea1f2d5a7988ceb0727a045fb6198ae71414255d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c2f1ecd90d554d2eb29abde56f2903ff2d2ffc599815922c19669c67f5dc4db2",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c2f1ecd90d554d2eb29abde56f2903ff2d2ffc599815922c19669c67f5dc4db2"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "9b0e5183217f3c1c7adf3794ad0ee688488a56a0f58e7a305584db42ccda36af",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a1a895773c5eb8f7d9a705021ae5242e302f5e6b15475704c84f4ed2b0d4ad73",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a1a895773c5eb8f7d9a705021ae5242e302f5e6b15475704c84f4ed2b0d4ad73"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "398aebf56024ed3805ffe1b8c929dbd667579311f1de2bc8a903be916d297db0",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "7e95630f48d2fd2bf114a8007cf29e4012c9b1328ae2db10ba98c95e91c6e362",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "7e95630f48d2fd2bf114a8007cf29e4012c9b1328ae2db10ba98c95e91c6e362"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "87bc9f500d1c7cf4fc3f3ea9a8aa69572382aec40b5f1b18ed43acc52a1b800f",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d1b83f77b3c46d911abb4902632f3b7851bb7f6897b7c68f8cf6f1fc48dd22e6",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d1b83f77b3c46d911abb4902632f3b7851bb7f6897b7c68f8cf6f1fc48dd22e6"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "1c1e30374cada9243630bd9c6d85b2e23b4a4cdf8613a176ab5a5882f3be5fa6",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "dee7ad091522521180d18e1a6c6409b27b50e7975775c3d7d60c00f8ca5965a3",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "dee7ad091522521180d18e1a6c6409b27b50e7975775c3d7d60c00f8ca5965a3"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c74230f05e24b23d04dcbd38391122ff113bbeb144868e2279e7744e06672824",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d0b8b9aa332b3a6191ef9320b8db9428a6bf4b3b0cfccd459a1bcc0f5840ce80",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d0b8b9aa332b3a6191ef9320b8db9428a6bf4b3b0cfccd459a1bcc0f5840ce80"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a7ae5ac369f954bfa85ddbe56ae4ac0b2226d7db2bd245ef90e9ca2aa7ca9df6",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ddda9effd8cd6af8bf62fbc02dc255c8ad705644c0d990afad9c72827eeaade2",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ddda9effd8cd6af8bf62fbc02dc255c8ad705644c0d990afad9c72827eeaade2"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a0a962449195dfec787c336a8bfa9febef43cc84fc10f38bae5f14848ce6151f",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "40a0f866e8929a251eb2ee0ffed39dddbcfea513b38473f7e33e413c9e907984",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "40a0f866e8929a251eb2ee0ffed39dddbcfea513b38473f7e33e413c9e907984"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "b145188252f3bbeecc16d0e6b6a339dc0be90f6b2cbd526e7704dedc7a1644a9",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "633c6d29ecf06f6c9266a932012cc3ff99be69ee7813e3585ca491bbb1f9220d",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "633c6d29ecf06f6c9266a932012cc3ff99be69ee7813e3585ca491bbb1f9220d"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "f8abe55e3749c8f97194ee0764ed8fcd9f52fe7275d249784c5b164211a7b893",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "293d236664664396e8fb78c94e2b8a7c774c09d421138684b9a39ecc2f41203a",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "293d236664664396e8fb78c94e2b8a7c774c09d421138684b9a39ecc2f41203a"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a5ef24b6e64e67165b21f9c6fd809dc763c408758bf4045b1145098fb2a0dfa6",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "03e24d5e96293ea892806b8d6af5ec4a21041c5b40ae0beac2dc9f6723de8099",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "03e24d5e96293ea892806b8d6af5ec4a21041c5b40ae0beac2dc9f6723de8099"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "3819d5ab0c607ff44f83b6c9bf64c214c39f436f94f03d143e1eef3a7d4e72ed",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "19c332ec6fbec0097ef6036c46f514f2412e94e77b6b750b3ca5d2283557de10",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "19c332ec6fbec0097ef6036c46f514f2412e94e77b6b750b3ca5d2283557de10"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "488401eaeb686939feedff6edd7bc65cebc99026498a1589b83167cb2d253f83",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "473b508c9ec62572ec7accedb4d32c015bf5d270977f70467fb6e393f5b79a09",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "473b508c9ec62572ec7accedb4d32c015bf5d270977f70467fb6e393f5b79a09"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "637decfeb21ceea8a1258950860eb003bc1f4d4f23f27d70e1091b0c277cc77f",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "f573db1fe9308dcdaada35dafec1a4d993f125ae7972f5e0d3feab42129dd963",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "f573db1fe9308dcdaada35dafec1a4d993f125ae7972f5e0d3feab42129dd963"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "0a30720b15a9cd667c7d1059b358fe193e5a813816ea3222f728b9efa3195194",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "99312c98eff6b5bc9c5d7ee8a590b9d6ba835c32556e05d787785b677e46f4d7",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "99312c98eff6b5bc9c5d7ee8a590b9d6ba835c32556e05d787785b677e46f4d7"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "521d9ef17ae21fe23760eb7dca0363157dc9b641c0ab93d403e7a4ef0cb91b45",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "7a0a082d6ff1c1a82885613b5c4890297e28d0c2a930f668a5a2a3d8bc3d2cd4",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "7a0a082d6ff1c1a82885613b5c4890297e28d0c2a930f668a5a2a3d8bc3d2cd4"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "dd61679b92548dce8e6a249012a1a6d2b1007df57d80757b30a4d0d843625f3d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "7b1f1fe8cbc38e091bf71ea8a4243abd9cd6e35ac8bec6eb5913ad3ed852c96b",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "7b1f1fe8cbc38e091bf71ea8a4243abd9cd6e35ac8bec6eb5913ad3ed852c96b"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "5c769cdf75ee009ab4a7256c026f2a61d5ced20c0541eb515de30e174630c6d4",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "de0fb775fd8486c04a035219033479487ff15d5b33aebfdb5eae0eeb61fefcbe",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "de0fb775fd8486c04a035219033479487ff15d5b33aebfdb5eae0eeb61fefcbe"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "f97a3ca92ef2ad9ac0b631aa02816f2bb34f72b4abf8a95a5c7f7ebb06b55ed1",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d641885a76dfd942593cf852e6926188304a6a40d698910c495383c5c31f9d7b",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d641885a76dfd942593cf852e6926188304a6a40d698910c495383c5c31f9d7b"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "7b407e3869a4c947e8938699f983d8f1da8ae88106b5d39d6cb5b0764b9596a7",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "38eeb9fa3eb75eaa0562795cb25d1d7d638ccad5c6d5d91ca5f8a5291cab41bf",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "38eeb9fa3eb75eaa0562795cb25d1d7d638ccad5c6d5d91ca5f8a5291cab41bf"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "2686f367b4c41d3999b5f4cdc7976898f9a0eaf8efd3a61afceb3201ca36a0ec",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "b6be0ea6ecdc9774f9024a5cc0d75f5c44d17f462dc8acc54e0fa1e784086b84",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "b6be0ea6ecdc9774f9024a5cc0d75f5c44d17f462dc8acc54e0fa1e784086b84"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "1362a6434950d9e4aa9a8381edc8abe8c78b94cbee5c09661525251af5eb45d9",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "3ab40335003866c218e277207a4886e17aeee5afedd8fb4121a22baa408480c8",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "3ab40335003866c218e277207a4886e17aeee5afedd8fb4121a22baa408480c8"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "021bff58809fcd87ecd4ddfaf48e5757537b62b7587ef7f26adc568a585a410e",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "99d408cb7a5fdef06693b003c65233a8c8d8c0c1fb1a4239fc2e10bc5c4dd5cb",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "99d408cb7a5fdef06693b003c65233a8c8d8c0c1fb1a4239fc2e10bc5c4dd5cb"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "aea0e67aa57d391d7a2bcc0fbc4e030d2c747922fb2a0ae8240e2085a5149880",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a0db0f3964afdb5cd94b461f1d1fdf6fec80397824030276acf7fd8ce9000cad",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a0db0f3964afdb5cd94b461f1d1fdf6fec80397824030276acf7fd8ce9000cad"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "56456c864dc4cd73811ea5bf744d0ad314ac4b34f0ec6b0d945816ae7695d74e",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "9bbe7cda029cafa15fd9ecee11aea7532f61056f54c644cb6a3dd85da1bf87ba",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "9bbe7cda029cafa15fd9ecee11aea7532f61056f54c644cb6a3dd85da1bf87ba"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "604bb12d6bdc77773d4e2ddbb169b704e300e672da9b77414e71552703626b14",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c712dab0d8147e27b9dccfe7d9fd4e8d8e7bf0ad07abd1e54e46b8444f790449",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c712dab0d8147e27b9dccfe7d9fd4e8d8e7bf0ad07abd1e54e46b8444f790449"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "ef1ead7109012f4772030e7542294564a256ffc1a6d18f078eb30751913bb78c",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ec930798e6bfee43219498b2908364359dd5f32a07e8a3f0d34e8383d8a81924",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ec930798e6bfee43219498b2908364359dd5f32a07e8a3f0d34e8383d8a81924"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "b3e2a328dd012ee661731b38e834eef8e6c4dd056b14d6ca77a8309d2d3be63b",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "003afa9fd648cc864b5725550970eb34bb5c9c159ae96f871a2b003d79e4fa38",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "003afa9fd648cc864b5725550970eb34bb5c9c159ae96f871a2b003d79e4fa38"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "d6be94e38653502ecfdb95da6215b7b61aeeff5577a4a26398b7946abb37cb9d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d37f37366185b0ebb9fa8bdcb699a9466d1b87528679a298a5852a16e14db977",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d37f37366185b0ebb9fa8bdcb699a9466d1b87528679a298a5852a16e14db977"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "15e971b22aa9cfa4202569ff53208eb8377ade74b1038f0df6cea5d8d5c6c982",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c79abf795c38b8b2b200ae619489de52e3da6caa0e8defb2e8cbc095739b3203",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c79abf795c38b8b2b200ae619489de52e3da6caa0e8defb2e8cbc095739b3203"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "2ca0a6348a912ac2ce8d851cc5dd9463fa161d2fc0cd4576993e77f030f32c81",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "97dbdf21af2f01fab916d22114307ec0e4b7ce3f0a3ff8f3a9a02d33be52ac1b",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "97dbdf21af2f01fab916d22114307ec0e4b7ce3f0a3ff8f3a9a02d33be52ac1b"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a28fcb529ede4ee6144fc4ad4cabf0b8c2efd73c2571e280ebd47d1cd13d6edf",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "8688fdc3a4e9a46468f1ffca6f89c70737eea68cf5061332b5323c622404fe93",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "8688fdc3a4e9a46468f1ffca6f89c70737eea68cf5061332b5323c622404fe93"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "2eca39b396135f6e95c4d07d299c28ef696b6b65e7b9345237b3e75941403d36",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "dbd751f56783271c1364bd49a5b174ce892a3568635634a75884fe0263c67604",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "dbd751f56783271c1364bd49a5b174ce892a3568635634a75884fe0263c67604"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "2c2c84abf84c5e4cc823f534491391ba3cf47009f53bc77ebcc049ee94221a29",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "3e179d1c54658330128d130333342dd253adc27fb16fb86401bb3bd46445383f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "3e179d1c54658330128d130333342dd253adc27fb16fb86401bb3bd46445383f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c0bc89fb59322d92b36ff8abaa59ae59fba464c23fafa12a25e748c726c71045",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "504224ed8af5283a5a294a0d550b3eb5cc2dc735f9829ecc6f515648fb00f86f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "504224ed8af5283a5a294a0d550b3eb5cc2dc735f9829ecc6f515648fb00f86f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "d7f31525996a6ad589e73f4d4db723654d9b402ade4fcb3e13cfeb7303a8b60b",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "4c8d8068a009286f3a2a29d8599e85b142b19afa8dcb94492b9315f129836690",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "4c8d8068a009286f3a2a29d8599e85b142b19afa8dcb94492b9315f129836690"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "58b01d3b21b774f9020395c86f016cac21f54d8ff2fd5edf3f87aee976d539c4",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "01b1f051177103e0c8d8096ed1622f6a14df218753bf62eefbe10f4b3f2879bc",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "01b1f051177103e0c8d8096ed1622f6a14df218753bf62eefbe10f4b3f2879bc"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "6b588eb9c3b7693b946f1fee5c2f9e21b1f1209ce421d06aa8a7a48577677d03",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "913286a1d780195489c1095fcf4a5d4d30e0caff50626c57f44fa4f8a5bfcab9",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "913286a1d780195489c1095fcf4a5d4d30e0caff50626c57f44fa4f8a5bfcab9"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "3a33a1eaca82af597aae118c6d860f0910fdbc8f53a652ea55fbbe495fef7931",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "45ae3b3700106fb47d22c5acc92a212a8b6720800caf0eebb3ca1a5d5ae39fca",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "45ae3b3700106fb47d22c5acc92a212a8b6720800caf0eebb3ca1a5d5ae39fca"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "d62393eec9249e8efed9533dd3fc528953581497dcea16cd8c3cea9632ce2ea5",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "5e8be9cdc6c3b8f0a00ab8e5f8df1c3c20d1edde90c34ddb56feee57721fadae",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "5e8be9cdc6c3b8f0a00ab8e5f8df1c3c20d1edde90c34ddb56feee57721fadae"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "e49320904d6ca7151694aef3ab076a8202cd0472e998229e094beb0ea45c1a51",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c7087901de08651d6720b62c23a5defc1249c51a58cc3166c83e1a65547a2943",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c7087901de08651d6720b62c23a5defc1249c51a58cc3166c83e1a65547a2943"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "53415bb69e5b7ebad808f3ea5cc6649e6b559e21524e7b8609ab21a517cdbc8f",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "aec5e72d15387c18ba600b84cbd64b060dc8d32f3645fd0293d29fbe0a398403",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "aec5e72d15387c18ba600b84cbd64b060dc8d32f3645fd0293d29fbe0a398403"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "73f045cf7898a346475feb8e22916c99f1ced9ce48a39732dc235ca1a4b51723",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "f70579befdc8b81f00d599ac4db453f58cb48a509b4d53a1c06905da20bfbaa7",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "f70579befdc8b81f00d599ac4db453f58cb48a509b4d53a1c06905da20bfbaa7"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "3e6794a83846839202e9f602e0d4d3042f66dbc458b5183c21f6768dcc9bbd99",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c67ceeeedf25ad39dd300ddda51339891825a416ffbecbaebabca2db530571ad",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c67ceeeedf25ad39dd300ddda51339891825a416ffbecbaebabca2db530571ad"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "8b6318b512ab4e86e1d8bef247516b2d0562809dec0c8253b37938b8405e04b9",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c4517fef8302eb47ac77933866859bec7a253f0ce78a71a7024ed200699b0b40",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c4517fef8302eb47ac77933866859bec7a253f0ce78a71a7024ed200699b0b40"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "2c0706a9aceac58508117ab155e7ebf6e5320a4050594f6df446ddb33931adc7",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "bbccc2f53c87219b2279e4bc923ba46cb59bf2e2b940a42c802a9135fae0c634",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "bbccc2f53c87219b2279e4bc923ba46cb59bf2e2b940a42c802a9135fae0c634"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "99ef09f90981ec65667761d8ae109aae61b3ade06d1bb6d1508b3a4b6e0558b0",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "54c754f2639a9f1b52b0c7d5adf51946732756cb9dc51b9acb59f020832d4d08",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "54c754f2639a9f1b52b0c7d5adf51946732756cb9dc51b9acb59f020832d4d08"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "f03cd764779ab9f81ffa32de1f36ccbb330d6c08e5e7927c6235b541bebeb86a",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "fde3c0f3fa4117b73d233f82967f28becee829644760d1f921391c57851c5187",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "fde3c0f3fa4117b73d233f82967f28becee829644760d1f921391c57851c5187"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "83800f307d7a88a900b6903ed161f4ede836ebe45a83b81501d7d601725b8744",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "60f7dbea6984340c24cfe3b3b73ea9f3c46fa9c2ecfb8ac355f45db25ec62f08",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "60f7dbea6984340c24cfe3b3b73ea9f3c46fa9c2ecfb8ac355f45db25ec62f08"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "fbe3c9052a8bcea923a8b3b82a7e124b29375cc5b62d1971204ae1b69e195712",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "beb4ec3ee1a1bb8c7bdac41b5beee68c8f5677ce90033265b95e8ba422d8dcab",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "beb4ec3ee1a1bb8c7bdac41b5beee68c8f5677ce90033265b95e8ba422d8dcab"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "86334abd83da07a3cb66cde39f5ad9aa85f40d64d1e340f9d68cb8c4bed03964",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "63f70c500b1ea83dfdd8c3bfbc59c48519a897582db5867c2d7580d56fafd707",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "63f70c500b1ea83dfdd8c3bfbc59c48519a897582db5867c2d7580d56fafd707"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "e23859ec40b68dc36d135ab4b20e3e3c56921524cc8dfc7d4fc8d15d6ac49efd",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "2c11b32df8f3afb47714139688bd3277239ba015f405a42aba55a5ccc4c0edca",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "2c11b32df8f3afb47714139688bd3277239ba015f405a42aba55a5ccc4c0edca"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "8f3f0f94b7120d3ac48b5944c526c346d01d30e7ffeb6c18ebda4c2d4a256120",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "17d97fabfdd79126bdd5d953753c8b4dd0e13ae12f721d841942fa2768204b4f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "17d97fabfdd79126bdd5d953753c8b4dd0e13ae12f721d841942fa2768204b4f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "604a0d56164c163fa4db32650271882a908c96f5113a0aff4871d0c08218e01c",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "e87798f68f4cfaa015cfd1122ac1f38a3f34a052cf081b35a1daa5e9dcd43a88",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "e87798f68f4cfaa015cfd1122ac1f38a3f34a052cf081b35a1daa5e9dcd43a88"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "cc453dcd19fa1384b5f7b491bf1440fdf92013d5e4628c490f9b93201d491b64",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "cd40eb1d778446ab81a160b83c0c5d8c67c3d3df2d47f15b446d9b21ccbc1883",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "cd40eb1d778446ab81a160b83c0c5d8c67c3d3df2d47f15b446d9b21ccbc1883"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "be4baa3ee7942be12f0ff40aafca81c280d86414c95beb06e4b49045a26a17bb",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "68ab2abf6e24d3454953e279f5fb8e19f5d8602f1a0f69ab38b16a9fb1666dba",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "68ab2abf6e24d3454953e279f5fb8e19f5d8602f1a0f69ab38b16a9fb1666dba"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "5e86174d14ede7146dac7bb4c24b25e5328a1522d683c2c2343fca3bc07057f7",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d84fd96182df9837fc63a4b9321a98db73b3632a39defab10567ba3ee09fc9fa",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d84fd96182df9837fc63a4b9321a98db73b3632a39defab10567ba3ee09fc9fa"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c5c056cbff3197b6458490f0a961ba78c57ceae4fef8b8dc3017bfb6fabd733d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a52dae34daf73627a869b899b7cb45c3496b5b6f5cf5ec68bb629708a011c9ea",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a52dae34daf73627a869b899b7cb45c3496b5b6f5cf5ec68bb629708a011c9ea"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "12158b57a0c4829e1c0e38e9bc5aab03fced3e0d1539eaf9df71456b7686dbd1",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "43c6556bdadb9793d4e1c464b4346f4c8f7319e4d526b52f3724c624730be95f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "43c6556bdadb9793d4e1c464b4346f4c8f7319e4d526b52f3724c624730be95f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "f2a6b0108253c7a505672997bf524060e43321228c5ac54af61f42a4aa62eb2e",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "319ffbdca1edd7b310165d4f6cecad797811539d7fce570bf446417cca54cbd0",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "319ffbdca1edd7b310165d4f6cecad797811539d7fce570bf446417cca54cbd0"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a39b7cb1005a59c5b7244b54cd4bcbd5d41739f9a42247af6c9c8124a07b7a47",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "be1f60ac2b4e159b0e244a43db8ad02f9a672c327fd611a66539dd06e0c67072",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "be1f60ac2b4e159b0e244a43db8ad02f9a672c327fd611a66539dd06e0c67072"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "50617bc5585dac0ce049b467808b99d2434a9ffd45d84aefcc30c13785fc8043",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "eddc9a2d64b4221a30848bb4c5dd361dbdb89849a637bb8accf5c24f200b9f29",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "eddc9a2d64b4221a30848bb4c5dd361dbdb89849a637bb8accf5c24f200b9f29"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "ba073b61dfcad3bfcb280a138a29c4c748f18e6dae737e0e08fdcd74c4370a80",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "a865377512fbf4a29c0adf51f65a67123e7258f93cad6e301033220303e95be1",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "a865377512fbf4a29c0adf51f65a67123e7258f93cad6e301033220303e95be1"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "cffc58e6e22efc59be99c59ddecd60c8bb679d0e9595932eacf5583cfeefda3d",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d78f1a4c4c40f7a4b55c652f670f8ff81b713ff46ca9a7741eeec7f2a25f9dae",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d78f1a4c4c40f7a4b55c652f670f8ff81b713ff46ca9a7741eeec7f2a25f9dae"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "16a0e07142187c310775e783774b6e73287efdd0b6e56ce7affc27c0748a50de",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "7d977e3b4db04737b96b3be5a9e14315755bfaafd62b3d1097fae4f21143fac0",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "7d977e3b4db04737b96b3be5a9e14315755bfaafd62b3d1097fae4f21143fac0"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "8b8be3d6945866c697b99c96aa5500c587070c2a4c3d2044fcf3ce4e14da1f10",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "4330b8cb9ac0865163dbe2c0be01c6a6eff90d777b44e95f96dba580addd4528",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "4330b8cb9ac0865163dbe2c0be01c6a6eff90d777b44e95f96dba580addd4528"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "fffdd4c7a885574f67906616f3ca62ffc6fa5c4dcbf6e7a8c1a64fd1c15e17d6",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "39f77339b71c84d1e17e603c6bd18a1a8f1ed87d607225093995da25213286fa",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "39f77339b71c84d1e17e603c6bd18a1a8f1ed87d607225093995da25213286fa"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "89a40875716cdbb64bd7343c6a642ba439c1ed637e6f46d797aea25a2515168a",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "f78d63978a24c3bedcfa10673ef7efa75e112abb9e0d0a77eed3e18668ec9637",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "f78d63978a24c3bedcfa10673ef7efa75e112abb9e0d0a77eed3e18668ec9637"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "0705f6bf2fd99853049384dc020c9a0ee8e2007b3847718c88cb1224d67a249a",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "9cf0610f700c06fe61bfa604d215f7f2d9905f0ddec60e21ecc9df7906cd8d07",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "9cf0610f700c06fe61bfa604d215f7f2d9905f0ddec60e21ecc9df7906cd8d07"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "5b177aa164f7182f259d24fe6ee94ba84a6c6bfa9b555df6b453e99325ca892b",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c92286be48fc61c87c75db65ba66029adf6bc761a9bd7743c3f4de994d4686ba",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c92286be48fc61c87c75db65ba66029adf6bc761a9bd7743c3f4de994d4686ba"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "2ac86d7d9a91703b87258ba775b01abd1e61421cf0aff0952f46854c7c31d068",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "9238d8bdee4abb102b4937e19e4508f98727b41185a5abc70466a60573b2520f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "9238d8bdee4abb102b4937e19e4508f98727b41185a5abc70466a60573b2520f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "e639c0fe56e4d2270134ef4062a1632d020755abb0064ef0e3c9c8b00a4d9eff",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "caada0f51cab908a95043c3cd989fe870369945c64fdeb5ae7128a6219068746",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "caada0f51cab908a95043c3cd989fe870369945c64fdeb5ae7128a6219068746"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "ea1be2d6488be65fac642a7958e374b038e662a8a70b2c10037ff6a8a34fcce1",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "63a475a6b816b05331b67ec8782f9fd00e758eb84c2509b58b561f623a8bf06f",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "63a475a6b816b05331b67ec8782f9fd00e758eb84c2509b58b561f623a8bf06f"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "7aec17f0fda2773683e76bd5c687c15c10f7e53ffb6eb101c1d84e0079fc9f69",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "fc49d2e3cabb9ec1b9c9ee2153fc70eb642905f85d92218286be036276ce13c3",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "fc49d2e3cabb9ec1b9c9ee2153fc70eb642905f85d92218286be036276ce13c3"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "5fd7c730dff3f8c33504961f27f124462d226823629795f4188892ff3756d225",
+      "source_span": {
+        "start": 9,
+        "end": 12,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "1a2b2bb3e54b357cc34580de91950cfc2319a7e8338932c4784efe0d46d25dd0",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "1a2b2bb3e54b357cc34580de91950cfc2319a7e8338932c4784efe0d46d25dd0"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "33d8cd8c237e3ae54de472a6b4d1f76c25bd621c5e9869139465977ae5fbc006",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "d1cd1d7ef87b4ff66612073de36ad598616006bc3df7b2ad36f4d1d27ffa0a79",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "d1cd1d7ef87b4ff66612073de36ad598616006bc3df7b2ad36f4d1d27ffa0a79"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "7844e0ae45f261b0c66d7fb48b830607180259e1e5360505964d03f4d849eec0",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ad4c59980c4a5dce63302890c1ae080b76800898fee95e15daac157eb51da3f1",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ad4c59980c4a5dce63302890c1ae080b76800898fee95e15daac157eb51da3f1"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c0e8f5417349ddf6baeafe0ebbe62a4f3533af1e632c395ba097c0e356989a88",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "1a4c049b62b6ce4c0148235cdf2b549fc83fa5676002c6a5fc740a2f0aaa9348",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "1a4c049b62b6ce4c0148235cdf2b549fc83fa5676002c6a5fc740a2f0aaa9348"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a210082e242f29b0eb45d3be4478fae948701858e0d531118a400ddb4e091f90",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ad09e6ac6f084693e35be7a28c56c012fc9f9850a7693d7f8465146477046a3e",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ad09e6ac6f084693e35be7a28c56c012fc9f9850a7693d7f8465146477046a3e"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "ca72fe75537187d349edac514b337287487f1a7ad4a7d0c2a6288e6fab97b599",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "7687599c83b37249888b46b9b2cc0dec5bcc8d9cacb9e7e27cf1608ed5ef04e5",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "7687599c83b37249888b46b9b2cc0dec5bcc8d9cacb9e7e27cf1608ed5ef04e5"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "dea39ee84579842d67ebcc05353364717705efda2532ca60c995c31e1f9c171d",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "c54d4ceda67bb6e954d3a7bcb8d790c172f763253d3ca96b5413f5d53d1a50a8",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "c54d4ceda67bb6e954d3a7bcb8d790c172f763253d3ca96b5413f5d53d1a50a8"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "4aec9fa42f4fec73aeb7afabae5520d47de50fd38bb8d90ebf237d4762ef2aa7",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "b60390a8d700ec5d1ec362f9d8849f1a56a3099587553a019bca03989a6f7b2a",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "b60390a8d700ec5d1ec362f9d8849f1a56a3099587553a019bca03989a6f7b2a"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "278fab8eea6abd37a32c1e9274aa246ab55bfdf97bba97d6b257c854bdc03cac",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "97aadb9e4f95d654c210c2da6d806ee7b32324663a9e72651999171fcc5b5a89",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "97aadb9e4f95d654c210c2da6d806ee7b32324663a9e72651999171fcc5b5a89"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "3ed0bf33a71b5e0f31efa084e79a61e98ad730d37b0af4ac882be67c416719d2",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "1ca3977a382ae6a36f0ddd5fe1d3335b5e37ebb29cbe38c8e9fb19163381f4d4",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "1ca3977a382ae6a36f0ddd5fe1d3335b5e37ebb29cbe38c8e9fb19163381f4d4"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "78474b6d9cd7b84243020113f60d20a8dc7abf9d1b35e6adf31dbe7b5ec22101",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "f4b131d5849be2a79a9bcccf8fc5fc4755d71a045272e6af9d6ee9ea5fc6eb3d",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "f4b131d5849be2a79a9bcccf8fc5fc4755d71a045272e6af9d6ee9ea5fc6eb3d"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "127cb2f6125b588b82221ebbca4c1ab22eb668e24377733085fca0e6aa252218",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "14716b5e4144a3cc4ec0a19a5a140fdfe5105183b32ebdc53e96a68dbde27bcd",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "14716b5e4144a3cc4ec0a19a5a140fdfe5105183b32ebdc53e96a68dbde27bcd"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "74d036bdb85a206d5e6cf177cfbb32dcc16a01fd74e2d1aa00fc787ad9d80716",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "b4416ef864a3f58c48a7c452be8620820337048a92ee11e301259c91731940ac",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "b4416ef864a3f58c48a7c452be8620820337048a92ee11e301259c91731940ac"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "4cd1b564ec5d609be8830e7a2c42ddde500945cfeccd80fd87f017bf4b2819f3",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "cb6d1d9ceb71d6a991a5c619180b281a27f66f3172d6bbef769058b104ef5ea0",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "cb6d1d9ceb71d6a991a5c619180b281a27f66f3172d6bbef769058b104ef5ea0"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "104f8b111f2b31424852335cab345aad85df6681f003ad13a2bd233273d6740e",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "6f7e6d7bbb6a0bb910db2b4fb6fc8ae2daf397a78d84fbaed07b5d891c4adc08",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "6f7e6d7bbb6a0bb910db2b4fb6fc8ae2daf397a78d84fbaed07b5d891c4adc08"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "c272f03896f5e3bc451672eace25cccbcbe7e810577ea0ae1e9c79d5d38b81d2",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "2a48c3d9d6ab8962a381e1cddb7d489c2ddd9cdc0fc3280ee9def4c60e3e50f3",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "2a48c3d9d6ab8962a381e1cddb7d489c2ddd9cdc0fc3280ee9def4c60e3e50f3"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "54e8dbb83cd42d6441b9a46aea355df62c15da047ebdba18665d0e719030142b",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "917ccd06b022245fcb9281053dda33c8b3a310608f2a9848397dcb56ca56de37",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "917ccd06b022245fcb9281053dda33c8b3a310608f2a9848397dcb56ca56de37"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "29d44d1a55b9d866717ea8dd64782928dff04e07d22b88d08beec33432a54903",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "02c462762d5c8481ad36db0bb78e5eae7d9f336ddd760c3ffaa5c7179fed6cd8",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "02c462762d5c8481ad36db0bb78e5eae7d9f336ddd760c3ffaa5c7179fed6cd8"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "a00c93b4a6ea4498439758fef93f1efb5c81088ff30517022451095d48f4afcb",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "83ca9623681dc53b597fad47e6eea30ce2958ad43511f8bff536051a27443075",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "83ca9623681dc53b597fad47e6eea30ce2958ad43511f8bff536051a27443075"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "8da4f4223727dc9ff67dc3d88f5212edfa9a60eaeeb6a223a7aae09764745f49",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ff2bc1065470cf5581c370ae71b80d31223e88a2ecc6b30665c8e474ba105b32",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ff2bc1065470cf5581c370ae71b80d31223e88a2ecc6b30665c8e474ba105b32"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "5cc1377536f2e939a58f7eec15a04d64da461ee28ea4fe4f36da0f851c317c21",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "2aa11658bb58c84fd263721ab1037d8d2a0228decacd0e76a755041de67db1bf",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "2aa11658bb58c84fd263721ab1037d8d2a0228decacd0e76a755041de67db1bf"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "00563f299b1ce7e68e9e794415a36fb995c2a33b42fc7555633ba54f00e09999",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "2b0c38e9ece3fb4f54bca183549637eb1cafe2be3b8c93e6d464caa67fc60bb9",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "2b0c38e9ece3fb4f54bca183549637eb1cafe2be3b8c93e6d464caa67fc60bb9"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "167049ae68dd6f1149e02ba5ddddf6bf3782cabdc258bd0e8b2e3156a031531b",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "6a8b1c28dc7ea025415e16c8ee23c411a10b250147d01cfc504c43e21e637afb",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "6a8b1c28dc7ea025415e16c8ee23c411a10b250147d01cfc504c43e21e637afb"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "7d108c3987444d203720e5de98c3857fddfa51e9467351d82ecd86c0eb4be3e3",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "8c6414237de948dc441aeda22e7743e4d5afb140d982bc510ec8e6917ae7687d",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "8c6414237de948dc441aeda22e7743e4d5afb140d982bc510ec8e6917ae7687d"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "9a3e90b45741bcedea8247b93d3fca10caecd9c8c067a3d139a58e4daf62ae71",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "3a1f8df7382b60267ee513d2da595c09a2070553bc12fe31c14d30f5a8f6d125",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "3a1f8df7382b60267ee513d2da595c09a2070553bc12fe31c14d30f5a8f6d125"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "84ec39c69e7e77a8218444d0e88d68d5806c9705b4c33a3e9f464431814155bf",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "17d074c04efb4dac080ff3189b3712432ad1264b3d5df39c6201edd72c82a8f3",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "17d074c04efb4dac080ff3189b3712432ad1264b3d5df39c6201edd72c82a8f3"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "0df44b7648d60ad7f7c13e61c7a068589cd9fe0d8ea03d22b32a7cb3818591d4",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "ff2f4abb42c38ed25b8144de89aa4baf3bf12f59844442b57168afff24284255",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "ff2f4abb42c38ed25b8144de89aa4baf3bf12f59844442b57168afff24284255"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "24b4c4bab862f5fe36874a1c0203974c0fa7665065e952efd0a3635879ea8c88",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "8715f5fb3b2f04b2cb6b195511a2609894146254ef8f36bf1c757530a1b7dc37",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "8715f5fb3b2f04b2cb6b195511a2609894146254ef8f36bf1c757530a1b7dc37"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    },
+    {
+      "source_hash": "b702254488f33122d90c721a435e3996ae74f4d57d8a712012980c4e390e1da6",
+      "source_span": {
+        "start": 10,
+        "end": 13,
+        "text": "示例名"
+      },
+      "choice": "official_pair",
+      "candidate": {
+        "candidate_id": "46734905f143cd6d0a9b53b8e2b4ebab4449c2336676996928bc618b3d6bb30a",
+        "zh": "示例名",
+        "en": "Sample Name",
+        "category": "character"
+      },
+      "offered": [
+        "46734905f143cd6d0a9b53b8e2b4ebab4449c2336676996928bc618b3d6bb30a"
+      ],
+      "basis": {
+        "rule_version": "review-v2",
+        "dictionary": {
+          "schema_version": "2",
+          "source_commit": "synthetic-commit-previous",
+          "term_count": 1187,
+          "revision": "fe1d3a3cfe23726df849c093df99d0be163917d573c2d7ea34a9f4da79b27338"
+        },
+        "matcher_revision": "26718f43e568dc9646aef09e4552b8fc960b7ba3f2e6204615a9b6dd50986a31"
+      }
+    }
+  ],
+  "progress": {
+    "current": 0,
+    "completed": [
+      1
+    ]
+  }
+}
