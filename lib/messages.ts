@@ -162,7 +162,7 @@ const zh = {
   failure: {
     causeTimeout: '原因：等待上游服务超时。',
     causeUnavailable: '原因：上游服务暂不可用。',
-    adviceTranslation: '可以稍后重试；较长的文本请按段翻译（在审校工作台逐段翻译）。',
+    adviceTranslation: '可以稍后重试；文本较长时，可以拆成几段较短的文本，在“整句翻译”中分别翻译。',
     adviceReview: '可以稍后重试。',
     wait: '服务要求等待约 {n} 秒后再发送。',
     requestId: '请求编号：{id}',
@@ -744,7 +744,7 @@ const en: typeof zh = {
   failure: {
     causeTimeout: 'Cause: the upstream service timed out.',
     causeUnavailable: 'Cause: the upstream service is unavailable.',
-    adviceTranslation: 'You can retry later; translate a long text segment by segment (in the review workbench).',
+    adviceTranslation: 'You can retry later; for a long text, split it into shorter parts and translate each in “Sentence translation”.',
     adviceReview: 'You can retry later.',
     wait: 'The service asks to wait about {n} seconds before sending again.',
     requestId: 'Request id: {id}',

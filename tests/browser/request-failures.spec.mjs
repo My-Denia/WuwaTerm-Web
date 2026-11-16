@@ -20,7 +20,9 @@ test('a failed translation in the review workbench says what failed, what to do 
   }
   await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
   await expect(panel(page)).toContainText(M.failure.causeTimeout);
-  await expect(panel(page)).toContainText(M.failure.adviceTranslation);
+  // The advice names a path every user has: retry, or split the text and translate the parts in the translation card.
+  await expect(panel(page)).toContainText('可以稍后重试；文本较长时，可以拆成几段较短的文本，在“整句翻译”中分别翻译。');
+  await expect(panel(page)).not.toContainText('审校工作台逐段翻译');
   // The site timed out waiting, so no upstream request id exists to show.
   await expect(panel(page)).not.toContainText(requestIdLabel);
 });
