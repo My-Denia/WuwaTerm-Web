@@ -53,6 +53,14 @@ The Core requirements are the same as for 0.2.0: `review-v2` with the
 context. A saved segment result is reused only after one live review request shows that the
 Core's dictionary and matcher basis equal the saved basis.
 
+## Version 0.3.1 and translation failure advice
+
+Web 0.3.1 changes the advice shown when a translation fails. It used to tell you to translate
+a long text segment by segment in the review workbench, which only the experimental semantic
+workbench offers. It now says to retry later, or, for a long text, to split it into shorter
+parts and translate each in "Sentence translation". The cause, wait and request id lines are
+unchanged. Core requirements and manuscript formats are the same as for 0.3.0.
+
 ## Download the Linux x64 bundle
 
 The standalone release candidate contains the server, browser assets and
