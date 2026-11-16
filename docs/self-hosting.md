@@ -40,6 +40,19 @@ A v2 manuscript cannot be opened by Web 0.1.x or Windows 0.3.x, which reject the
 v1 manuscripts stay readable everywhere, and a v2 file is written only once the manuscript
 holds a semantic decision or history.
 
+## Version 0.3.0 and long manuscripts
+
+Web 0.3.0 resumes the review of a long manuscript from its file. A manuscript with either
+side over 2,000 characters is checked one segment at a time; its per-segment term results,
+your term choices per segment and the current position are saved as `wuwaterm-manuscript-v3`
+([specification](../contracts/manuscript-v3/SPEC.md)). A manuscript without that state still
+saves as v1 or v2 exactly as before, and 0.3.0 reads v1, v2 and v3. Web 0.2.0 and
+Windows 0.4.2 reject v3 files, so a v3 file needs 0.3.0 or a Windows release that reads v3.
+The Core requirements are the same as for 0.2.0: `review-v2` with the
+`X-WuwaTerm-Matcher-Basis: 1` header, and `translation-context-v1` for translation with
+context. A saved segment result is reused only after one live review request shows that the
+Core's dictionary and matcher basis equal the saved basis.
+
 ## Download the Linux x64 bundle
 
 The standalone release candidate contains the server, browser assets and
