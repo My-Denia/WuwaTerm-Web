@@ -12,20 +12,39 @@ pins a Web commit independently. A passing pair proves compatibility for those
 two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
-Current pins: `contracts/windows-ref.txt` is `e8880eb27b6117ff30d3bf134022303fe5f1a441`
-(WuwaTerm-Windows PR #20, the target-only-edit rule on top of PR #19, which reads and writes
-`wuwaterm-manuscript-v3`; raised from `9010190cd8dfbbb75c241a4caf21bacabc10826c`, PR #3,
-v2). The Web and Windows manuscript contract test exchanges v2 and v3 files in both
-directions: every valid `contracts/manuscript-v2/` and `contracts/manuscript-v3/` fixture is
-read alike by both and written back to its canonical bytes, every invalid fixture is
-rejected by both with its code, the explicit-alignments fixture gets the same alignment
-input digests, and a long manuscript with choices, a target-only edit and progress, built
-by each client's own runtime, gives the same v3 bytes and is kept unchanged by the other.
-`contracts/backend-ref.txt`
-is `d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core PR #199, the semantic review engine:
-semantic review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
-`translation-context-v1` is always listed when a model is configured). It was raised from
-`7122ea7cb41e5987aac80b23fc27bd071fcfa22b` (Core PR #198, the contracts) by Web PR #16.
+Current pins: `contracts/backend-ref.txt` is
+`9a4f680f3ec3909e23afc2394f2c7eccf00af6e3` (Core PR #279: the MY-355 attribution fixes, the
+MY-356 `dense-128`/`reason-v1` review-v2 features with the 64 KiB review body, and the
+MY-359 regroup guard). It was raised from `d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core
+PR #199, the semantic review engine: semantic review is experimental and off unless
+`WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and `translation-context-v1` is always listed when a
+model is configured), which was raised from `7122ea7cb41e5987aac80b23fc27bd071fcfa22b`
+(Core PR #198, the contracts) by Web PR #16.
+`contracts/windows-ref.txt` is `eaceb8bbe847f4db14f227dea274261fa2dc5784`
+(WuwaTerm-Windows PR #30, the 0.6.0 release that reads and writes
+`wuwaterm-manuscript-v4`; raised from `e8880eb27b6117ff30d3bf134022303fe5f1a441`, PR #20, v3
+only).
+
+The Web and Windows manuscript contract test exchanges manuscripts in every format in both
+directions: the Unicode v1 case, every valid `contracts/manuscript-v2/`,
+`contracts/manuscript-v3/` and `contracts/manuscript-v4/` fixture, is read alike by both and
+written back to its canonical bytes, every invalid fixture is rejected by both with its
+code, the explicit-alignments fixture gets the same alignment input digests, and a long
+manuscript with choices, a target-only edit and progress, built by each client's own
+runtime, gives the same v3 bytes and is kept unchanged by the other. The v4 cases carry no
+transitional expectation: the pinned consumer reads, writes and rejects the same files as
+the Web, in both directions.
+
+The dense review contract runs against a live Core checkout, not a recorded body: the
+contract suite starts that checkout's own application object on a loopback socket and sends a
+`/api/reviews` request through the real parser and BFF, once with
+`X-WuwaTerm-Review-Features: dense-128,reason-v1` and once without it, including a body
+above 32 KiB. Web CI passes `contracts/backend-ref.txt` as that checkout and Core CI's
+`API to Web contract` job passes the Core pull request's own commit, so the same suite proves
+the pinned pair and a candidate Core before it merges. Both features are a consumer-side
+opt-in: the BFF forwards the header only when the browser sent it, and the BFF's validator
+accepts the 32-finding answer, so the Web works against a Core with them and against one
+without.
 
 The meta contract sends actual Python API response bodies through the real BFF.
 The label contract compares the Python category/reason keys and existing Windows
@@ -41,8 +60,8 @@ only while the paired versions remain compatible. Do not assume these two cases
 have the same deployment order.
 
 Keep the `/v1` API path, report `rule_version`, dictionary `schema_version`,
-opt-in `matcher_revision` hash and the `wuwaterm-manuscript-v1`, `-v2` and `-v3`
-formats distinct.
+opt-in `matcher_revision` hash and the `wuwaterm-manuscript-v1`, `-v2`, `-v3` and
+`-v4` formats distinct.
 The matcher hash is requested with `X-WuwaTerm-Matcher-Basis: 1`; it is not
 a report field named `matcher_basis`. Their actual validators and fixtures are the
 contracts. A document-mode import (v1 choices and history, v2 semantic data) is not
@@ -51,8 +70,9 @@ its content hashes, request inputs and all six basis values equal the current on
 where the current basis comes from a live review-v2 request
 ([contract](../contracts/manuscript-v3/SPEC.md)).
 
-Web 0.2.0 and Windows 0.4.2 reject v3 files. Cross-client v3 interchange is verified
-against the Windows client pinned in `contracts/windows-ref.txt`.
+Web 0.2.0 and Windows 0.4.2 reject v3 files; Web 0.3.1 and Windows 0.5.1 reject v4
+files. Cross-client v3 and v4 interchange is verified against the Windows client pinned
+in `contracts/windows-ref.txt`.
 
 ## Deployment receipt
 

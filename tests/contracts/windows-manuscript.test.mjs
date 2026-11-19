@@ -383,11 +383,8 @@ test('every valid v3 fixture is read alike by Web and Windows, and both write ba
   }
 });
 
-// The Windows pin that still reads v3 only. invalid-v3-format-v4.json is the v3 contract's "unknown format version" case, and a valid
-// v4 payload: the v4-capable Web reader accepts it, and a Windows consumer reads it as soon as the pin moves to one that implements v4
-// (contracts/manuscript-v4). Until then the pinned consumer keeps rejecting it with the v3 code.
-const V3_ONLY_WINDOWS_PIN = 'e8880eb27b6117ff30d3bf134022303fe5f1a441';
-const windowsPin = readFileSync(fileURLToPath(new URL('../../contracts/windows-ref.txt', import.meta.url)), 'utf8').trim();
+// invalid-v3-format-v4.json is the v3 contract's "unknown format version" case and a valid v4 payload, so the v3 reader gives its
+// code while the v4-capable Web parser and the pinned Windows consumer both accept it.
 const READ_AS_V4 = new Set(['invalid-v3-format-v4.json']);
 
 test('both consumers reject every invalid v3 fixture with its code, including 129 decisions in the v2 part', () => {
@@ -398,8 +395,7 @@ test('both consumers reject every invalid v3 fixture with its code, including 12
     if (READ_AS_V4.has(c.file)) {
       assert.equal(parseWorkfile(content).format, 'wuwaterm-manuscript-v4', `${c.file}: Web reads it as v4`);
       const fromWindows = windows({ operation: 'parse', content });
-      if (windowsPin === V3_ONLY_WINDOWS_PIN) assert.equal(fromWindows.error, c.error, `${c.file}: the v3-only Windows pin`);
-      else assert.ok(fromWindows.result, `${c.file}: Windows at ${windowsPin} must read v4 (${fromWindows.error})`);
+      assert.ok(fromWindows.result, `${c.file}: Windows rejected a valid v4 payload (${fromWindows.error})`);
       continue;
     }
     let web = null;
@@ -509,39 +505,33 @@ test('a long manuscript with choices, a target-only edit and progress: Web and W
   assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, web.content);
 });
 
-// ---- Manuscript v4: transitional while the pin is a Windows that implements v3 only -----------------------------------------------
+// ---- Manuscript v4: both consumers read, write and reject it alike -----------------------------------------------------------
 
 const v4Dir = fileURLToPath(new URL('../../contracts/manuscript-v4/', import.meta.url));
 const v4Cases = JSON.parse(readFileSync(join(v4Dir, 'cases.json'), 'utf8'));
 const readV4 = file => readFileSync(join(v4Dir, file), 'utf8');
 const contentOfV4 = c => (c.pad_to_bytes ? readV4(c.file) + ' '.repeat(c.pad_to_bytes - Buffer.byteLength(readV4(c.file), 'utf8')) : readV4(c.file));
-const windowsReadsV4 = windowsPin !== V3_ONLY_WINDOWS_PIN;
 
-test('every valid v4 fixture: Web reads it and writes its canonical bytes; Windows gives it its legacy code until the pin implements v4, then reads and writes it alike', () => {
+test('every valid v4 fixture: Web and Windows read it alike and write its canonical bytes', () => {
   for (const c of v4Cases.valid) {
     const content = contentOfV4(c);
     const web = parseWorkfile(content);
     assert.equal(serializeWorkfile(web), readV4(c.canonical), `${c.file}: Web bytes`);
     const fromWindows = windows({ operation: 'parse', content });
-    if (windowsReadsV4 || c.legacy_error === null) {
-      assert.ok(fromWindows.result, `${c.file}: Windows rejected it (${fromWindows.error})`);
-      assert.deepEqual(fromWindows.result, web, `${c.file}: Windows parse differs from Web parse`);
-      assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, readV4(c.canonical), `${c.file}: Windows bytes`);
-    } else {
-      assert.equal(fromWindows.error, c.legacy_error, `${c.file}: the v3-only Windows pin`);
-    }
+    assert.ok(fromWindows.result, `${c.file}: Windows rejected it (${fromWindows.error})`);
+    assert.deepEqual(fromWindows.result, web, `${c.file}: Windows parse differs from Web parse`);
+    assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, readV4(c.canonical), `${c.file}: Windows bytes`);
   }
 });
 
-test('every invalid v4 fixture: Web gives its code; Windows gives its legacy code until the pin implements v4, then the same code', () => {
+test('every invalid v4 fixture: Web and Windows give its code', () => {
   const differing = [];
   for (const c of v4Cases.invalid) {
     const content = contentOfV4(c);
     let web = null;
     try { parseWorkfile(content); } catch (cause) { web = cause.code; }
     const fromWindows = windows({ operation: 'parse', content }).error ?? null;
-    const expected = windowsReadsV4 ? c.error : c.legacy_error;
-    if (web !== c.error || fromWindows !== expected) differing.push(`${c.file}: expected ${c.error} (Windows ${expected}), Web ${web}, Windows ${fromWindows}`);
+    if (web !== c.error || fromWindows !== c.error) differing.push(`${c.file}: expected ${c.error}, Web ${web}, Windows ${fromWindows}`);
   }
   assert.deepEqual(differing, []);
 });

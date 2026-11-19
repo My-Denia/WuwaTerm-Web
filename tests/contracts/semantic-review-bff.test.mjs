@@ -5,9 +5,9 @@ import test from 'node:test';
 import { parseSemanticReviewRequest, proxySemanticReviewRequest } from '../../lib/wuwaterm-proxy.js';
 import { SEMANTIC_WIRE_KEYS } from '../../lib/semantic-review.js';
 import { createPool, fixtureEnvironment } from '../helpers/pool-fixture.mjs';
+import { requireBackendCheckout } from './backend-source.mjs';
 
-const root = process.env.WUWATERM_BACKEND_ROOT;
-assert.ok(root, 'Set WUWATERM_BACKEND_ROOT to the pinned backend checkout');
+const root = requireBackendCheckout();
 const dir = join(root, 'contracts', 'semantic-review-v1');
 const cases = JSON.parse(readFileSync(join(dir, 'cases.json'), 'utf8')).cases;
 const bytes = name => readFileSync(join(dir, name));

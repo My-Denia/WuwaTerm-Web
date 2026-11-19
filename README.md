@@ -57,7 +57,12 @@ cd /path/to/backend
 WUWATERM_WEB_ROOT=/path/to/web python -m pytest -m cross_component tests/test_meta_site_contract.py
 ```
 
-The backend checkout needs its documented Python development dependencies.
+The backend checkout needs its documented Python development dependencies. The
+contract job also starts that checkout's own `POST /v1/reviews` on a loopback
+socket and sends `dense-128`/`reason-v1` requests through this repository's BFF,
+including one body above 32 KiB, so it needs an interpreter that can import the
+backend; the suite takes the checkout's `.venv` or `python3`, and
+`WUWATERM_CORE_PYTHON` names another one.
 Changes to strict response shapes require coordinated consumer/producer PRs;
 adding a `/v1` field is not automatically compatible with the strict BFF.
 See [cross-repository delivery](docs/cross-repository-delivery.md).

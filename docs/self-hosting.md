@@ -61,6 +61,29 @@ workbench offers. It now says to retry later, or, for a long text, to split it i
 parts and translate each in "Sentence translation". The cause, wait and request id lines are
 unchanged. Core requirements and manuscript formats are the same as for 0.3.0.
 
+## Version 0.4.0 and dense reviews with reasons
+
+Web 0.4.0 reads and writes `wuwaterm-manuscript-v4`
+([specification](../contracts/manuscript-v4/SPEC.md)): up to 128 findings, term choices and
+resolutions in one answer and in a saved file, and one of five reasons on a `not_evaluated`
+finding. The workbench asks a Core for those answers with
+`X-WuwaTerm-Review-Features: dense-128,reason-v1` on every review-v2 request, and
+`/api/reviews` accepts up to 65,536 bytes (every other endpoint keeps 32,768) so a dense
+request fits. The features are a client-side opt-in: the BFF forwards the header only when
+the browser sent it, and a Core that does not implement them answers with at most 32
+findings and no reason, which 0.4.0 still reads. Core requirements are otherwise the same
+as for 0.3.0.
+
+A long manuscript's term list now groups every segment's findings by term and lets one place
+be handled on its own: adopt the official pair, mark it not a term, confirm it again, replace
+only that occurrence with a candidate, or open an editor for that one segment's translation.
+Segments that were not paired automatically are counted above the segment list, with a jump
+to the first one that needs a manual split.
+
+Windows 0.6.0 reads and writes v4. Windows 0.5.1 and Web 0.3.1 reject a v4 file with an
+explicit error and keep the manuscript they already have open. A manuscript that fits v1, v2
+or v3 is still written in that format, so old clients keep reading it.
+
 ## Download the Linux x64 bundle
 
 The standalone release candidate contains the server, browser assets and
@@ -126,6 +149,55 @@ source commit and tree, build
 Node version, platform, prefix and CI run. The export excludes the Sites hosting
 binding and environment files. The workflow creates no Git tag or
 GitHub Release; an Actions artifact is a candidate and may expire.
+
+### Publish a self-host release
+
+Publication promotes candidates; it never rebuilds. Run **Self-host release candidate**
+twice for the same `main` commit and tag, once for the root build and once for the prefix
+build:
+
+```sh
+sha=$(git rev-parse origin/main)
+gh workflow run selfhost-release-build.yml --ref main \
+  -f source_sha="$sha" -f tag=v0.4.0 -f base_path=
+gh workflow run selfhost-release-build.yml --ref main \
+  -f source_sha="$sha" -f tag=v0.4.0 -f base_path=/private
+```
+
+Dispatch both while `main` is still at that commit: the provenance job requires
+`source_sha` to equal the run's own `main` SHA and a successful main-push Web CI run for
+it. `tag` must be `v` plus the `version` in `package.json` (`v0.4.0` for this release).
+When both runs finish, note each run id, run attempt and artifact id:
+
+```sh
+gh api repos/My-Denia/WuwaTerm-Web/actions/runs/<run-id>/artifacts \
+  --jq '.artifacts[] | "\(.id) \(.name) \(.expired)"'
+```
+
+Then run **Self-host release publication** in `validate` mode. It downloads both
+artifacts, re-checks the manifest, archive digest, checksums and source identity, and
+creates nothing; it also reports whether the tag already points at the source:
+
+```sh
+gh workflow run selfhost-release-publish.yml --ref main \
+  -f mode=validate -f source_sha="$sha" -f tag=v0.4.0 \
+  -f root_run_id=<root run id> -f root_attempt=<root attempt> \
+  -f root_artifact_id=<root artifact id> \
+  -f prefix_run_id=<prefix run id> -f prefix_attempt=<prefix attempt> \
+  -f prefix_artifact_id=<prefix artifact id> -f prefix_path=/private
+```
+
+Create the tag at that exact commit, as for earlier releases:
+
+```sh
+git tag v0.4.0 "$sha"
+git push origin v0.4.0
+```
+
+Run the same dispatch again with `mode=publish` and identical values. Publication creates
+the GitHub Release with the six verified assets (`manifest-root.json`, `SHA256SUMS-root`,
+`manifest-prefix.json`, `SHA256SUMS-prefix` and both archives). A run interrupted after
+the draft exists resumes against that draft; a published release is never overwritten.
 
 Create a private environment file outside the repository with permissions that
 allow only the service account to read it. Replace every placeholder; use the
