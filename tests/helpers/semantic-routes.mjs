@@ -35,13 +35,14 @@ export const busy = () => failure(429, 'shared_pool_busy', { retry_after_seconds
  *  reviewHold / translateHold: { [callNumber]: Promise } holding that call open until it settles
  *  matcherRevision: the review-v2 matcher_revision the term reviews return (rec.matcherRevision can change it later)
  *  reviewTruncated: (body, callNumber) => boolean; true marks that term review response truncated (Core's finding cap)
+ *  reviewReport: (body, callNumber) => report | undefined   replaces the default term review answer
  * Returned recorder: semantic / translations / reviews (request bodies), maxInflight,
  * gate(n) -> {release} holding semantic call n open until released.
  */
 export async function installRoutes(page, options = {}) {
   const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate, translateFailures = {}, translateHold = {}, reviewFailures = {}, reviewHold = {},
-    matcherRevision = FRESH_MATCHER_REVISION, reviewTruncated = () => false } = options;
-  const rec = { semantic: [], translations: [], reviews: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map(), matcherRevision };
+    matcherRevision = FRESH_MATCHER_REVISION, reviewTruncated = () => false, reviewReport } = options;
+  const rec = { semantic: [], translations: [], reviews: [], reviewHeaders: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map(), matcherRevision };
   rec.gate = n => {
     let release;
     const held = new Promise(resolve => { release = resolve; });
@@ -74,10 +75,13 @@ export async function installRoutes(page, options = {}) {
     if (path === '/api/reviews') {
       const body = route.request().postDataJSON();
       rec.reviews.push(body);
+      rec.reviewHeaders.push(route.request().headers());
       const n = rec.reviews.length;
       if (reviewHold[n]) await reviewHold[n];
       const failed = reviewFailures[n];
       if (failed) return route.fulfill({ status: failed.status, json: failed.body });
+      const custom = reviewReport ? reviewReport(body, n) : undefined;
+      if (custom) return route.fulfill({ json: custom });
       const report = { ...freshApiReport(fixture(body.source, body.target, body.direction).report), matcher_revision: rec.matcherRevision };
       return route.fulfill({ json: reviewTruncated(body, n) ? { ...report, truncated: true } : report });
     }

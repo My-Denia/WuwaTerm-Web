@@ -67,12 +67,13 @@ separate surfaces and are unchanged by public Site access.
 
 The review workbench saves a user-initiated JSON file in the lowest manuscript
 format that holds the work: `wuwaterm-manuscript-v1`, `wuwaterm-manuscript-v2`
-once it holds semantic decisions or history, or `wuwaterm-manuscript-v3` once it
-holds long-manuscript segment state (below). It reads all three.
-It contains source, target, direction, up to 32 occurrence-specific decisions,
-their dictionary/rule/candidate basis, explicit scalar correspondences and the
-last two reports. Import is local and bounded to 1 MiB (44 MiB for v3); it never
-sends a request.
+once it holds semantic decisions or history, `wuwaterm-manuscript-v3` once it
+holds long-manuscript segment state (below), or `wuwaterm-manuscript-v4` once a
+list is over 32 items or a finding carries a `reason` (below). It reads all four.
+It contains source, target, direction, up to 32 occurrence-specific decisions (128
+in v4), their dictionary/rule/candidate basis, explicit scalar correspondences and
+the last two reports. Import is local and bounded to 1 MiB (44 MiB for v3 and v4);
+it never sends a request.
 Undoing an import restores the prior manuscript and its historical reports; it still requires an explicit fresh check.
 There are no accounts, cloud manuscripts, automatic uploads or browser-storage
 history. The user must download and later import the file to resume. The page
@@ -85,7 +86,7 @@ manuscript, decisions and reports. A crash or forced quit can still discard the 
 
 The 2,000-character review request limit does not restrict manuscript storage:
 long translations can be saved and reopened intact within the file size cap
-(1 MiB for v1 and v2, 44 MiB for v3).
+(1 MiB for v1 and v2, 44 MiB for v3 and v4).
 A manuscript with either side over 2,000 scalars is in long mode: it is paired
 into segments with `segmentation-v1` (Core's rules and fixtures; at most 1,800
 scalars per side) and checked one segment at a time. The user's term choices are
@@ -118,6 +119,37 @@ choices and history and v2 semantic data are history until a fresh check.
 
 A result JSON or Markdown export is not a resumable manuscript and not a backup.
 Web 0.2.0 and Windows 0.4.2 reject v3 files with an explicit error.
+
+### Dense reviews in v4
+
+v1 to v3 cap every list of findings, choices and resolutions at 32. A client can ask
+for more with the request header `X-WuwaTerm-Review-Features`: `dense-128` raises
+the findings of one answer and the resolutions of one request to 128, and
+`reason-v1` lets a `not_evaluated` finding say why (`not_a_term`, `ordinary_word`,
+`no_target_region`, `found_outside_region`, `ambiguous_repeat`). The workbench
+sends both on every review-v2 request, and only there. The BFF forwards the
+header only when the client sent it (an unknown or repeated token, or a token on a
+review-v1 request, is `site_invalid_request`), accepts up to 64 KiB for
+`/api/reviews` (32 KiB everywhere else) and keeps 32 findings, 32 resolutions and
+seven keys for a client that did not ask. A service that does not know the
+features answers in the old shape, which is still read.
+
+A manuscript that holds more than that, or a reason, is written as
+`wuwaterm-manuscript-v4` ([specification](../contracts/manuscript-v4/SPEC.md)); one
+that does not keeps v1, v2 or v3. Web 0.3.1 and the Windows release that pins the
+v3 contract reject v4 files with an explicit error.
+
+### Term groups
+
+In long mode the term list groups every segment's findings by term: how many
+places, which segments, the translation actually used at each place (for example
+`Camellya ×2`, no hit ×1) and a status (inconsistent or in conflict, to do, not
+evaluated, confirmed). Each place shows its context and can adopt an official pair,
+be marked not a term, be confirmed again, have only that place replaced with a
+candidate, or, when the translation has no hit there, open an editor for that one
+segment's translation; each is one undo step. Segments that could not be paired
+automatically are counted in a banner above the segment list, with a jump to the
+first one that needs a manual split.
 
 ## Semantic review workbench
 
@@ -317,7 +349,7 @@ sends no translation, review or meta request. Browser tests check that the
 language choice is the only cookie and that exercised workbench state is not
 written to browser storage. The client-secret scan checks emitted artifacts.
 
-Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`, `-v2` or `-v3`,
+Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`, `-v2`, `-v3` or `-v4`,
 the lowest that holds the work), the result JSON (`wuwaterm-result-v2`), the translation TXT, and a readable
 Markdown snapshot of the full report (`wuwaterm-report.md`). The Markdown is
 generated from the current workbench state without requests and without

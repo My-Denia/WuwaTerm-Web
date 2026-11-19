@@ -872,6 +872,8 @@ export function SemanticWorkbench(props: Props) {
   const orderedFlat = termView === 'segments'
     ? filteredGroups.flatMap(g => g.occurrences).sort((a, b) => a.segmentIndex - b.segmentIndex || a.docSource.start - b.docSource.start).slice(0, selectedSegment === null ? LONG_ROWS : undefined)
     : [];
+  // Ready segments without a result (never checked, or edited since): their terms are not in the groups.
+  const uncheckedSegments = ready.filter(v => v.record?.state === 'pending').length;
   const truncatedRows = termRows.filter(r => r.report.truncated && (selectedSegment === null || r.index === selectedSegment));
   const longChoices = long ? views.flatMap((v, index) => (v.record?.choices ?? []).map(c => ({ index, view: v, choice: c }))) : [];
 
@@ -952,7 +954,7 @@ export function SemanticWorkbench(props: Props) {
     return <article className="term-result long-term" key={occ.key} data-segment={occ.segmentIndex} data-mention-id={finding.id} data-term-state={occ.freshness} data-verdict={occ.verdict} data-attention={occ.attention}>
       <p className="result-summary"><span className={`verdict-badge verdict-${occ.verdict}`}>{(m.review.verdicts as Record<string, string>)[occ.verdict]}</span> · {fill(s.segmentLabel, { n: occ.segmentNumber })} · {finding.source_span.text}{occ.freshness !== 'current' ? ` · ${stateText}` : ''}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
       {occ.reason && <p className="finding-reason" data-reason={occ.reason}>{fill(m.review.reasonLabel, { reason: (m.review.reasons as Record<string, string>)[occ.reason] ?? occ.reason })}</p>}
-      <p className="occurrence-position">{fill(s.occurrencePosition, { n: occ.segmentNumber, start: occ.docSource.start + 1, end: occ.docSource.end })}</p>
+      <p className="occurrence-position">{fill(m.review.spanRange, { start: occ.docSource.start + 1, end: occ.docSource.end })}</p>
       <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><ContextLine context={occ.sourceContext} missing={s.sourceMissing} /></div>
       <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptTargetLabel}</span>
         {occ.targetContext ? <ContextLine context={occ.targetContext} missing={m.review.excerptMissingTarget} />
@@ -1004,8 +1006,9 @@ export function SemanticWorkbench(props: Props) {
       </div>
     </div>}
     {long && truncatedRows.map(r => <p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>)}
+    {long && termGroups.length > 0 && uncheckedSegments > 0 && <p className="track-note groups-unchecked" role="status">{fill(s.groupsUnchecked, { n: uncheckedSegments })}</p>}
     {long && termGroups.length > 0 && placeCount === 0 && <p className="track-note">{s.groupsNone}</p>}
-    {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} aria-label={g.surface}>
+    {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} data-group-surface={g.surface} aria-label={g.surface}>
       <header className="term-group-head">
         <h5 className="term-group-title"><span className="term-surface">{g.surface}</span>{g.surfaces.length > 1 && <span className="term-variants">（{g.surfaces.slice(1).join('、')}）</span>} <span className={`group-status group-status-${g.status}`}>{s.groupStatuses[g.status]}</span></h5>
         <p className="term-group-meta">{fill(s.groupHead, { n: g.occurrenceCount, segments: numberList(g.segments) })}</p>
