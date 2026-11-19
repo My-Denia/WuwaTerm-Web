@@ -12,6 +12,8 @@ const runButton = page => page.locator('.long-tools .long-terms button');
 const status = page => page.locator('.run-phase');
 const groups = page => page.locator('.term-group');
 const groupOf = (page, surface) => page.locator(`.term-group[data-group-surface="${surface}"]`);
+const filterButton = (page, id) => page.locator(`[data-group-filter="${id}"]`);
+const summary = page => page.locator('.group-filter-summary');
 const places = group => group.locator('article.long-term');
 const target = page => page.locator('#review-target');
 const open = (page, options = {}) => openWorkbench(page, { capabilities: [], reviewReport: termGroupReport, ...options });
@@ -42,8 +44,11 @@ test('the term view groups findings by term: places, segments, the translation u
     .toEqual([['椿', 'inconsistent'], ['声骸', 'not_evaluated'], ['今汐', 'confirmed']]);
   const camellya = groupOf(page, '椿');
   await expect(camellya.locator('.term-group-meta')).toHaveText(fill(S.groupHead, { n: 5, segments: '1、2、3' }));
-  // The translation used at each place: two Camellya and three places with no hit (not a term, an ordinary word, no target word).
-  await expect(camellya.locator('.term-group-renderings')).toHaveText(fill(S.groupRenderings, { items: `${S.renderingNone} ×3 · Camellya ×2` })); // the most used first
+  // The translation used at each place: two Camellya and one place with no hit, and the two places Core did not evaluate (an ordinary
+  // word, a homograph) counted apart: they are not a miss of the term.
+  await expect(camellya.locator('.term-group-renderings')).toHaveText(fill(S.groupRenderings, { items: `Camellya ×2 · ${S.renderingNone} ×1 · ${S.renderingNotEvaluated} ×2` }));
+  // The places of the group by state: one to check, two not evaluated, two checked.
+  await expect(camellya.locator('.term-group-tally')).toHaveText([fill(S.groupTallyPending, { n: 1 }), fill(S.groupTallyNotEvaluated, { n: 2 }), fill(S.groupTallyConfirmed, { n: 2 })].join(' · '));
   await expect(places(camellya)).toHaveCount(5);
   expect(await places(camellya).evaluateAll(list => list.map(el => el.getAttribute('data-segment')))).toEqual(['0', '1', '1', '2', '2']);
   // The reason of what Core did not evaluate, in words, and the three ways a place can have no translation.
@@ -51,25 +56,66 @@ test('the term view groups findings by term: places, segments, the translation u
   await expect(camellya.locator('.finding-reason[data-reason="not_a_term"]')).toHaveText(reason('not_a_term'));
   await expect(camellya.locator('.finding-reason[data-reason="ordinary_word"]')).toHaveText(reason('ordinary_word'));
   await expect(groupOf(page, '声骸').locator('.finding-reason[data-reason="no_target_region"]')).toHaveText(reason('no_target_region'));
-  await expect(camellya.locator('.occurrence-translation[data-hit="false"]')).toHaveCount(3);
+  // Only the place that was evaluated and has no hit says so; a place Core did not evaluate has no "no matching word" line.
+  await expect(camellya.locator('.occurrence-translation[data-hit="false"]')).toHaveCount(1);
+  await expect(page.locator('article.long-term[data-verdict="not_evaluated"] .occurrence-translation')).toHaveCount(0);
+  await expect(camellya.locator('article[data-verdict="needs_review"] .occurrence-translation')).toHaveText(S.occurrenceNoHit);
   // Context of the place: the hit marked, and for a place with no hit a sentence of that segment's translation, never a blank.
   const noHit = places(camellya).nth(1);
   await expect(noHit.locator('.excerpt-labeled').first().locator('mark')).toHaveText('椿');
   await expect(noHit.locator('.target-excerpt')).not.toBeEmpty();
   await expect(noHit.locator('.occurrence-translation')).toHaveText(S.occurrenceNoHit);
 
-  // The status filter, with its counts.
-  await page.locator('[data-group-filter="inconsistent"]').click();
-  await expect(groups(page)).toHaveCount(1);
+  // The status filter: each button counts the groups that hold a place of its kind, and what is shown is exactly that count.
+  const counts = { all: 3, inconsistent: 1, pending: 1, not_evaluated: 2, confirmed: 1 };
+  for (const [id, n] of Object.entries(counts)) {
+    await filterButton(page, id).click();
+    await expect(filterButton(page, id)).toHaveAttribute('data-group-count', String(n));
+    await expect(filterButton(page, id)).toHaveText(`${S.groupFilters[id]} ${n}`);
+    await expect(groups(page)).toHaveCount(n);
+  }
+  // 椿 has a place to check, so it is under "to do" with that place, though its status is inconsistent; the rest is one click away.
+  await filterButton(page, 'pending').click();
   await expect(groups(page).first()).toHaveAttribute('data-group-surface', '椿');
-  await page.locator('[data-group-filter="not_evaluated"]').click();
+  await expect(groups(page).first()).toHaveAttribute('data-group-status', 'inconsistent');
+  await expect(places(camellya)).toHaveCount(1);
+  await expect(places(camellya).first()).toHaveAttribute('data-verdict', 'needs_review');
+  await expect(summary(page)).toHaveText(`${fill(S.groupFilterSummary, { label: S.groupFilters.pending, groups: 1, places: 1 })}${fill(S.groupHiddenInGroups, { n: 4 })}`);
+  const rest = camellya.locator('.group-rest-toggle');
+  await expect(rest).toHaveText(fill(S.groupShowRest, { n: 4 }));
+  await rest.click();
+  await expect(places(camellya)).toHaveCount(5);
+  await expect(rest).toHaveText(fill(S.groupHideRest, { n: 4 }));
+  await expect(summary(page)).toHaveText(fill(S.groupFilterSummary, { label: S.groupFilters.pending, groups: 1, places: 5 }));
+  await rest.click();
+  await expect(places(camellya)).toHaveCount(1);
+  // Inconsistent shows the place that needs a decision, not every place of the group.
+  await filterButton(page, 'inconsistent').click();
   await expect(groups(page)).toHaveCount(1);
-  await expect(groups(page).first()).toHaveAttribute('data-group-surface', '声骸');
-  await page.locator('[data-group-filter="pending"]').click();
-  await expect(groups(page)).toHaveCount(0);
-  await expect(page.getByText(S.groupsNone, { exact: true })).toBeVisible();
-  await page.locator('[data-group-filter="all"]').click();
+  await expect(places(camellya)).toHaveCount(1);
+  await expect(places(camellya).first()).toHaveAttribute('data-verdict', 'needs_review');
+  // Not evaluated: the two places of 椿 that Core did not look at, and the one of 声骸.
+  await filterButton(page, 'not_evaluated').click();
+  expect(await groups(page).evaluateAll(list => list.map(el => [el.getAttribute('data-group-surface'), el.querySelectorAll('article.long-term').length]))).toEqual([['椿', 2], ['声骸', 1]]);
+  await expect(page.locator('article.long-term:not([data-verdict="not_evaluated"])')).toHaveCount(0);
+  // Settled groups: all their places.
+  await filterButton(page, 'confirmed').click();
+  expect(await groups(page).evaluateAll(list => list.map(el => el.getAttribute('data-group-surface')))).toEqual(['今汐']);
+  await filterButton(page, 'all').click();
   await expect(groups(page)).toHaveCount(3);
+  await expect(places(camellya)).toHaveCount(5);
+  await expect(summary(page)).toHaveText(fill(S.groupFilterSummary, { label: S.groupFilters.all, groups: 3, places: 8 }));
+
+  // One segment selected: the buttons count what that segment shows, and the lists follow.
+  await chips(page).nth(1).getByRole('button').first().click();
+  await expect(filterButton(page, 'pending')).toHaveAttribute('data-group-count', '1');
+  await expect(filterButton(page, 'confirmed')).toHaveAttribute('data-group-count', '0');
+  await expect(filterButton(page, 'all')).toHaveAttribute('data-group-count', '1');
+  await filterButton(page, 'pending').click();
+  await expect(groups(page)).toHaveCount(1);
+  await expect(places(camellya)).toHaveCount(1);
+  await chips(page).nth(1).getByRole('button').first().click();
+  await filterButton(page, 'all').click();
 
   // The view toggle: the same places in segment order, without groups.
   await page.getByRole('button', { name: S.termViewSegments, exact: true }).click();
@@ -77,6 +123,10 @@ test('the term view groups findings by term: places, segments, the translation u
   const order = await page.locator('.long-term-list article.long-term').evaluateAll(list => list.map(el => Number(el.getAttribute('data-segment'))));
   expect(order).toEqual([...order].sort((a, b) => a - b));
   expect(order.length).toBe(8);
+  // A filter still applies there; the places it leaves out are named, with the way back.
+  await filterButton(page, 'pending').click();
+  await expect(page.locator('.long-term-list article.long-term')).toHaveCount(1);
+  await expect(summary(page)).toHaveText(`${fill(S.groupFilterSummary, { label: S.groupFilters.pending, groups: 1, places: 1 })}${fill(S.groupHiddenInSegments, { n: 4 })}`);
 });
 
 test('replace puts the official rendering into one place only; a word that stands elsewhere is left alone; one undo takes it back', async ({ page }) => {
@@ -101,10 +151,25 @@ test('replace puts the official rendering into one place only; a word that stand
   await expect(page.locator('.notice-state')).toHaveText(S.notices.longTargetReplaced);
   // The edited segment has no result until it is checked again, and the groups say so instead of reading as complete.
   await expect(page.locator('.groups-unchecked')).toHaveText(fill(S.groupsUnchecked, { n: 1 }));
-  // One undo step restores the text.
+  // The run no longer reads complete: a segment was edited and has no result. The Tuner is not confirmed across the manuscript either:
+  // the two places left are checked, and the head names the segment that holds the term and waits for its check.
+  await expect(status(page)).toHaveText(fill(S.phaseTermDoneRecheck, { n: 1 }));
+  await expect(status(page)).not.toHaveText(S.phaseTermDone);
+  await expect(runButton(page)).toHaveAttribute('data-recheck', 'true');
+  await expect(tuner).toHaveAttribute('data-group-status', 'pending');
+  await expect(tuner.locator('.term-group-unverified .group-status')).toHaveText(fill(S.groupUnverified, { list: 2 }));
+  await expect(tuner.locator('.group-status').first()).not.toHaveText(S.groupStatuses.confirmed);
+  await expect(tuner.locator('.term-group-renderings')).toHaveText(fill(S.groupRenderings, { items: '调谐器 ×2' }));
+  await expect(filterButton(page, 'pending')).toHaveAttribute('data-group-count', '1');
+  await expect(filterButton(page, 'confirmed')).toHaveAttribute('data-group-count', '0');
+  // One undo step restores the text, and with it the complete run and the inconsistent group.
   await page.getByRole('button', { name: M.review.undo, exact: true }).click();
   await expect(target(page)).toHaveValue(before);
   await expect(page.locator('.groups-unchecked')).toHaveCount(0);
+  await expect(status(page)).toHaveText(S.phaseTermDone);
+  await expect(runButton(page)).not.toHaveAttribute('data-recheck', 'true');
+  await expect(tuner).toHaveAttribute('data-group-status', 'inconsistent');
+  await expect(tuner.locator('.term-group-unverified')).toHaveCount(0);
 });
 
 test('a place with no translation hit opens an editor for that one segment; applying changes only that segment and one undo takes it back', async ({ page }) => {
@@ -130,7 +195,9 @@ test('a place with no translation hit opens an editor for that one segment; appl
   full[1] = revised;
   await expect(target(page)).toHaveValue(full.join('\n\n'));
   await expect(page.locator('.notice-state')).toHaveText(S.notices.longSegmentRevised);
+  await expect(status(page)).toHaveText(fill(S.phaseTermDoneRecheck, { n: 1 }));
   await page.getByRole('button', { name: M.review.undo, exact: true }).click();
+  await expect(status(page)).toHaveText(S.phaseTermDone);
   await expect(target(page)).toHaveValue(manuscript.target);
   // The editor closes with Cancel and changes nothing.
   await places(groupOf(page, '椿')).nth(1).getByRole('button', { name: S.occRevise, exact: true }).click();

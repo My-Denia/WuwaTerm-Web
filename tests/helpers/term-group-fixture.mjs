@@ -7,18 +7,28 @@ const sha = value => createHash('sha256').update(value, 'utf8').digest('hex');
 const scalars = text => Array.from(text);
 const sourceOf = (term, n) => ({ source_file: 'synthetic/terms.json', source_id: `${term}-${n}` });
 const term = (zh, en, category) => ({ zh, en, category, candidate_id: sha(`term-group:${zh}:${en}:${category}`), sources: [sourceOf(en.toLowerCase().replace(/\W+/gu, '-'), 1)] });
-export const CAMELLYA = term('椿', 'Camellya', 'character');
-export const JINHSI = term('今汐', 'Jinhsi', 'character');
+export const CAMELLYA = term('椿', 'Camellya', 'resonator');
+export const JINHSI = term('今汐', 'Jinhsi', 'resonator');
 export const ECHO = term('声骸', 'Echo', 'item');
 export const TUNER = term('调谐器', 'Tuner', 'item');
 export const DICTIONARY = { schema_version: '2', source_commit: 'synthetic-term-groups', term_count: 1204, revision: sha('dictionary:term-groups') };
 
 // ---- generic filler, so a segment is long enough to stand alone ----
-const ZH_BANK = ['他们沿着荒原继续前行。', '风从远处的山脊吹来。', '夜里的营火慢慢暗了下来。', '没有人再提起那件旧事。', '远方传来低沉的钟声。', '她把地图折好放进袋中。', '天亮之前必须赶到渡口。', '路上的石头被雨水冲得发亮。'];
+// A bank of different sentences (none holds a term of this file, so the filler never makes a finding), read from a start that moves from
+// one segment to the next, so the sentences around a hit read as prose and no two segments open the same way.
+const ZH_BANK = ['他们沿着荒原继续前行。', '风从远处的山脊吹来。', '夜里的营火慢慢暗了下来。', '没有人再提起那件旧事。', '远方传来低沉的钟声。', '她把地图折好放进袋中。',
+  '天亮之前必须赶到渡口。', '路上的石头被雨水冲得发亮。', '河面上浮着一层薄薄的雾。', '老旧的木桥在脚下吱呀作响。', '他蹲下身检查了马蹄的伤口。', '远处的塔楼亮起了一盏孤灯。',
+  '商队在岔路口停下来歇脚。', '她抬头望了望渐渐阴沉的天色。', '山谷里的回声久久没有散去。', '干粮只够再撑两天的路程。', '领路的少年忽然放慢了脚步。', '雪水顺着岩壁一滴一滴落下。',
+  '谁也没有注意到身后的脚印。', '篝火旁有人低声哼起了旧曲。', '昨夜的雨在泥地里留下了水洼。', '他把外套披在了熟睡的同伴身上。', '城墙的影子在黄昏里越拉越长。', '铃声从很远的地方一阵阵传来。'];
 const EN_BANK = ['They kept walking along the wasteland.', 'The wind came in from the distant ridge.', 'The campfire slowly burned low in the night.', 'Nobody mentioned the old affair again.',
-  'A deep bell sounded somewhere far away.', 'She folded the map and put it in her bag.', 'They had to reach the ferry before dawn.', 'The stones on the road shone with rain.'];
-export const zhFiller = (sentences = 100) => Array.from({ length: sentences }, (_, k) => ZH_BANK[k % ZH_BANK.length]).join('');
-export const enFiller = (sentences = 30) => Array.from({ length: sentences }, (_, k) => EN_BANK[k % EN_BANK.length]).join(' ');
+  'A deep bell sounded somewhere far away.', 'She folded the map and put it in her bag.', 'They had to reach the ferry before dawn.', 'The stones on the road shone with rain.',
+  'A thin mist lay over the river.', 'The old wooden bridge creaked under their feet.', 'He crouched to check the horse\'s wounded hoof.', 'A single lamp came on in the distant tower.',
+  'The caravan stopped at the fork to rest.', 'She looked up at the darkening sky.', 'The valley held its sound for a long while.', 'The food would last only two more days.',
+  'The boy leading the way suddenly slowed down.', 'Meltwater dripped from the rock face, drop by drop.', 'Nobody noticed the footprints behind them.', 'Somebody by the fire hummed an old tune.',
+  'Last night\'s rain had left puddles in the mud.', 'He laid his coat over his sleeping companion.', 'The shadow of the wall grew longer in the dusk.', 'Bells rang again and again from far away.'];
+const from = (bank, sentences, seed) => Array.from({ length: sentences }, (_, k) => bank[(seed * 7 + k) % bank.length]);
+export const zhFiller = (sentences = 100, seed = 0) => from(ZH_BANK, sentences, seed).join('');
+export const enFiller = (sentences = 30, seed = 0) => from(EN_BANK, sentences, seed).join(' ');
 const paragraphs = list => list.join('\n\n');
 
 /**
@@ -32,12 +42,12 @@ export function camellyaManuscript({ withMismatch = true } = {}) {
     ['红椿蕊落在地上，椿又笑了。', 'The red camellia stamen fell, and Camellya smiled again.'],
     ['声骸安静下来。', 'The sound fell quiet.'],
   ];
-  const source = leads.map(([zh]) => `${zh}${zhFiller(100)}`);
-  const target = leads.map(([, en]) => `${en} ${enFiller(30)}`);
+  const source = leads.map(([zh], i) => `${zh}${zhFiller(100, i + 1)}`);
+  const target = leads.map(([, en], i) => `${en} ${enFiller(30, i + 1)}`);
   if (withMismatch) {
     // Both sides far over the segment limit with different sentence counts: segmentation-v1 cannot pair them and asks for a manual split.
-    source.push(zhFiller(320));
-    target.push(enFiller(110));
+    source.push(zhFiller(320, 5));
+    target.push(enFiller(110, 5));
   }
   return { source: paragraphs(source), target: paragraphs(target), direction: 'en' };
 }
@@ -49,14 +59,14 @@ export function camellyaManuscript({ withMismatch = true } = {}) {
 export function denseManuscript() {
   const places = Array.from({ length: 52 }, (_, i) => i);
   const source = [
-    `${places.map(i => `椿${i % 2 ? '微笑' : '点头'}。`).join('')}${zhFiller(60)}`,
-    `今汐站在高处远望。${zhFiller(100)}`,
-    `声骸在夜里发出微光。${zhFiller(100)}`,
+    `${places.map(i => `椿${i % 2 ? '微笑' : '点头'}。`).join('')}${zhFiller(60, 1)}`,
+    `今汐站在高处远望。${zhFiller(100, 2)}`,
+    `声骸在夜里发出微光。${zhFiller(100, 3)}`,
   ];
   const target = [
-    `${places.map(i => `${i >= 48 ? 'She' : 'Camellya'} ${i % 2 ? 'smiled' : 'nodded'}.`).join(' ')} ${enFiller(20)}`,
-    `Jinhsi stood high and looked far. ${enFiller(30)}`,
-    `The Echo glowed faintly in the night. ${enFiller(30)}`,
+    `${places.map(i => `${i >= 48 ? 'She' : 'Camellya'} ${i % 2 ? 'smiled' : 'nodded'}.`).join(' ')} ${enFiller(20, 1)}`,
+    `Jinhsi stood high and looked far. ${enFiller(30, 2)}`,
+    `The Echo glowed faintly in the night. ${enFiller(30, 3)}`,
   ];
   return { source: paragraphs(source), target: paragraphs(target), direction: 'en' };
 }
@@ -68,9 +78,9 @@ export function tunerManuscript() {
     ['She asked the Tuner for help.', '她向调音师求助。'],
     ['Another Tuner waited outside.', '另一台调谐器在外面等着。'],
   ];
-  const source = leads.map(([en]) => `${en} ${enFiller(30)}`);
+  const source = leads.map(([en], i) => `${en} ${enFiller(30, i + 1)}`);
   // A 调音师 in the third translation that is not a Tuner place at all: replacing one place must leave it alone.
-  const target = leads.map(([, zh], i) => `${zh}${zhFiller(100)}${i === 2 ? '后来调音师也来了。' : ''}`);
+  const target = leads.map(([, zh], i) => `${zh}${zhFiller(100, i + 1)}${i === 2 ? '后来调音师也来了。' : ''}`);
   return { source: paragraphs(source), target: paragraphs(target), direction: 'zh' };
 }
 

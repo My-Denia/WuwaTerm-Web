@@ -4,6 +4,7 @@ import test from 'node:test';
 import * as L from '../lib/long-review.js';
 import { REASON_VALUES, parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
 import { hash } from './fixtures/manuscript.mjs';
+import { camellyaManuscript } from './helpers/term-group-fixture.mjs';
 
 // Term groups and the single-place edits of the long-manuscript term view (lib/long-review.js). Public game terms and synthetic text.
 
@@ -49,7 +50,8 @@ test('a group counts its places, names the segments and tallies what the transla
   assert.equal(group.surface, '椿');
   assert.equal(group.occurrenceCount, 3);
   assert.deepEqual(group.segments, [1]);
-  assert.deepEqual(group.renderings, [{ text: 'Camellya', count: 1 }, { text: null, count: 2 }].sort((a, b) => b.count - a.count));
+  // The place Core did not evaluate is no miss of the term: it is counted apart, last.
+  assert.deepEqual(group.renderings, [{ text: 'Camellya', count: 1, kind: 'hit' }, { text: null, count: 1, kind: 'none' }, { text: null, count: 1, kind: 'not_evaluated' }]);
   assert.equal(group.notEvaluated, 1);
   assert.deepEqual(group.candidates, [camellya]);
   // Places are in text order, with the whole-text spans, the translation used and the not_evaluated reason.
@@ -64,7 +66,7 @@ test('Camellya x2 and no hit x1 is inconsistent until every place is decided; a 
   const find = [['椿', 0, 'verified_constraint', 'Camellya'], ['椿', 2, 'verified_constraint', 'Camellya', 0], ['椿', 1, 'needs_review', null]];
   const segments = [segment(0, 'current', SOURCE, TARGET, find)];
   const [group] = L.groupTermOccurrences(segments, SOURCE, TARGET, 'en');
-  assert.deepEqual(group.renderings, [{ text: 'Camellya', count: 2 }, { text: null, count: 1 }]);
+  assert.deepEqual(group.renderings, [{ text: 'Camellya', count: 2, kind: 'hit' }, { text: null, count: 1, kind: 'none' }]);
   assert.equal(group.status, 'inconsistent');
   // Every place has a confirmed choice that applies: confirmed.
   const decided = (view = 'applies') => [0, 1, 2].map(nth => choice(spanOf(SOURCE, '椿', nth), 'official_pair', camellya, true, view));
@@ -84,7 +86,7 @@ test('Tuner x2 and a second Chinese rendering x1; the status of a conflict, an u
   const target = '调整调谐器。调谐器在嗡嗡响。问问调音师。';
   const find = [['Tuner', 0, 'verified_constraint', '调谐器', 0, [tunerA, tunerB]], ['Tuner', 1, 'verified_constraint', '调谐器', 1, [tunerA, tunerB]], ['Tuner', 2, 'verified_constraint', '调音师', 0, [tunerA, tunerB]]];
   const [group] = L.groupTermOccurrences([segment(0, 'current', source, target, find)], source, target, 'zh');
-  assert.deepEqual(group.renderings, [{ text: '调谐器', count: 2 }, { text: '调音师', count: 1 }]);
+  assert.deepEqual(group.renderings, [{ text: '调谐器', count: 2, kind: 'hit' }, { text: '调音师', count: 1, kind: 'hit' }]);
   assert.equal(group.status, 'inconsistent');
   assert.equal(group.candidates.length, 2);
   // A confirmed_conflict that no choice settles is inconsistent even with one rendering.
@@ -164,6 +166,108 @@ test('groups are ordered by urgency, then by where they first stand', () => {
   const target = 'The Echo first. Camellya after.';
   const segments = [segment(0, 'current', source, target, [['声骸', 0, 'verified_constraint', 'Echo', 0, [echo]], ['椿', 0, 'needs_review', null]])];
   assert.deepEqual(L.groupTermOccurrences(segments, source, target, 'en').map(g => [g.surface, g.status]), [['椿', 'pending'], ['声骸', 'confirmed']]);
+});
+
+test('the traits behind the status: every place is in one of three counts, and a group with one place to check is still found under pending', () => {
+  const find = [
+    ['椿', 0, 'verified_constraint', 'Camellya'], ['椿', 1, 'not_evaluated', null, 0, [camellya], { reason: 'not_a_term' }], ['椿', 2, 'needs_review', null],
+  ];
+  const [group] = L.groupTermOccurrences([segment(0, 'current', SOURCE, TARGET, find)], SOURCE, TARGET, 'en');
+  assert.equal(group.status, 'inconsistent', 'the most urgent trait names the group');
+  assert.equal(group.inconsistent, true);
+  assert.deepEqual([group.pendingCount, group.notEvaluatedCount, group.confirmedCount], [1, 1, 1]);
+  assert.equal(group.pendingCount + group.notEvaluatedCount + group.confirmedCount, group.occurrenceCount);
+  assert.deepEqual(group.unverifiedSegments, []);
+  // A decided place leaves its count: the not_evaluated one marked not a term is settled, the verified one with no choice is nothing to do.
+  const decided = [choice(spanOf(SOURCE, '椿', 1), 'not_a_term', null, true, 'applies')];
+  const [after] = L.groupTermOccurrences([segment(0, 'current', SOURCE, TARGET, find, decided)], SOURCE, TARGET, 'en');
+  assert.deepEqual([after.pendingCount, after.notEvaluatedCount, after.confirmedCount], [1, 0, 2]);
+  assert.equal(after.notEvaluated, 1, 'Core still did not evaluate it');
+  // A conflict nobody settled and a stale segment both need an action.
+  const conflict = [['椿', 0, 'confirmed_conflict', 'Camellya'], ['椿', 1, 'verified_constraint', 'Camellya', 0]];
+  assert.equal(L.groupTermOccurrences([segment(0, 'current', SOURCE, TARGET, conflict)], SOURCE, TARGET, 'en')[0].pendingCount, 1);
+  assert.equal(L.groupTermOccurrences([segment(0, 'stale', SOURCE, TARGET, conflict)], SOURCE, TARGET, 'en')[0].pendingCount, 2);
+});
+
+test('the filters count groups by the traits they hold, and what a count says is what the filter shows', () => {
+  // 椿: 19 verified and one place to check; 声骸: two places Core did not evaluate; 今汐: settled.
+  const source = `${'椿在这里。'.repeat(20)}声骸一，声骸二，今汐来了。`;
+  const target = `${'Camellya is here. '.repeat(19)}She is here. The Echo one, the Echo two, Jinhsi came.`;
+  const find = [
+    ...Array.from({ length: 19 }, (_, nth) => ['椿', nth, 'verified_constraint', 'Camellya', nth]),
+    ['椿', 19, 'needs_review', null],
+    ['声骸', 0, 'not_evaluated', null, 0, [echo], { reason: 'no_target_region' }], ['声骸', 1, 'not_evaluated', null, 0, [echo], { reason: 'no_target_region' }],
+    ['今汐', 0, 'verified_constraint', 'Jinhsi', 0, [{ ...camellya, candidate_id: hash('jinhsi'), zh: '今汐', en: 'Jinhsi' }]],
+  ];
+  const groups = L.groupTermOccurrences([segment(0, 'current', source, target, find)], source, target, 'en');
+  assert.deepEqual(groups.map(g => [g.surface, g.status]), [['椿', 'inconsistent'], ['声骸', 'not_evaluated'], ['今汐', 'confirmed']]);
+  assert.deepEqual(L.termGroupCounts(groups), { all: 3, inconsistent: 1, pending: 1, not_evaluated: 1, confirmed: 1 });
+  // Pending is not "groups whose status is pending": the group with one place to check is under it, showing that one place.
+  const pending = L.filterTermGroups(groups, 'pending');
+  assert.deepEqual(pending.map(g => [g.surface, g.occurrences.length, g.hidden]), [['椿', 1, 19]]);
+  assert.equal(pending[0].occurrences[0].verdict, 'needs_review');
+  // Inconsistent surfaces the one place that needs a decision instead of listing all twenty.
+  const inconsistent = L.filterTermGroups(groups, 'inconsistent');
+  assert.deepEqual(inconsistent.map(g => [g.surface, g.occurrences.length, g.hidden]), [['椿', 1, 19]]);
+  assert.equal(L.filterTermGroups(groups, 'not_evaluated').map(g => g.surface).join(), '声骸');
+  assert.equal(L.filterTermGroups(groups, 'confirmed').map(g => g.surface).join(), '今汐');
+  assert.equal(L.filterTermGroups(groups, 'all').flatMap(g => g.occurrences).length, 20 + 2 + 1);
+  // The rest of a group opens on request, and for every filter the number of groups shown is the number on its button.
+  assert.equal(L.filterTermGroups(groups, 'pending', { expanded: new Set([groups[0].key]) })[0].occurrences.length, 20);
+  const counts = L.termGroupCounts(groups);
+  for (const f of L.TERM_GROUP_FILTERS) assert.equal(L.filterTermGroups(groups, f).length, counts[f], f);
+  // One segment selected: counts and lists follow the same scope. 椿 has no place there, so the filters that need one drop it.
+  const two = [segment(0, 'current', source, target, find), segment(1, 'current', '声骸三。', 'The Echo three.', [['声骸', 0, 'verified_constraint', 'Echo', 0, [echo]]], [], { source: 0, target: 0 })];
+  const scoped = L.groupTermOccurrences(two, `${source}声骸三。`, `${target}The Echo three.`, 'en');
+  const inSecond = L.termGroupCounts(scoped, 1);
+  assert.deepEqual(inSecond, { all: 1, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 0 });
+  for (const f of L.TERM_GROUP_FILTERS) assert.equal(L.filterTermGroups(scoped, f, { segment: 1 }).length, inSecond[f], f);
+});
+
+test('a ready segment without a result that holds the term keeps its group from reading confirmed; the others do not', () => {
+  const source = 'Tune the Tuner. The Tuner hums.';
+  const target = '调整调谐器。调谐器在嗡嗡响。';
+  const verified = [['Tuner', 0, 'verified_constraint', '调谐器', 0, [tunerA]], ['Tuner', 1, 'verified_constraint', '调谐器', 1, [tunerA]]];
+  const checked = [segment(0, 'current', source, target, verified)];
+  assert.equal(L.groupTermOccurrences(checked, source, target, 'zh')[0].status, 'confirmed');
+  // Segment 2 was edited and has no result; its source holds the Tuner (a plural and another case too).
+  const holds = [{ index: 1, sourceCore: 'She asked the tuners for help.' }];
+  const [group] = L.groupTermOccurrences(checked, source, target, 'zh', holds);
+  assert.deepEqual(group.unverifiedSegments, [2]);
+  assert.equal(group.status, 'pending');
+  assert.equal(group.pendingCount, 0, 'no place of the group needs an action: the segment has none yet');
+  assert.deepEqual(L.termGroupCounts([group]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(L.filterTermGroups([group], 'pending').map(g => [g.occurrences.length, g.hidden]), [[0, 2]], 'its head says why; the places open on request');
+  // A segment without the term, a longer English word and the same term in another group do not count.
+  const others = [{ index: 1, sourceCore: 'Nothing of interest. Tuneful sounds.' }, { index: 2, sourceCore: 'Intuners and tunerless.' }];
+  assert.deepEqual(L.groupTermOccurrences(checked, source, target, 'zh', others)[0].unverifiedSegments, []);
+  assert.equal(L.groupTermOccurrences(checked, source, target, 'zh', others)[0].status, 'confirmed');
+  // A Chinese source matches as a substring; the spellings of a merged group all count.
+  const zhSource = '椿看着椿。';
+  const zhGroup = L.groupTermOccurrences([segment(0, 'current', zhSource, 'Camellya looked at Camellya.', [['椿', 0, 'verified_constraint', 'Camellya', 0], ['椿', 1, 'verified_constraint', 'Camellya', 1]])],
+    zhSource, 'Camellya looked at Camellya.', 'en', [{ index: 1, sourceCore: '香椿很好吃。' }, { index: 2, sourceCore: '今汐。' }])[0];
+  assert.deepEqual(zhGroup.unverifiedSegments, [2]);
+  const plural = 'The Tuner and the Tuners.';
+  const merged = L.groupTermOccurrences([segment(0, 'current', plural, '调谐器和调谐器们。', [['Tuner', 0, 'verified_constraint', '调谐器', 0, [tunerA]], ['Tuners', 0, 'verified_constraint', '调谐器', 1, [tunerA]]])],
+    plural, '调谐器和调谐器们。', 'zh', [{ index: 1, sourceCore: 'TUNERS everywhere.' }])[0];
+  assert.deepEqual(merged.unverifiedSegments, [2]);
+  // No unchecked list, nothing changes (the argument is optional).
+  assert.deepEqual(L.groupTermOccurrences(checked, source, target, 'zh')[0].unverifiedSegments, []);
+});
+
+test('uncheckedTermSegments lists the ready segments that hold no result, with their source cores; a segment that has one is left out', () => {
+  const manuscript = camellyaManuscript();
+  const draft = { source: manuscript.source, target: manuscript.target, direction: manuscript.direction, alignments: null };
+  const long = L.longFromWorkfile({ ...manuscript, alignments: null, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
+  const ctx = { draft, basis: null };
+  const items = L.segmentInputs(draft).items;
+  assert.deepEqual(items.map(i => i.pair.status), ['ready', 'ready', 'ready', 'ready', 'needs_manual_split']);
+  // Nothing was checked: the four ready segments, not the one that needs a manual split.
+  assert.deepEqual(L.uncheckedTermSegments(long, ctx).map(u => u.index), [0, 1, 2, 3]);
+  assert.equal(L.uncheckedTermSegments(long, ctx)[1].sourceCore, items[1].sourceCore);
+  // A segment that has a result is not listed.
+  const checked = { ...long, records: long.records.map((r, i) => (i === 1 ? { ...r, result: { findings: [], truncated: false } } : r)) };
+  assert.deepEqual(L.uncheckedTermSegments(checked, ctx).map(u => u.index), [0, 2, 3]);
 });
 
 test('spliceTargetSpan replaces one place only, never every place the same word stands', () => {
@@ -248,7 +352,7 @@ test('the dense v4 fixture opens into groups: 椿 places across segments, five r
   const camellyaGroup = groups.find(g => g.surface === '椿');
   assert.equal(camellyaGroup.occurrenceCount, 123 + 2 + 33);
   assert.deepEqual(camellyaGroup.segments, [2, 3]);
-  assert.deepEqual(camellyaGroup.renderings, [{ text: 'Camellya', count: 123 + 33 }, { text: null, count: 2 }]);
+  assert.deepEqual(camellyaGroup.renderings, [{ text: 'Camellya', count: 123 + 33, kind: 'hit' }, { text: null, count: 2, kind: 'not_evaluated' }]);
   assert.equal(camellyaGroup.status, 'pending', 'the choices wait for the next check');
   assert.deepEqual(groups.flatMap(g => g.occurrences).filter(o => o.reason).map(o => o.reason).sort(), [...REASON_VALUES].sort());
   assert.equal(groups.every(g => g.occurrences.every(o => o.sourceContext && o.sourceContext.hit === o.docSource.text)), true);

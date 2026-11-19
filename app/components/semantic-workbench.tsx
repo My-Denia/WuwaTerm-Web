@@ -12,8 +12,9 @@ import {
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../../lib/semantic-run.js';
 import {
-  applyResult, chooseTerm, exportSegments, groupTermOccurrences, probeIndex, reconfirmChoice, recheckPlan, recordView, removeChoice, removeHistoryEntry,
-  restorableHistory, restoreHistoryEntry, reviseSegmentTarget, sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished, spliceTargetSpan, termSegments,
+  TERM_GROUP_FILTERS, applyResult, chooseTerm, exportSegments, filterTermGroups, groupTermOccurrences, probeIndex, reconfirmChoice, recheckPlan, recordView,
+  removeChoice, removeHistoryEntry, restorableHistory, restoreHistoryEntry, reviseSegmentTarget, sameV3Basis, segmentInputs, segmentRequest, setCurrent,
+  setFinished, spliceTargetSpan, termGroupCounts, termSegments, uncheckedTermSegments,
 } from '../../lib/long-review.js';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES, SEMANTIC_REVIEW_VERSION,
@@ -48,8 +49,7 @@ const REVIEW_REQUEST_LIMIT = 65_536;
 const REVIEW_FEATURES = 'dense-128,reason-v1';
 /** Longest list of segment numbers a banner spells out. */
 const NUMBERS_SHOWN = 8;
-const GROUP_FILTERS = ['all', 'inconsistent', 'pending', 'not_evaluated', 'confirmed'] as const;
-type GroupFilter = (typeof GROUP_FILTERS)[number];
+type GroupFilter = import('../../lib/long-review.js').TermGroupFilter;
 export type Span = { start: number; end: number; text: string };
 type Region = { start: number; end: number };
 type PairRegion = { start: number; end: number; core_start: number; core_end: number };
@@ -230,7 +230,11 @@ export function SemanticWorkbench(props: Props) {
   // The term view of a long manuscript: grouped by term (default) or in segment order, filtered by group status; the segment whose
   // translation is being revised (the occurrence that opened it, the translation it started from, the text typed).
   const [termView, setTermView] = useState<'groups' | 'segments'>('groups');
-  const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
+  const [groupFilter, setGroupFilterState] = useState<GroupFilter>('all');
+  // The groups whose other places (the ones the filter is not about) are opened; a filter change closes them again.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const setGroupFilter = (id: GroupFilter) => { setGroupFilterState(id); setOpenGroups(new Set()); };
+  const toggleGroup = (key: string) => setOpenGroups(prev => { const next = new Set(prev); if (!next.delete(key)) next.add(key); return next; });
   const [revising, setRevising] = useState<{ key: string; index: number; base: string; text: string } | null>(null);
   // The split helper, which the banner's jump scrolls to and focuses.
   const splitRef = useRef<HTMLDivElement | null>(null);
@@ -804,6 +808,7 @@ export function SemanticWorkbench(props: Props) {
   const translationClosed = !!poolData && (!poolData.translation_enabled || poolData.translations.remaining === 0 || poolData.characters.remaining === 0);
   const reviewsClosed = !!poolData && poolData.reviews.remaining === 0;
   // Waiting, paused, failed and retrying each have their own words (and data-run-state) for every kind of run.
+  const needsRecheck = long ? ready.filter(v => v.record?.needsCheck).length : 0;
   const runPhaseLine = (() => {
     if (runState === 'idle') return null;
     const done = progress.done; const total = progress.total;
@@ -821,7 +826,9 @@ export function SemanticWorkbench(props: Props) {
       const details = failureDetails(lang, { kind: run.kind === 'translate' ? 'translation' : 'review', reason: run.stopCode, requestId: run.stopRequestId });
       return [fill(s.phaseStopped, { reason: stopText(run.stopCode) }), ...details].join(' ');
     }
-    return run.kind === 'term' ? s.phaseTermDone : run.kind === 'translate' ? s.phaseTranslateDone : s.phaseDone;
+    // A term run that ended says so only while every ready segment has a current result: after an edit the segment is to be checked again.
+    if (run.kind === 'term') return needsRecheck > 0 ? fill(s.phaseTermDoneRecheck, { n: needsRecheck }) : s.phaseTermDone;
+    return run.kind === 'translate' ? s.phaseTranslateDone : s.phaseDone;
   })();
   const issueRegion = activeView ?? null;
 
@@ -848,18 +855,16 @@ export function SemanticWorkbench(props: Props) {
   const LONG_ROWS = 100;
   const targetChars = useMemo(() => chars(target), [target]);
   // Every segment's findings grouped by term (lib/long-review.js groupTermOccurrences), each place with its context.
-  const termGroups = useMemo(() => (long ? groupTermOccurrences(termSegments(semantic.long, longCtx), source, target, direction) as TermGroup[] : []),
+  // The ready segments that have no result (never checked, or edited since) are passed too: a term they hold is not yet confirmed.
+  const termGroups = useMemo(() => (long ? groupTermOccurrences(termSegments(semantic.long, longCtx), source, target, direction, uncheckedTermSegments(semantic.long, longCtx)) as TermGroup[] : []),
     [long, semantic.long, longCtx, source, target, direction]);
-  const groupCounts = useMemo(() => {
-    const n: Record<GroupFilter, number> = { all: termGroups.length, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 0 };
-    for (const g of termGroups) n[g.status] += 1;
-    return n;
-  }, [termGroups]);
-  // The selected segment's places only, when one is selected; a group keeps the status of all its places. Then the status filter.
-  const filteredGroups = termGroups
-    .map(g => ({ ...g, occurrences: g.occurrences.filter(o => selectedSegment === null || o.segmentIndex === selectedSegment) }))
-    .filter(g => g.occurrences.length > 0 && (groupFilter === 'all' || g.status === groupFilter));
+  // One rule decides what a filter button counts and what it shows (lib/long-review.js filterTermGroups): the selected segment's places
+  // when one is selected (a group keeps the traits of all its places), the groups that hold a place of the filter's kind, and in each
+  // the places the filter is about, the rest on request.
+  const groupCounts = useMemo(() => termGroupCounts(termGroups, selectedSegment), [termGroups, selectedSegment]);
+  const filteredGroups = useMemo(() => filterTermGroups(termGroups, groupFilter, { segment: selectedSegment, expanded: openGroups }), [termGroups, groupFilter, selectedSegment, openGroups]);
   const placeCount = filteredGroups.reduce((n, g) => n + g.occurrences.length, 0);
+  const collapsedCount = filteredGroups.reduce((n, g) => n + (openGroups.has(g.key) ? 0 : g.hidden), 0);
   // At most LONG_ROWS places on screen at once, as before; selecting a segment shows its places in full.
   let budget = selectedSegment === null ? LONG_ROWS : Infinity;
   const shownGroups = filteredGroups.flatMap(g => {
@@ -961,7 +966,8 @@ export function SemanticWorkbench(props: Props) {
           : occ.targetExcerpt ? <><p className="review-excerpt target-excerpt">{occ.targetExcerpt.text}{occ.targetExcerpt.clipped ? '…' : ''}</p><p className="track-note">{s.occurrenceExcerpt}</p></>
             : <p className="review-excerpt">{m.review.excerptMissingTarget}</p>}
       </div>
-      <p className="occurrence-translation" data-hit={occ.translation === null ? 'false' : 'true'}>{occ.translation === null ? s.occurrenceNoHit : fill(s.occurrenceTranslation, { text: occ.translation })}</p>
+      {/* A place Core did not evaluate is not a missed translation (香椿 is not 椿): no "no matching word" line, the reason above says why. */}
+      {(occ.translation !== null || occ.verdict !== 'not_evaluated') && <p className="occurrence-translation" data-hit={occ.translation === null ? 'false' : 'true'}>{occ.translation === null ? s.occurrenceNoHit : fill(s.occurrenceTranslation, { text: occ.translation })}</p>}
       {occ.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
         <div className="finding-actions">
           <button type="button" className="text-button" onClick={() => chooseLong(occ.segmentIndex, finding, c)}>{m.review.adopt}</button>
@@ -1001,19 +1007,27 @@ export function SemanticWorkbench(props: Props) {
         {(['groups', 'segments'] as const).map(id => <button key={id} type="button" className="secondary-button" aria-pressed={termView === id} onClick={() => setTermView(id)}>{id === 'groups' ? s.termViewGroups : s.termViewSegments}</button>)}
       </div>
       <div className="semantic-filters term-group-filters" role="group" aria-label={s.groupFilterAria}>
-        {GROUP_FILTERS.map(id => <button key={id} type="button" className="secondary-button" aria-pressed={groupFilter === id} data-group-filter={id}
-          aria-label={`${s.termViewGroups}：${s.groupFilters[id]} ${groupCounts[id]}`} onClick={() => setGroupFilter(id)}>{s.groupFilters[id]} {groupCounts[id]}</button>)}
+        {TERM_GROUP_FILTERS.map(id => <button key={id} type="button" className="secondary-button" aria-pressed={groupFilter === id} data-group-filter={id} data-group-count={groupCounts[id]}
+          aria-label={fill(s.groupFilterPill, { label: s.groupFilters[id], n: groupCounts[id] })} onClick={() => setGroupFilter(id)}>{s.groupFilters[id]} {groupCounts[id]}</button>)}
       </div>
     </div>}
+    {long && termGroups.length > 0 && <p className="track-note group-filter-summary" role="status" aria-live="polite" data-groups={filteredGroups.length} data-places={placeCount} data-collapsed={collapsedCount}>
+      {fill(s.groupFilterSummary, { label: s.groupFilters[groupFilter], groups: filteredGroups.length, places: placeCount })}{collapsedCount > 0 ? fill(termView === 'groups' ? s.groupHiddenInGroups : s.groupHiddenInSegments, { n: collapsedCount }) : ''}</p>}
     {long && truncatedRows.map(r => <p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>)}
     {long && termGroups.length > 0 && uncheckedSegments > 0 && <p className="track-note groups-unchecked" role="status">{fill(s.groupsUnchecked, { n: uncheckedSegments })}</p>}
-    {long && termGroups.length > 0 && placeCount === 0 && <p className="track-note">{s.groupsNone}</p>}
+    {long && termGroups.length > 0 && filteredGroups.length === 0 && <p className="track-note">{s.groupsNone}</p>}
     {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} data-group-surface={g.surface} aria-label={g.surface}>
       <header className="term-group-head">
         <h5 className="term-group-title"><span className="term-surface">{g.surface}</span>{g.surfaces.length > 1 && <span className="term-variants">（{g.surfaces.slice(1).join('、')}）</span>} <span className={`group-status group-status-${g.status}`}>{s.groupStatuses[g.status]}</span></h5>
         <p className="term-group-meta">{fill(s.groupHead, { n: g.occurrenceCount, segments: numberList(g.segments) })}</p>
-        <p className="term-group-renderings">{fill(s.groupRenderings, { items: g.renderings.map(r => fill(s.renderingItem, { text: r.text ?? s.renderingNone, n: r.count })).join(' · ') })}</p>
+        <p className="term-group-tally" data-pending={g.pendingCount} data-not-evaluated={g.notEvaluatedCount} data-confirmed={g.confirmedCount}>{[
+          g.pendingCount > 0 && fill(s.groupTallyPending, { n: g.pendingCount }), g.notEvaluatedCount > 0 && fill(s.groupTallyNotEvaluated, { n: g.notEvaluatedCount }),
+          g.confirmedCount > 0 && fill(s.groupTallyConfirmed, { n: g.confirmedCount }),
+        ].filter(Boolean).join(' · ')}</p>
+        {g.unverifiedSegments.length > 0 && <p className="term-group-unverified"><span className="group-status group-status-pending" data-unverified={g.unverifiedSegments.join(',')}>{fill(s.groupUnverified, { list: numberList(g.unverifiedSegments) })}</span></p>}
+        <p className="term-group-renderings">{fill(s.groupRenderings, { items: g.renderings.map(r => fill(s.renderingItem, { text: r.kind === 'not_evaluated' ? s.renderingNotEvaluated : r.text ?? s.renderingNone, n: r.count })).join(' · ') })}</p>
         {g.candidates.length > 0 && <p className="term-group-candidates">{fill(s.groupCandidates, { items: g.candidates.map(c => `${c.zh} / ${c.en}`).join(lang === 'en' ? '; ' : '；') })}</p>}
+        {g.hidden > 0 && <button type="button" className="text-button group-rest-toggle" aria-expanded={openGroups.has(g.key)} onClick={() => toggleGroup(g.key)}>{fill(openGroups.has(g.key) ? s.groupHideRest : s.groupShowRest, { n: g.hidden })}</button>}
       </header>
       {g.occurrences.map(renderOccurrence)}
     </section>)}
@@ -1054,7 +1068,7 @@ export function SemanticWorkbench(props: Props) {
       {!translateBlankLong && <div className="long-terms">
         <p>{s.runTermHint}</p>
         <div className="actions">
-          <button type="button" className="secondary-button" disabled={runActive || reviewsClosed || !plan?.cost} onClick={startTermRun}>{runTermLabel}</button>
+          <button type="button" className={`secondary-button${needsRecheck > 0 && termRows.length > 0 && !runActive ? ' recheck-prominent' : ''}`} data-recheck={needsRecheck > 0 && termRows.length > 0 ? 'true' : undefined} disabled={runActive || reviewsClosed || !plan?.cost} onClick={startTermRun}>{runTermLabel}</button>
         </div>
       </div>}
       {draft.alignments !== null && <div className="actions">
