@@ -112,7 +112,7 @@ test('built production parser rejects malformed bodies and v2 fields before cons
     [post({ ...draft, headers: { authorization: 'client-control' } }), 'site_invalid_request'],
     [{ method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' }, 'site_invalid_request'],
     [{ method: 'POST', headers: { 'content-type': 'application/json' }, body: new Uint8Array([0xc3, 0x28]) }, 'site_invalid_request'],
-    [{ method: 'POST', headers: { 'content-type': 'application/json' }, body: ' '.repeat(32769) }, 'site_request_too_large'],
+    [{ method: 'POST', headers: { 'content-type': 'application/json' }, body: ' '.repeat(65537) }, 'site_request_too_large'],
     [{ method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify(draft) }, 'site_invalid_request'],
   ];
   for (const [index, [input, reason]] of cases.entries()) {

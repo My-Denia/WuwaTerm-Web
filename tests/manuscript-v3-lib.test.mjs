@@ -34,11 +34,21 @@ test('lib: exports the v3 limits and keeps the v1/v2 limit', () => {
   assert.equal(Object.keys(specMessages).length, 13);
 });
 
+// invalid-v3-format-v4.json is the v3 contract's "an unknown format version" case. lib/manuscript.js now reads that format
+// (contracts/manuscript-v4/SPEC.md), and the file is a valid v4 payload, so the shipped reader accepts it; the frozen Web 0.3.1
+// reader (tests/manuscript-v3.test.mjs and tests/legacy/web-0.3.1) still gives the v3 contract's code.
+const READ_AS_V4 = new Set(['invalid-v3-format-v4.json']);
+
 test('lib: parseWorkfile reads every case in cases.json as the contract says, with the SPEC message', () => {
   for (const c of cases.valid) assert.doesNotThrow(() => parseWorkfile(contentOf(c)), c.file);
   for (const c of cases.invalid) {
     let error;
     try { parseWorkfile(contentOf(c)); } catch (cause) { error = cause; }
+    if (READ_AS_V4.has(c.file)) {
+      assert.equal(error, undefined, `${c.file}: a valid v4 payload`);
+      assert.equal(parseWorkfile(contentOf(c)).format, 'wuwaterm-manuscript-v4', c.file);
+      continue;
+    }
     assert.equal(error?.code, c.error, c.file);
     assert.equal(error.message, specMessages[c.error], `${c.file} message`);
   }

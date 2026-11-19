@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
-import { WORKFILE_FORMAT_V2, parseWorkfile, validAlignments } from '../lib/manuscript.js';
+// The v3 reference reader falls back to the frozen Web 0.3.1 reader (the last v3-only one) for every other format: lib/manuscript.js now also reads v4.
+import { WORKFILE_FORMAT_V2, parseWorkfile, validAlignments } from './legacy/web-0.3.1/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
 import { pairSegments } from '../lib/segmentation.js';
 import { parseWorkfile as parseWorkfileWeb020 } from './legacy/web-0.2.0/manuscript.js';

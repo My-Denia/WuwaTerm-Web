@@ -12,7 +12,7 @@ import { summarizeReviewParts } from './review-report.js';
 
 export type MarkdownSpan = { start: number; end: number; text: string };
 export type MarkdownCandidate = { candidate_id: string; zh: string; en: string; category: string; sources: { source_file: string; source_id: string }[] };
-export type MarkdownFinding = { id: string; rule_id: string; verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: MarkdownCandidate[]; candidates_truncated: boolean };
+export type MarkdownFinding = { id: string; rule_id: string; verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: MarkdownCandidate[]; candidates_truncated: boolean; reason?: string };
 export type MarkdownReport = {
   request_id: string; source_revision: string; target_revision: string; rule_version: string;
   dictionary: { schema_version: string | null; source_commit: string | null; term_count: number; revision?: string };
@@ -34,7 +34,7 @@ export type MarkdownSemantic = { items: MarkdownSemanticItem[]; resolved: number
 // stale (re-check pending); without it, `stale` alone decides the label.
 // `truncated` (the segment result left findings out) and `candidates_truncated` (a finding left candidates out) are rendered
 // with the same lines as the document report's.
-export type MarkdownSegmentTerms = { index: number; state?: 'pending' | 'saved' | 'current' | 'stale'; stale: boolean; truncated?: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[]; candidates_truncated?: boolean }[] };
+export type MarkdownSegmentTerms = { index: number; state?: 'pending' | 'saved' | 'current' | 'stale'; stale: boolean; truncated?: boolean; findings: { verdict: string; source_span: MarkdownSpan; target_span: MarkdownSpan | null; candidates: { zh: string; en: string }[]; candidates_truncated?: boolean; reason?: string }[] };
 export type MarkdownCurrency = 'current' | 'stale' | 'imported' | 'none';
 
 export type MarkdownReportInput = {
@@ -111,6 +111,8 @@ export function isMarkdownReportExport(text: string): boolean {
 export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguage): string {
   const m = msg(lang);
   const md = m.md;
+  // A not_evaluated finding's reason, in words; a value this build does not know is written as it is.
+  const reasonText = (reason: string) => fill(m.review.reasonLabel, { reason: (m.review.reasons as Record<string, string>)[reason] ?? inline(reason) });
   const out: string[] = [];
   const heading = (depth: number, text: string) => out.push('#'.repeat(depth) + ' ' + text, '');
   const paragraph = (text: string) => out.push(text, '');
@@ -196,6 +198,7 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
           : md.notProvided));
       }
       if (finding.candidates_truncated) paragraph(md.candidatesTruncatedLine);
+      if (finding.reason) paragraph(reasonText(finding.reason));
       out.push('');
     });
 
@@ -272,7 +275,8 @@ export function renderMarkdownReport(input: MarkdownReportInput, lang: UiLanguag
         + ' · ' + inline(finding.source_span.text) + ' · ' + fill(md.spanLabel, { start: finding.source_span.start + 1, end: finding.source_span.end })
         + (finding.target_span ? ' · ' + fill(md.targetSpanLabel, { start: finding.target_span.start + 1, end: finding.target_span.end }) + colon(lang) + inline(finding.target_span.text) : ' · ' + md.noTargetSpan)
         + (finding.candidates.length ? ' · ' + finding.candidates.map(c => inline(c.zh) + ' / ' + inline(c.en)).join(semicolon(lang)) : '')
-        + (finding.candidates_truncated ? ' · ' + md.candidatesTruncatedLine : ''))), '');
+        + (finding.candidates_truncated ? ' · ' + md.candidatesTruncatedLine : '')
+        + (finding.reason ? ' · ' + reasonText(finding.reason) : ''))), '');
     }
   }
   if (input.semantic) {
