@@ -1,0 +1,214 @@
+{
+  "format": "wuwaterm-manuscript-v4",
+  "spec": "SPEC.md",
+  "codes": [
+    "workfile_not_json",
+    "workfile_too_large",
+    "workfile_too_deep",
+    "workfile_too_many_entries",
+    "workfile_too_many_fields",
+    "workfile_forbidden_field",
+    "workfile_unsupported_format",
+    "workfile_invalid_content",
+    "workfile_duplicate_choices",
+    "workfile_segment_invalid",
+    "workfile_segment_order",
+    "workfile_segment_anchor_invalid",
+    "workfile_progress_invalid"
+  ],
+  "limits": {
+    "file_bytes": 46137344,
+    "legacy_file_bytes": 1048576,
+    "text_scalars": 46137344,
+    "array_items": 512,
+    "v1_v2_part_array_items": 128,
+    "object_fields": 32,
+    "depth": 16,
+    "segments": 512,
+    "segment_choice_history": 512,
+    "progress_completed": 512,
+    "core_scalars": 2000,
+    "findings_per_result": 128,
+    "candidates_per_finding": 8,
+    "choices_per_record": 128,
+    "offered_per_choice": 8,
+    "choices": 128,
+    "resolutions_per_history_snapshot": 128,
+    "findings_per_history_report": 128,
+    "history": 2,
+    "alignments": 64,
+    "semantic_decisions": 128,
+    "semantic_texts": 16,
+    "semantic_history": 2,
+    "semantic_history_segments": 64,
+    "v1_v3_items_per_list": 32
+  },
+  "valid": [
+    {
+      "file": "valid-v4-document-dense.json",
+      "canonical": "valid-v4-document-dense.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "document mode: a history report with 40 findings (five not_evaluated, one per reason code, each with `reason` last), 40 resolutions and 40 choices; every list is over the 32 of v1 to v3, so v4 is the lowest format that holds it"
+    },
+    {
+      "file": "valid-v4-document-dense.json",
+      "pad_to_bytes": 1048577,
+      "canonical": "valid-v4-document-dense.json",
+      "legacy_error": "workfile_too_large",
+      "note": "the same v4 file padded with spaces to 1 MiB plus one byte: a v4 reader accepts it (v4 has the 44 MiB cap); a v1 to v3 reader stops at its 1 MiB check"
+    },
+    {
+      "file": "valid-v4-document-reason-only.json",
+      "canonical": "valid-v4-document-reason-only.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "document mode, every list within 32, but two history findings are not_evaluated with a `reason`: the reason alone makes v4 the lowest format"
+    },
+    {
+      "file": "valid-v4-segments-dense.json",
+      "canonical": "valid-v4-segments-dense.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "long mode, three ready segments: pending with an unconfirmed choice; done with 128 findings (123 verified, one not_evaluated per reason code in the rest) and 128 confirmed choices; stale with 33 findings and 33 choices"
+    },
+    {
+      "file": "valid-v4-segment-reason-only.json",
+      "canonical": "valid-v4-segment-reason-only.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "long mode, every list within 32, but one record finding is not_evaluated with a `reason`: v4"
+    },
+    {
+      "file": "valid-v4-fits-v3.json",
+      "canonical": "valid-v3-from-v4.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a v4 file whose lists are all within 32 and without a reason: a writer writes it back as v3 (valid-v3-from-v4.json)"
+    },
+    {
+      "file": "valid-v3-from-v4.json",
+      "canonical": "valid-v3-from-v4.json",
+      "legacy_error": null,
+      "note": "the v3 bytes of valid-v4-fits-v3.json"
+    },
+    {
+      "file": "valid-v4-fits-v1.json",
+      "canonical": "valid-v1-from-v4.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a v4 file with no segment state, every list within 32 and no reason, under 1 MiB: a writer writes it back as v1 (valid-v1-from-v4.json)"
+    },
+    {
+      "file": "valid-v1-from-v4.json",
+      "canonical": "valid-v1-from-v4.json",
+      "legacy_error": null,
+      "note": "the v1 bytes of valid-v4-fits-v1.json"
+    }
+  ],
+  "invalid": [
+    {
+      "file": "invalid-v4-129-findings-document.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "a history report with 129 findings: the v1/v2 part array cap is 128 (as for 129 decisions in v3), checked before the content"
+    },
+    {
+      "file": "invalid-v4-129-resolutions.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "a history snapshot with 129 resolutions"
+    },
+    {
+      "file": "invalid-v4-129-choices.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "129 top-level choices: the same array cap of 128"
+    },
+    {
+      "file": "invalid-v4-129-findings-segment.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "a record result with 129 findings (the count is checked before the content)"
+    },
+    {
+      "file": "invalid-v4-129-segment-choices.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "a record with 129 choices"
+    },
+    {
+      "file": "invalid-v4-reason-on-verified.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a history finding that is verified_constraint with a `reason`: a reason belongs to not_evaluated only"
+    },
+    {
+      "file": "invalid-v4-reason-null.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a not_evaluated history finding with `reason: null`: an absent reason is no key, never null"
+    },
+    {
+      "file": "invalid-v4-reason-unknown.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a not_evaluated history finding whose reason is not one of the five codes"
+    },
+    {
+      "file": "invalid-v4-segment-reason-on-verified.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a record finding that is verified_constraint with a `reason`"
+    },
+    {
+      "file": "invalid-v4-segment-reason-null.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a not_evaluated record finding with `reason: null`"
+    },
+    {
+      "file": "invalid-v4-segment-reason-unknown.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a not_evaluated record finding whose reason is not one of the five codes"
+    },
+    {
+      "file": "invalid-v4-format-v5.json",
+      "error": "workfile_unsupported_format",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "an unknown format version falls through to the v2 reader"
+    },
+    {
+      "file": "invalid-v4-v3-format-33-choices.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "the v3 label keeps the v3 limits: a record with 33 choices"
+    },
+    {
+      "file": "invalid-v4-v3-format-33-findings.json",
+      "error": "workfile_too_many_entries",
+      "legacy_error": "workfile_too_many_entries",
+      "note": "the v3 label keeps the v3 limits: a record result with 128 findings"
+    },
+    {
+      "file": "invalid-v4-v3-format-reason.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_segment_invalid",
+      "note": "the v3 label rejects a finding `reason`: the finding has an extra key"
+    },
+    {
+      "file": "invalid-v4-v2-format-reason.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_invalid_content",
+      "note": "the v2 label rejects a history finding `reason` (an extra key in a v1/v2 report)"
+    },
+    {
+      "file": "invalid-v4-v2-format-33-choices.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_invalid_content",
+      "note": "the v2 label keeps the limit of 32 choices (33 choices, within the v2 array cap of 128)"
+    },
+    {
+      "file": "valid-v4-document-dense.json",
+      "pad_to_bytes": 46137345,
+      "error": "workfile_too_large",
+      "legacy_error": "workfile_too_large",
+      "note": "a v4 file one byte over 44 MiB (46,137,345 bytes)"
+    }
+  ]
+}
