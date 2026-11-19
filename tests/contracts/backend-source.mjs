@@ -12,9 +12,11 @@ export function requireBackendCheckout() {
   return root;
 }
 
-// The checkout must be both at the pinned commit and unmodified under src/, because the
-// live review contract runs the Core's own application code: a locally modified backend
-// would otherwise answer for a commit that is not the one CI publishes.
+// The checkout must be a Core repository root without uncommitted src/ bytes, because the live
+// review contract runs that checkout's own application code. Its HEAD is deliberately not
+// compared with contracts/backend-ref.txt: this repository's CI checks that pin out, while
+// Core CI (`.github/workflows/ci.yml`, job "API to Web contract") passes its own candidate
+// commit as WUWATERM_BACKEND_ROOT so the pair is tested forward, before Core merges.
 export function requireBackendRoot() {
   const root = requireBackendCheckout();
   const pin = readFileSync(fileURLToPath(new URL('../../contracts/backend-ref.txt', import.meta.url)), 'utf8').trim();
@@ -22,9 +24,8 @@ export function requireBackendRoot() {
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
   const top = git('rev-parse', '--show-toplevel').toString('utf8').trim();
   assert.equal(realpathSync(root), realpathSync(top), 'The backend root must be the checkout root');
-  const actual = git('rev-parse', '--verify', 'HEAD^{commit}').toString('utf8').trim();
-  assert.equal(actual, pin, 'Backend checkout does not match contracts/backend-ref.txt');
+  const commit = git('rev-parse', '--verify', 'HEAD^{commit}').toString('utf8').trim();
   const modified = git('status', '--porcelain', '--untracked-files=no', '--', 'src').toString('utf8').trim();
-  assert.equal(modified, '', `Backend src/ differs from committed ${pin}; the live server would not be the pinned source`);
+  assert.equal(modified, '', `Backend src/ differs from ${commit}; the live server would not be the checked-out source`);
   return root;
 }

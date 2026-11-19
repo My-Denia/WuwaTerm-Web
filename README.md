@@ -58,7 +58,7 @@ WUWATERM_WEB_ROOT=/path/to/web python -m pytest -m cross_component tests/test_me
 ```
 
 The backend checkout needs its documented Python development dependencies. The
-contract job also starts the pinned Core's own `POST /v1/reviews` on a loopback
+contract job also starts that checkout's own `POST /v1/reviews` on a loopback
 socket and sends `dense-128`/`reason-v1` requests through this repository's BFF,
 including one body above 32 KiB, so it needs an interpreter that can import the
 backend; the suite takes the checkout's `.venv` or `python3`, and

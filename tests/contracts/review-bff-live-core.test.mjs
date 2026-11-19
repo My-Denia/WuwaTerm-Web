@@ -10,9 +10,11 @@ import { createNodeEnvironment } from '../../lib/runtime/node.js';
 import { parseReviewRequest, proxyReviewRequest } from '../../lib/wuwaterm-proxy.js';
 import { requireBackendRoot } from './backend-source.mjs';
 
-// The two review-v2 features the workbench asks for, end to end against the pinned Core: a real
-// `POST /v1/reviews` served by the Core's own application object, reached over a loopback socket
-// by the real BFF, with dense-128 and reason-v1 negotiated in `X-WuwaTerm-Review-Features`.
+// The two review-v2 features the workbench asks for, end to end against the Core checkout under
+// test: a real `POST /v1/reviews` served by the Core's own application object, reached over a
+// loopback socket by the real BFF, with dense-128 and reason-v1 negotiated in
+// `X-WuwaTerm-Review-Features`. Web CI points that checkout at contracts/backend-ref.txt, and
+// Core CI points it at the Core pull request's own commit, so the pair is proved forward too.
 //
 // The recorded fixtures in tests/fixtures prove the BFF's own contract. This file proves the live
 // pair: the header the browser sends, the header the BFF forwards, the body Core's 64 KiB reader
@@ -42,12 +44,14 @@ function corePython() {
     join(backendRoot, '.venv', 'bin', 'python'),
     'python3',
   ].filter(Boolean);
+  // The helper loads the wuwaterm* source from the checkout itself, so the interpreter only has
+  // to provide the Core's runtime dependencies; a wuwaterm installed from another checkout is fine.
   for (const candidate of candidates) {
-    const probe = spawnSync(candidate, ['-c', 'import wuwaterm_api'], { stdio: 'ignore' });
+    const probe = spawnSync(candidate, ['-c', 'import fastapi, uvicorn, httpx, pytest'], { stdio: 'ignore' });
     if (probe.status === 0) return candidate;
   }
   assert.fail(
-    `No Python can import wuwaterm_api from ${backendRoot}; set WUWATERM_CORE_PYTHON to an interpreter with the pinned Core installed`,
+    `No Python has the pinned Core's runtime dependencies (fastapi, uvicorn, httpx, pytest); set WUWATERM_CORE_PYTHON to one that does`,
   );
 }
 

@@ -20,27 +20,30 @@ PR #199, the semantic review engine: semantic review is experimental and off unl
 `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and `translation-context-v1` is always listed when a
 model is configured), which was raised from `7122ea7cb41e5987aac80b23fc27bd071fcfa22b`
 (Core PR #198, the contracts) by Web PR #16.
-`contracts/windows-ref.txt` names the Windows commit the manuscript contract runs against.
-It moves to the Windows 0.6.0 merge commit when that release lands, the first consumer that
-reads and writes `wuwaterm-manuscript-v4`.
+`contracts/windows-ref.txt` is `eaceb8bbe847f4db14f227dea274261fa2dc5784`
+(WuwaTerm-Windows PR #30, the 0.6.0 release that reads and writes
+`wuwaterm-manuscript-v4`; raised from `e8880eb27b6117ff30d3bf134022303fe5f1a441`, PR #20, v3
+only).
 
 The Web and Windows manuscript contract test exchanges manuscripts in every format in both
 directions: the Unicode v1 case, every valid `contracts/manuscript-v2/`,
-`contracts/manuscript-v3/` and `contracts/manuscript-v4/` fixture, is read alike by both and written back to its canonical
-bytes, every invalid fixture is rejected by both with its code, the explicit-alignments
-fixture gets the same alignment input digests, and a long manuscript with choices, a
-target-only edit and progress, built by each client's own runtime, gives the same v3 bytes
-and is kept unchanged by the other. The v4 cases take their expectation from
-`contracts/windows-ref.txt` itself: a consumer that implements v3 only (Windows 0.5.1)
-must still give each file the v3 code, and Windows 0.6.0 must read and write every one of
-them, so raising the pin is the whole change.
+`contracts/manuscript-v3/` and `contracts/manuscript-v4/` fixture, is read alike by both and
+written back to its canonical bytes, every invalid fixture is rejected by both with its
+code, the explicit-alignments fixture gets the same alignment input digests, and a long
+manuscript with choices, a target-only edit and progress, built by each client's own
+runtime, gives the same v3 bytes and is kept unchanged by the other. The v4 cases carry no
+transitional expectation: the pinned consumer reads, writes and rejects the same files as
+the Web, in both directions.
 
-The dense review contract runs against the live pinned Core, not a recorded body: the
-contract suite starts the Core's own application object on a loopback socket and sends a
+The dense review contract runs against a live Core checkout, not a recorded body: the
+contract suite starts that checkout's own application object on a loopback socket and sends a
 `/api/reviews` request through the real parser and BFF, once with
 `X-WuwaTerm-Review-Features: dense-128,reason-v1` and once without it, including a body
-above 32 KiB. Both features are a consumer-side opt-in, and the BFF reads a dense answer
-and the published 32-finding one, so the Web works against a Core with them and against one
+above 32 KiB. Web CI passes `contracts/backend-ref.txt` as that checkout and Core CI's
+`API to Web contract` job passes the Core pull request's own commit, so the same suite proves
+the pinned pair and a candidate Core before it merges. Both features are a consumer-side
+opt-in: the BFF forwards the header only when the browser sent it, and the BFF's validator
+accepts the 32-finding answer, so the Web works against a Core with them and against one
 without.
 
 The meta contract sends actual Python API response bodies through the real BFF.

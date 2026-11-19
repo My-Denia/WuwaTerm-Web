@@ -308,8 +308,10 @@ function segmentsPayload() {
 // ---- the cases ----
 
 /**
- * What the frozen Web 0.3.1 reader gives a file (the last reader without v4): the error code, or null when it accepts it. Windows
- * 0.5.1, at the same contract level, gives the same code (tests/contracts/windows-manuscript.test.mjs asserts it for the pinned one).
+ * What the frozen Web 0.3.1 reader gives a file (the last reader without v4): the error code, or null when it accepts it.
+ * `tests/manuscript-v4.test.mjs` asserts every case against that reader, and Windows 0.5.1, at the same contract level, gives the
+ * same code. The Windows client pinned in `contracts/windows-ref.txt` reads and writes v4, so
+ * `tests/contracts/windows-manuscript.test.mjs` asserts the shared codes against it instead of a legacy one.
  */
 function legacyCode(content) {
   try { parseWeb031(content); return null; } catch (error) { return error.code; }

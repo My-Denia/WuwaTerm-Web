@@ -21,8 +21,14 @@ goes to standard error. The process serves until it is terminated.
 
 ``WUWATERM_API_MAX_BODY_BYTES`` is not consulted: the application is built with
 the 64 KiB production ceiling explicitly, which is the size this contract needs.
+
+The ``wuwaterm`` and ``wuwaterm_api`` source always comes from the checkout
+named on the command line, even when the interpreter has a different checkout
+installed editably; the interpreter supplies the third-party dependencies (and,
+with them, distribution metadata such as ``service_version``).
 """
 
+import importlib.machinery
 import importlib.util
 import json
 import shutil
@@ -71,6 +77,34 @@ def unwrap(module, name: str):
     return wrapped
 
 
+def load_checkout_package(name: str, source_root: Path) -> None:
+    """Import a top-level package from the checkout, ahead of an editable install.
+
+    ``sys.path`` alone is not enough: a ``pip install -e`` of another checkout of
+    this Core registers a meta-path finder, and meta-path finders run before the
+    path-based one, so ``import wuwaterm_api`` would silently load that tree
+    instead of the one under test. Loading the package from ``<root>/src`` and
+    registering it in ``sys.modules`` first makes every submodule resolve through
+    the checkout's own ``__path__``; :func:`verify_provenance` then checks it.
+    """
+    spec = importlib.machinery.PathFinder.find_spec(name, [str(source_root)])
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"{source_root} does not contain the {name} package")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+
+
+def verify_provenance(root: Path, names: tuple[str, ...]) -> None:
+    """Refuse to serve if the code under test is not the checkout the caller named."""
+    for name in names:
+        origin = Path(getattr(sys.modules.get(name), "__file__", "") or "").resolve()
+        if not origin.is_relative_to(root):
+            raise RuntimeError(
+                f"{name} was imported from {origin or 'nowhere'}, not from {root}"
+            )
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: core-review-server.py <backend-root>", file=sys.stderr)
@@ -80,6 +114,10 @@ def main() -> int:
         print(f"{root} is not a WuwaTerm Core checkout", file=sys.stderr)
         return 2
     sys.path.insert(0, str(root))
+    sys.path.insert(0, str(root / "src"))
+    load_checkout_package("wuwaterm", root / "src")
+    load_checkout_package("wuwaterm_api", root / "src")
+    verify_provenance(root, ("wuwaterm", "wuwaterm_api"))
 
     conftest = load_conftest(root)
     workdir = Path(tempfile.mkdtemp(prefix="wuwaterm-core-review-"))

@@ -143,7 +143,7 @@ format is written in that format (fixtures `valid-v4-fits-v3.json` and
 ## Compatibility
 
 - **New clients** read v1 to v4 and write by the rule above.
-- **Old clients** (Web 0.3.1, Windows at the v3 contract) read a v4 file as unsupported,
+- **Old clients** (Web 0.3.1, Windows 0.5.1) read a v4 file as unsupported,
   explicitly: they read nothing from it and keep the manuscript that is already open. The
   code depends on the file:
   - `workfile_too_large` when the file is over 1 MiB, their first check;
@@ -154,9 +154,9 @@ format is written in that format (fixtures `valid-v4-fits-v3.json` and
 
   `cases.json` records each case's code under those clients as `legacy_error`. Web's test
   asserts it against `tests/legacy/web-0.3.1/manuscript.js`, a frozen copy of the Web
-  0.3.1 parser (tag `v0.3.1`), and the Windows contract test asserts it against the
-  Windows revision that `contracts/windows-ref.txt` pins, until that pin moves to a
-  revision that implements v4.
+  0.3.1 parser (tag `v0.3.1`). The Windows client pinned in `contracts/windows-ref.txt`
+  reads and writes v4, so the Windows contract test asserts the shared codes against it
+  rather than a legacy code.
 - **v3 contract.** `contracts/manuscript-v3/` does not change. Its case
   `invalid-v3-format-v4.json`, an unknown format version for a v3 reader, is a valid v4
   payload: a v4-capable reader accepts it, and the v3 tests assert its v3 code against
