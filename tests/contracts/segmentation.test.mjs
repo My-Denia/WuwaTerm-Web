@@ -12,9 +12,9 @@ import {
   pairSegments,
   segmentText,
 } from '../../lib/segmentation.js';
+import { requireBackendCheckout } from './backend-source.mjs';
 
-const root = process.env.WUWATERM_BACKEND_ROOT;
-assert.ok(root, 'Set WUWATERM_BACKEND_ROOT to the pinned backend checkout');
+const root = requireBackendCheckout();
 const fixture = JSON.parse(readFileSync(join(root, 'contracts', 'segmentation-v1.json'), 'utf8'));
 
 const join_ = (text, spans) => {

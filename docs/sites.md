@@ -136,8 +136,8 @@ features answers in the old shape, which is still read.
 
 A manuscript that holds more than that, or a reason, is written as
 `wuwaterm-manuscript-v4` ([specification](../contracts/manuscript-v4/SPEC.md)); one
-that does not keeps v1, v2 or v3. Web 0.3.1 and the Windows release that pins the
-v3 contract reject v4 files with an explicit error.
+that does not keeps v1, v2 or v3. Web 0.3.1 and Windows 0.5.1 reject v4 files with
+an explicit error and keep the manuscript they already have open.
 
 ### Term groups
 

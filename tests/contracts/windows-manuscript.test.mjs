@@ -383,9 +383,10 @@ test('every valid v3 fixture is read alike by Web and Windows, and both write ba
   }
 });
 
-// The Windows pin that still reads v3 only. invalid-v3-format-v4.json is the v3 contract's "unknown format version" case, and a valid
-// v4 payload: the v4-capable Web reader accepts it, and a Windows consumer reads it as soon as the pin moves to one that implements v4
-// (contracts/manuscript-v4). Until then the pinned consumer keeps rejecting it with the v3 code.
+// The last Windows pin that reads v3 only (0.5.1). The v4 cases take their expectation from contracts/windows-ref.txt itself: against
+// this pin every v4-only file must still give the v3 contract's code, and against a pin that implements v4 (Windows 0.6.0 and later)
+// the same cases must read and write it. invalid-v3-format-v4.json is the v3 contract's "unknown format version" case and a valid
+// v4 payload, so it follows the same rule; raising the pin is therefore the whole change.
 const V3_ONLY_WINDOWS_PIN = 'e8880eb27b6117ff30d3bf134022303fe5f1a441';
 const windowsPin = readFileSync(fileURLToPath(new URL('../../contracts/windows-ref.txt', import.meta.url)), 'utf8').trim();
 const READ_AS_V4 = new Set(['invalid-v3-format-v4.json']);
@@ -509,7 +510,7 @@ test('a long manuscript with choices, a target-only edit and progress: Web and W
   assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, web.content);
 });
 
-// ---- Manuscript v4: transitional while the pin is a Windows that implements v3 only -----------------------------------------------
+// ---- Manuscript v4: whether the pinned consumer must implement it is read from contracts/windows-ref.txt --------------------
 
 const v4Dir = fileURLToPath(new URL('../../contracts/manuscript-v4/', import.meta.url));
 const v4Cases = JSON.parse(readFileSync(join(v4Dir, 'cases.json'), 'utf8'));
@@ -517,7 +518,7 @@ const readV4 = file => readFileSync(join(v4Dir, file), 'utf8');
 const contentOfV4 = c => (c.pad_to_bytes ? readV4(c.file) + ' '.repeat(c.pad_to_bytes - Buffer.byteLength(readV4(c.file), 'utf8')) : readV4(c.file));
 const windowsReadsV4 = windowsPin !== V3_ONLY_WINDOWS_PIN;
 
-test('every valid v4 fixture: Web reads it and writes its canonical bytes; Windows gives it its legacy code until the pin implements v4, then reads and writes it alike', () => {
+test('every valid v4 fixture: Web reads it and writes its canonical bytes; a v3-only pinned Windows gives it the legacy code, a v4-capable one reads and writes it alike', () => {
   for (const c of v4Cases.valid) {
     const content = contentOfV4(c);
     const web = parseWorkfile(content);
@@ -533,7 +534,7 @@ test('every valid v4 fixture: Web reads it and writes its canonical bytes; Windo
   }
 });
 
-test('every invalid v4 fixture: Web gives its code; Windows gives its legacy code until the pin implements v4, then the same code', () => {
+test('every invalid v4 fixture: Web gives its code; a v3-only pinned Windows gives its legacy code, a v4-capable one the same code', () => {
   const differing = [];
   for (const c of v4Cases.invalid) {
     const content = contentOfV4(c);

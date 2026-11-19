@@ -3,10 +3,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { CATEGORY_LABEL_KEYS, REASON_LABEL_KEYS, categoryLabel, reasonLabel } from '../../lib/dictionary-labels.ts';
+import { requireBackendCheckout } from './backend-source.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
 
-const root = process.env.WUWATERM_BACKEND_ROOT;
-assert.ok(root, 'Set WUWATERM_BACKEND_ROOT to the pinned backend checkout');
+const root = requireBackendCheckout();
 const read = name => readFileSync(join(root, name), 'utf8');
 const windowsRoot = requireWindowsRoot();
 
