@@ -144,6 +144,6 @@ test('review UI imports the report module and does not insert manuscripts as HTM
   assert.match(zhCatalog, /rowReviewCeiling: '\{n\} 次 \/ UTC 日'/u);
   assert.match(component, /fill\(m\.review\.charCounts/u);
   assert.match(zhCatalog, /charCounts: '原文 \{s\} \/ 2,000 · 译文 \{t\} \/ 2,000'/u);
-  assert.match(component, /validReport\(value, source, target\)/u);
+  assert.match(component, /validReport\(value, source, target, REPORT_V4\)/u);
   assert.match(translation, /const result = state\.data/u);
 });

@@ -12,8 +12,8 @@ import {
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../../lib/semantic-run.js';
 import {
-  applyResult, chooseTerm, exportSegments, probeIndex, reconfirmChoice, recheckPlan, recordView, removeChoice, removeHistoryEntry,
-  restorableHistory, restoreHistoryEntry, sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished,
+  applyResult, chooseTerm, exportSegments, groupTermOccurrences, probeIndex, reconfirmChoice, recheckPlan, recordView, removeChoice, removeHistoryEntry,
+  restorableHistory, restoreHistoryEntry, reviseSegmentTarget, sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished, spliceTargetSpan, termSegments,
 } from '../../lib/long-review.js';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES, SEMANTIC_REVIEW_VERSION,
@@ -25,7 +25,7 @@ import {
   reconcileState, removeDecision, upsertDecision,
 } from '../../lib/semantic-state.js';
 import { insertParagraphBreak, linesToParagraphs, mergeParagraphs, pairShape, singleBreaks, splitLayout } from '../../lib/manual-split.js';
-import { recoverSpan, validReport } from '../../lib/manuscript.js';
+import { REPORT_V4, recoverSpan, validReport } from '../../lib/manuscript.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { highlightSegments, revisionOf } from '../../lib/review-report.js';
 import { compactScalarContext } from '../../lib/review-navigation.js';
@@ -42,6 +42,14 @@ import { numberLocale, type UiLanguage } from '../../lib/ui-language';
  */
 export const PRECEDENTS_DEFAULT_ON = true;
 
+// One /api/reviews request may carry up to 128 resolutions: 64 KiB. The features are asked for on every review-v2 request; an older
+// service answers in the old shape, which is still read.
+const REVIEW_REQUEST_LIMIT = 65_536;
+const REVIEW_FEATURES = 'dense-128,reason-v1';
+/** Longest list of segment numbers a banner spells out. */
+const NUMBERS_SHOWN = 8;
+const GROUP_FILTERS = ['all', 'inconsistent', 'pending', 'not_evaluated', 'confirmed'] as const;
+type GroupFilter = (typeof GROUP_FILTERS)[number];
 export type Span = { start: number; end: number; text: string };
 type Region = { start: number; end: number };
 type PairRegion = { start: number; end: number; core_start: number; core_end: number };
@@ -66,7 +74,10 @@ export type Placed = {
 };
 // Long-manuscript term review (lib/long-review.js; contracts/manuscript-v3/SPEC.md).
 type TermCandidate = { candidate_id: string; zh: string; en: string; category: string };
-type TermFinding = { id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: TermCandidate[]; candidates_truncated: boolean };
+type TermFinding = { id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: TermCandidate[]; candidates_truncated: boolean; reason?: string };
+type TermGroup = import('../../lib/long-review.js').TermGroup;
+type Occurrence = import('../../lib/long-review.js').Occurrence;
+type ContextSnippet = import('../../lib/long-review.js').Snippet;
 type TermReport = { findings: TermFinding[]; truncated: boolean };
 export type Basis = { rule_version: string; dictionary: { schema_version: string; source_commit: string; term_count: number; revision: string }; matcher_revision: string };
 /** The basis of the latest live segment response: null before one arrives, false when it carried none. Not user work. */
@@ -77,7 +88,7 @@ type SegmentInput = { pair: Pair; range: { source_start: number; source_end: num
 type RecordState = 'pending' | 'saved' | 'current' | 'stale';
 type RecordView = { state: RecordState; ready: boolean; needsCheck: boolean; finished: boolean; choices: (LongChoice & { view: 'applies' | 'needs_reconfirmation' | 'waiting' })[] };
 type LongCtx = { draft: Draft; basis: SessionBasis };
-type ExportRow = { index: number; state: RecordState; stale: boolean; truncated: boolean; source_start: number; source_end: number; target_start: number; target_end: number; report: TermReport & Record<string, unknown>; findings: { verdict: string; source_span: Span; target_span: Span | null; candidates: { zh: string; en: string }[]; candidates_truncated: boolean }[] };
+type ExportRow = { index: number; state: RecordState; stale: boolean; truncated: boolean; source_start: number; source_end: number; target_start: number; target_end: number; report: TermReport & Record<string, unknown>; findings: { verdict: string; source_span: Span; target_span: Span | null; candidates: { zh: string; en: string }[]; candidates_truncated: boolean; reason?: string }[] };
 const inputsOf = (draft: Draft) => segmentInputs(draft) as { long: boolean; items: SegmentInput[] };
 const viewOf = (long: LongState, index: number, ctx: LongCtx) => recordView(long, index, ctx) as RecordView | null;
 const rowsOf = (long: LongState, ctx: LongCtx) => exportSegments(long, ctx) as ExportRow[];
@@ -178,6 +189,12 @@ function Marked({ text, offset, marks, activeRef }: { text: string; offset: numb
     : <mark key={i} className={part.mark === 'active' ? 'compare-active' : 'compare-other'} ref={part.mark === 'active' ? el => { activeRef.current = el; } : undefined}>{part.text}</mark>)}</p>;
 }
 
+/** A context snippet of the term view: the hit marked, with a hint where text was cut. */
+function ContextLine({ context, missing }: { context: ContextSnippet | null; missing: string }) {
+  if (!context) return <p className="review-excerpt">{missing}</p>;
+  return <p className="review-excerpt">{context.clippedBefore ? '…' : null}{context.before}<mark>{context.hit}</mark>{context.after}{context.clippedAfter ? '…' : null}</p>;
+}
+
 function Snippet({ text, span, missing }: { text: string; span: Span | null; missing: string }) {
   const compact = span && highlightSegments(text, span) ? compactScalarContext(text, span) : null;
   if (!compact) return <p className="review-excerpt">{missing}</p>;
@@ -210,6 +227,13 @@ export function SemanticWorkbench(props: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lastAction, setLastAction] = useState<{ placedId: string; marker: number; kind: string } | null>(null);
   const [pairTranslating, setPairTranslating] = useState<number | null>(null);
+  // The term view of a long manuscript: grouped by term (default) or in segment order, filtered by group status; the segment whose
+  // translation is being revised (the occurrence that opened it, the translation it started from, the text typed).
+  const [termView, setTermView] = useState<'groups' | 'segments'>('groups');
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
+  const [revising, setRevising] = useState<{ key: string; index: number; base: string; text: string } | null>(null);
+  // The split helper, which the banner's jump scrolls to and focuses.
+  const splitRef = useRef<HTMLDivElement | null>(null);
   const activeMark = useRef<HTMLElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
 
@@ -249,7 +273,7 @@ export function SemanticWorkbench(props: Props) {
   const [resetSeen, setResetSeen] = useState(resetSignal);
   if (resetSeen !== resetSignal) {
     setResetSeen(resetSignal);
-    dispatch({ type: 'reset' }); setActiveId(null); setLocalSegment(null); setSplitOpen(null); setLastAction(null);
+    dispatch({ type: 'reset' }); setActiveId(null); setLocalSegment(null); setSplitOpen(null); setLastAction(null); setRevising(null);
   }
   useEffect(() => {
     runGeneration.current += 1; runAbort.current?.abort(); runAbort.current = null; inflight.current = null; translateRun.current = null;
@@ -383,10 +407,10 @@ export function SemanticWorkbench(props: Props) {
     for (;;) {
       const request = segmentRequest(work.current.semantic.long, at, ctx, { withResolutions }) as { index: number; body: Record<string, unknown>; alignmentInput: string; sentKey: string } | null;
       if (!request) { dispatch({ type: 'skip', key: item.key }); return; }
-      if (new TextEncoder().encode(JSON.stringify(request.body)).length > 32768) { fail('bodyTooLarge'); return; }
+      if (new TextEncoder().encode(JSON.stringify(request.body)).length > REVIEW_REQUEST_LIMIT) { fail('bodyTooLarge'); return; }
       sent += 1;
       try {
-        const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', signal, body: JSON.stringify(request.body) });
+        const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json', 'X-WuwaTerm-Review-Features': REVIEW_FEATURES }, cache: 'no-store', signal, body: JSON.stringify(request.body) });
         const body = await responseBody(response);
         if (!live()) return;
         requestPoolRefresh();
@@ -397,7 +421,7 @@ export function SemanticWorkbench(props: Props) {
           failRun({ type: 'failed', key: item.key, ...failure, now: Date.now() });
           return;
         }
-        if (!validReport(body, request.body.source, request.body.target) || body?.rule_version !== 'review-v2') { fail('responseInvalid'); return; }
+        if (!validReport(body, request.body.source, request.body.target, REPORT_V4) || body?.rule_version !== 'review-v2') { fail('responseInvalid'); return; }
         const before = basisRef.current;
         let out: { long: LongState; basis: SessionBasis; secondRequest: boolean; error: string | null } | null = null;
         setSemantic(state => {
@@ -822,8 +846,33 @@ export function SemanticWorkbench(props: Props) {
     return record.state === 'current' ? s.segFinished : record.state === 'stale' ? s.segFinishedRecheck : `${s.segFinished} · ${base}`;
   };
   const LONG_ROWS = 100;
-  const visibleTermRows = termRows.filter(r => selectedSegment === null || r.index === selectedSegment);
-  const shownTermRows = selectedSegment === null ? visibleTermRows.slice(0, LONG_ROWS) : visibleTermRows;
+  const targetChars = useMemo(() => chars(target), [target]);
+  // Every segment's findings grouped by term (lib/long-review.js groupTermOccurrences), each place with its context.
+  const termGroups = useMemo(() => (long ? groupTermOccurrences(termSegments(semantic.long, longCtx), source, target, direction) as TermGroup[] : []),
+    [long, semantic.long, longCtx, source, target, direction]);
+  const groupCounts = useMemo(() => {
+    const n: Record<GroupFilter, number> = { all: termGroups.length, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 0 };
+    for (const g of termGroups) n[g.status] += 1;
+    return n;
+  }, [termGroups]);
+  // The selected segment's places only, when one is selected; a group keeps the status of all its places. Then the status filter.
+  const filteredGroups = termGroups
+    .map(g => ({ ...g, occurrences: g.occurrences.filter(o => selectedSegment === null || o.segmentIndex === selectedSegment) }))
+    .filter(g => g.occurrences.length > 0 && (groupFilter === 'all' || g.status === groupFilter));
+  const placeCount = filteredGroups.reduce((n, g) => n + g.occurrences.length, 0);
+  // At most LONG_ROWS places on screen at once, as before; selecting a segment shows its places in full.
+  let budget = selectedSegment === null ? LONG_ROWS : Infinity;
+  const shownGroups = filteredGroups.flatMap(g => {
+    if (budget <= 0) return [];
+    const part = g.occurrences.slice(0, budget);
+    budget -= part.length;
+    return [{ ...g, occurrences: part }];
+  });
+  const shownFlat = shownGroups.flatMap(g => g.occurrences);
+  const orderedFlat = termView === 'segments'
+    ? filteredGroups.flatMap(g => g.occurrences).sort((a, b) => a.segmentIndex - b.segmentIndex || a.docSource.start - b.docSource.start).slice(0, selectedSegment === null ? LONG_ROWS : undefined)
+    : [];
+  const truncatedRows = termRows.filter(r => r.report.truncated && (selectedSegment === null || r.index === selectedSegment));
   const longChoices = long ? views.flatMap((v, index) => (v.record?.choices ?? []).map(c => ({ index, view: v, choice: c }))) : [];
 
   const segmentLabel = (view: PairView) => {
@@ -847,9 +896,96 @@ export function SemanticWorkbench(props: Props) {
   // text it moves to the nearest pair that still needs a manual split.
   const manualViews = views.filter(v => v.pair.status === 'needs_manual_split');
   const splitView = splitOpen === null ? null : manualViews.find(v => v.pair.index === splitOpen) ?? manualViews.find(v => v.pair.index >= splitOpen) ?? manualViews.at(-1) ?? null;
+  // The banner's jump: the first pair that needs a manual split is selected, the segment filters follow it and the helper opens and
+  // takes focus. It does not edit anything.
+  function jumpToManual() {
+    const first = manualViews[0];
+    if (!first) return;
+    selectSegment(first.pair.index);
+    setSegmentFilter(first.pair.index);
+    setSplitOpen(first.pair.index);
+    // After the render that opens the helper (it may already be open at this pair).
+    requestAnimationFrame(() => {
+      splitRef.current?.scrollIntoView({ block: 'start' });
+      splitRef.current?.focus({ preventScroll: true });
+    });
+  }
   const runTermLabel = !plan ? '' : plan.probe !== null && plan.saved > 0
     ? (plan.due > 0 ? fill(s.runTermConfirmAnd, { n: plan.cost }) : s.runTermConfirm)
     : fill(s.runTerm, { n: plan.cost });
+
+  // ---- per-place edits in the term view: one place at a time, each its own undo step ----
+  const rendering = (candidate: TermCandidate) => (direction === 'en' ? candidate.en : candidate.zh);
+  /** Replace only this place's translation with the candidate's rendering; never every place the same word stands. */
+  function replaceOccurrence(occ: Occurrence, candidate: TermCandidate) {
+    const d = work.current.draft;
+    if (!occ.docTarget) return;
+    const out = spliceTargetSpan(d.target, occ.docTarget, rendering(candidate)) as { target?: string; error?: string };
+    if (out.error === 'span_mismatch') { commit({ semantic: x => x, notice: 'sem:longReplaceStale', remember: false }); return; }
+    if (out.target === undefined) return;
+    commit({ draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] }, notice: 'sem:longTargetReplaced' });
+  }
+  function openRevise(occ: Occurrence) {
+    const item = inputsOf(work.current.draft).items[occ.segmentIndex];
+    if (item) setRevising({ key: occ.key, index: occ.segmentIndex, base: item.targetCore, text: item.targetCore });
+  }
+  /** The segment's translation core becomes the typed text; the rest of the translation stays. */
+  function applyRevise() {
+    if (!revising) return;
+    const d = work.current.draft;
+    const item = inputsOf(d).items[revising.index];
+    const out = (item ? reviseSegmentTarget(d.target, { start: item.range.target_start, end: item.range.target_end }, revising.base, revising.text) : { error: 'core_mismatch' }) as { target?: string; error?: string };
+    if (out.target === undefined) { if (out.error !== 'noop') commit({ semantic: x => x, notice: 'sem:longReviseInvalid', remember: false }); return; }
+    setRevising(null);
+    commit({ draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] }, notice: 'sem:longSegmentRevised' });
+  }
+  const numberList = (numbers: number[]) => numbers.slice(0, NUMBERS_SHOWN).join(lang === 'en' ? ', ' : '、') + (numbers.length > NUMBERS_SHOWN ? '…' : '');
+  const renderOccurrence = (occ: Occurrence) => {
+    const finding = occ.finding as TermFinding;
+    const view = views[occ.segmentIndex];
+    const chosen = choiceAt(view, finding.source_span);
+    // A one-click replacement only where the translation still reads what the finding saw.
+    const live = occ.docTarget !== null && slice(targetChars, occ.docTarget.start, occ.docTarget.end) === occ.docTarget.text;
+    const at = { index: occ.segmentIndex, start: finding.source_span.start, end: finding.source_span.end };
+    const editing = revising?.key === occ.key ? revising : null;
+    const stateText = { saved: s.segTermSaved, current: s.segTermChecked, stale: s.segTermStale }[occ.freshness];
+    return <article className="term-result long-term" key={occ.key} data-segment={occ.segmentIndex} data-mention-id={finding.id} data-term-state={occ.freshness} data-verdict={occ.verdict} data-attention={occ.attention}>
+      <p className="result-summary"><span className={`verdict-badge verdict-${occ.verdict}`}>{(m.review.verdicts as Record<string, string>)[occ.verdict]}</span> · {fill(s.segmentLabel, { n: occ.segmentNumber })} · {finding.source_span.text}{occ.freshness !== 'current' ? ` · ${stateText}` : ''}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
+      {occ.reason && <p className="finding-reason" data-reason={occ.reason}>{fill(m.review.reasonLabel, { reason: (m.review.reasons as Record<string, string>)[occ.reason] ?? occ.reason })}</p>}
+      <p className="occurrence-position">{fill(s.occurrencePosition, { n: occ.segmentNumber, start: occ.docSource.start + 1, end: occ.docSource.end })}</p>
+      <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><ContextLine context={occ.sourceContext} missing={s.sourceMissing} /></div>
+      <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptTargetLabel}</span>
+        {occ.targetContext ? <ContextLine context={occ.targetContext} missing={m.review.excerptMissingTarget} />
+          : occ.targetExcerpt ? <><p className="review-excerpt target-excerpt">{occ.targetExcerpt.text}{occ.targetExcerpt.clipped ? '…' : ''}</p><p className="track-note">{s.occurrenceExcerpt}</p></>
+            : <p className="review-excerpt">{m.review.excerptMissingTarget}</p>}
+      </div>
+      <p className="occurrence-translation" data-hit={occ.translation === null ? 'false' : 'true'}>{occ.translation === null ? s.occurrenceNoHit : fill(s.occurrenceTranslation, { text: occ.translation })}</p>
+      {occ.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
+        <div className="finding-actions">
+          <button type="button" className="text-button" onClick={() => chooseLong(occ.segmentIndex, finding, c)}>{m.review.adopt}</button>
+          {live && rendering(c) !== occ.translation && <button type="button" className="text-button" title={fill(s.occReplaceAria, { n: occ.segmentNumber, term: rendering(c) })} onClick={() => replaceOccurrence(occ, c)}>{fill(s.occReplace, { term: rendering(c) })}</button>}
+        </div>
+      </div>)}
+      <div className="finding-actions">
+        <button type="button" className="text-button" onClick={() => chooseLong(occ.segmentIndex, finding, null)}>{m.review.notTerm}</button>
+        <button type="button" className="text-button" onClick={() => locate('source', occ.docSource)}>{m.review.jumpSource}</button>
+        <button type="button" className="text-button" disabled={!occ.docTarget} onClick={() => { if (occ.docTarget) locate('target', occ.docTarget); }}>{m.review.jumpTarget}</button>
+        {!occ.docTarget && <button type="button" className="text-button" aria-expanded={!!editing} onClick={() => (editing ? setRevising(null) : openRevise(occ))}>{s.occRevise}</button>}
+      </div>
+      {chosen && <p className="long-choice-state" data-choice-view={chosen.view}>{chosen.candidate ? fill(m.review.choicePair, { span: chosen.source_span.text, zh: chosen.candidate.zh, en: chosen.candidate.en }) : fill(m.review.choiceNotTerm, { span: chosen.source_span.text })} — {choiceViewText(chosen.view)}
+        {chosen.view === 'needs_reconfirmation' && view?.record?.state !== 'pending' && <> <button type="button" className="text-button" onClick={() => commitLong(state => reconfirmChoice(state, at) as { long: LongState; error: string | null }, 'sem:longChoiceRecorded')}>{s.choiceReconfirm}</button></>}</p>}
+      {editing && <div className="term-revise" role="group" aria-label={fill(s.reviseTitle, { n: occ.segmentNumber })}>
+        <h5>{fill(s.reviseTitle, { n: occ.segmentNumber })}</h5>
+        <p className="track-note">{s.reviseHint}</p>
+        <label htmlFor={`revise-${occ.key}`}>{fill(s.reviseLabel, { n: occ.segmentNumber })}</label>
+        <textarea id={`revise-${occ.key}`} rows={Math.min(14, Math.max(4, Math.ceil(chars(editing.text).length / 60)))} value={editing.text} onChange={e => setRevising({ ...editing, text: e.target.value })} />
+        <div className="actions">
+          <button type="button" disabled={!editing.text.trim() || editing.text === editing.base} onClick={applyRevise}>{s.reviseApply}</button>
+          <button type="button" className="secondary-button" onClick={() => setRevising(null)}>{s.reviseCancel}</button>
+        </div>
+      </div>}
+    </article>;
+  };
 
   // Shown in long mode, and in document mode while the choice history holds entries (leaving long mode moves every
   // choice there; the user can remove them, SPEC "Leaving long mode").
@@ -858,34 +994,28 @@ export function SemanticWorkbench(props: Props) {
     {long && <p className="track-note">{s.longTermsNote}</p>}
     {long && termRows.length === 0 && <p>{s.longTermsNone}</p>}
     {long && selectedSegment !== null && <p className="track-note">{fill(s.longTermsFiltered, { n: selectedSegment + 1 })}</p>}
-    {shownTermRows.flatMap(r => {
-      const view = views[r.index];
-      const cores = inputs.items[r.index];
-      // A truncated result (Core's 32-finding cap) still takes choices on the findings it shows (SPEC "Segment choice").
-      const note = r.report.truncated
-        ? [<p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>]
-        : [];
-      return [...note, ...r.report.findings.map((finding, k) => {
-        const placed = r.findings[k];
-        const chosen = choiceAt(view, finding.source_span);
-        return <article className="term-result long-term" key={`${r.index}:${finding.id}`} data-segment={r.index} data-mention-id={finding.id} data-term-state={r.state}>
-          <p className="result-summary"><span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span> · {fill(s.segmentLabel, { n: r.index + 1 })} · {finding.source_span.text}{r.state !== 'current' ? ` · ${{ pending: s.segTermPending, saved: s.segTermSaved, current: s.segTermChecked, stale: s.segTermStale }[r.state]}` : ''}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
-          {/* Excerpts come from the segment's cores (core-relative spans), so a long text is not scanned once per finding. */}
-          <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><Snippet text={cores?.sourceCore ?? ''} span={finding.source_span} missing={s.sourceMissing} /></div>
-          <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptTargetLabel}</span><Snippet text={cores?.targetCore ?? ''} span={finding.target_span} missing={m.review.excerptMissingTarget} /></div>
-          {finding.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
-            <div className="finding-actions"><button type="button" className="text-button" onClick={() => chooseLong(r.index, finding, c)}>{m.review.adopt}</button></div>
-          </div>)}
-          <div className="finding-actions">
-            <button type="button" className="text-button" onClick={() => chooseLong(r.index, finding, null)}>{m.review.notTerm}</button>
-            <button type="button" className="text-button" onClick={() => locate('source', placed.source_span)}>{m.review.jumpSource}</button>
-            <button type="button" className="text-button" disabled={!placed.target_span} onClick={() => { if (placed.target_span) locate('target', placed.target_span); }}>{m.review.jumpTarget}</button>
-          </div>
-          {chosen && <p className="long-choice-state" data-choice-view={chosen.view}>{chosen.candidate ? fill(m.review.choicePair, { span: chosen.source_span.text, zh: chosen.candidate.zh, en: chosen.candidate.en }) : fill(m.review.choiceNotTerm, { span: chosen.source_span.text })} — {choiceViewText(chosen.view)}</p>}
-        </article>;
-      })];
-    })}
-    {selectedSegment === null && visibleTermRows.length > LONG_ROWS && <p className="track-note">{fill(s.longTermsMore, { n: visibleTermRows.length - LONG_ROWS })}</p>}
+    {long && termGroups.length > 0 && <div className="term-view-bar">
+      <div className="term-view-toggle" role="group" aria-label={s.termViewAria}>
+        {(['groups', 'segments'] as const).map(id => <button key={id} type="button" className="secondary-button" aria-pressed={termView === id} onClick={() => setTermView(id)}>{id === 'groups' ? s.termViewGroups : s.termViewSegments}</button>)}
+      </div>
+      <div className="semantic-filters term-group-filters" role="group" aria-label={s.groupFilterAria}>
+        {GROUP_FILTERS.map(id => <button key={id} type="button" className="secondary-button" aria-pressed={groupFilter === id} data-group-filter={id}
+          aria-label={`${s.termViewGroups}：${s.groupFilters[id]} ${groupCounts[id]}`} onClick={() => setGroupFilter(id)}>{s.groupFilters[id]} {groupCounts[id]}</button>)}
+      </div>
+    </div>}
+    {long && truncatedRows.map(r => <p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>)}
+    {long && termGroups.length > 0 && placeCount === 0 && <p className="track-note">{s.groupsNone}</p>}
+    {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} aria-label={g.surface}>
+      <header className="term-group-head">
+        <h5 className="term-group-title"><span className="term-surface">{g.surface}</span>{g.surfaces.length > 1 && <span className="term-variants">（{g.surfaces.slice(1).join('、')}）</span>} <span className={`group-status group-status-${g.status}`}>{s.groupStatuses[g.status]}</span></h5>
+        <p className="term-group-meta">{fill(s.groupHead, { n: g.occurrenceCount, segments: numberList(g.segments) })}</p>
+        <p className="term-group-renderings">{fill(s.groupRenderings, { items: g.renderings.map(r => fill(s.renderingItem, { text: r.text ?? s.renderingNone, n: r.count })).join(' · ') })}</p>
+        {g.candidates.length > 0 && <p className="term-group-candidates">{fill(s.groupCandidates, { items: g.candidates.map(c => `${c.zh} / ${c.en}`).join(lang === 'en' ? '; ' : '；') })}</p>}
+      </header>
+      {g.occurrences.map(renderOccurrence)}
+    </section>)}
+    {long && termView === 'segments' && orderedFlat.map(renderOccurrence)}
+    {long && selectedSegment === null && placeCount > (termView === 'groups' ? shownFlat.length : orderedFlat.length) && <p className="track-note">{fill(s.longTermsMore, { n: placeCount - (termView === 'groups' ? shownFlat.length : orderedFlat.length) })}</p>}
     {longChoices.length > 0 && <div className="choice-records long-choices"><h4>{fill(s.longChoicesTitle, { n: longChoices.length })}</h4>
       {longChoices.map(({ index, view, choice: c }) => {
         const at = { index, start: c.source_span.start, end: c.source_span.end };
@@ -938,6 +1068,12 @@ export function SemanticWorkbench(props: Props) {
       </div>
       {runState !== 'idle' && <progress max={Math.max(1, progress.total)} value={progress.done} aria-label={runPhaseLine ?? ''} />}
       {runPhaseLine && <p className="run-phase" role="status" aria-live="polite" data-run-state={runState} data-run-kind={run.kind ?? undefined}>{runPhaseLine}</p>}
+      {manualViews.length > 0 && <div className="mismatch-banner" role="status" aria-live="polite" data-mismatch-count={manualViews.length}>
+        <p className="mismatch-title"><strong>{fill(s.mismatchTitle, { n: manualViews.length })}</strong></p>
+        <p>{s.mismatchBody}</p>
+        <p className="track-note">{fill(s.mismatchList, { list: numberList(manualViews.map(v => v.pair.index + 1)) })}</p>
+        <button type="button" className="secondary-button" onClick={jumpToManual}>{s.mismatchJump}</button>
+      </div>}
       {(semanticOn || contextOn) && <label className="inline-check"><input type="checkbox" checked={usePrecedents} onChange={e => setUsePrecedents(e.target.checked)} />{s.precedents}</label>}
       <div className="actions">
         {(run.phase === 'running' || run.phase === 'waiting') && <button type="button" className="secondary-button" onClick={() => dispatch({ type: 'pause' })}>{s.pause}</button>}
@@ -974,7 +1110,7 @@ export function SemanticWorkbench(props: Props) {
       </ol>
       {splitOpen !== null && (splitView
         ? <SplitHelper s={s} locale={locale} source={source} target={target} view={splitView} splitAt={splitAt} merge={merge} linesAsParagraphs={linesAsParagraphs}
-          pending={pendingCut} cancelPending={() => setPendingCut(null)} splitPendingOnly={splitPendingOnly} />
+          pending={pendingCut} cancelPending={() => setPendingCut(null)} splitPendingOnly={splitPendingOnly} innerRef={splitRef} />
         : <p className="split-helper" role="status">{s.splitResolved} <button type="button" className="text-button" onClick={() => setSplitOpen(null)}>{s.manualClose}</button></p>)}
     </section>}
 
@@ -1036,11 +1172,12 @@ export function SemanticWorkbench(props: Props) {
   </>;
 }
 
-function SplitHelper({ s, locale, source, target, view, splitAt, merge, linesAsParagraphs, pending, cancelPending, splitPendingOnly }: {
+function SplitHelper({ s, locale, source, target, view, splitAt, merge, linesAsParagraphs, pending, cancelPending, splitPendingOnly, innerRef }: {
   s: SemanticMessages; locale: string; source: string; target: string; view: PairView;
   splitAt: (side: 'source' | 'target', offset: number, paired: boolean, label: string) => void; merge: (side: 'source' | 'target', a: number, b: number) => void;
   linesAsParagraphs: (side: 'source' | 'target', region: Region) => void;
   pending: { side: 'source' | 'target'; offset: number; label: string } | null; cancelPending: () => void; splitPendingOnly: () => void;
+  innerRef: MutableRefObject<HTMLDivElement | null>;
 }) {
   const sc = chars(source); const tc = chars(target);
   type Para = { start: number; end: number; coreStart: number; coreEnd: number; length: number; sentences: { start: number; end: number }[] };
@@ -1077,7 +1214,7 @@ function SplitHelper({ s, locale, source, target, view, splitAt, merge, linesAsP
       {next && <button type="button" className="text-button split-merge" aria-label={fill(s.splitMergeAria, { side: sideName[side], n: i + 1 })} onClick={() => merge(side, para.coreEnd, next.coreStart)}>{s.splitMerge}</button>}
     </div>;
   };
-  return <div className="split-helper" role="region" aria-label={s.splitTitle}>
+  return <div className="split-helper" role="region" aria-label={s.splitTitle} tabIndex={-1} ref={innerRef}>
     <h4>{s.splitTitle}</h4>
     <p>{s.splitIntro}</p>
     {(['source', 'target'] as const).filter(side => breaks[side] > 0).map(side => <p key={side} className="split-lines">

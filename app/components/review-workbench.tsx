@@ -6,9 +6,9 @@ import {
 } from '../../lib/review-navigation.js';
 import { highlightSegments, revisionOf, scalarToUtf16, summarizeReviewParts } from '../../lib/review-report.js';
 import {
-  MAX_CHOICES, MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, basisOf, canonicalManuscript, compareReports, leaveGuardActive,
+  MAX_V3_WORKFILE_BYTES, MAX_V4_CHOICES, MAX_WORKFILE_BYTES, REPORT_V4, basisOf, canonicalManuscript, compareReports, leaveGuardActive,
   makeChoice, manuscriptSaveView, mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent,
-  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3,
+  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
 } from '../../lib/manuscript.js';
 import { longFromWorkfile, recordView, segmentInputs, workfileParts } from '../../lib/long-review.js';
 import { fragmentOccurrences, spliceOccurrence } from '../../lib/target-revision.js';
@@ -25,10 +25,16 @@ import { SemanticWorkbench, semanticFromWorkfile, semanticWorkfileParts, semanti
 import { emptySemantic, freshSemantic, longHoldsWork, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 
+// At most 128 kept choices (manuscript v4; a file with more than 32 is written as v4), and 64 KiB for one /api/reviews request.
+const MAX_CHOICES = MAX_V4_CHOICES;
+const REVIEW_REQUEST_LIMIT = 65_536;
+// The review-v2 features this client reads: up to 128 findings and resolutions, and a reason on a not_evaluated finding. The BFF
+// forwards them only to a service that is asked, and an older one answers in the old shape, which is still read.
+const REVIEW_FEATURES = 'dense-128,reason-v1';
 type Span = { start: number; end: number; text: string };
 type Alignment = { source: Span; target: Span | null };
 type Candidate = { candidate_id: string; zh: string; en: string; category: string; sources: { source_file: string; source_id: string }[] };
-type Finding = { id: string; rule_id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: Candidate[]; candidates_truncated: boolean };
+type Finding = { id: string; rule_id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: Candidate[]; candidates_truncated: boolean; reason?: string };
 type Report = { request_id: string; source_revision: string; target_revision: string; rule_version: string; matcher_revision?: string; dictionary: { schema_version: string | null; source_commit: string | null; term_count: number; revision: string }; coverage: { evaluated: number; not_evaluated: number; rules: string[] }; findings: Finding[]; truncated: boolean };
 type Draft = { source: string; target: string; direction: 'en' | 'zh'; alignments: Alignment[] | null };
 type Choice = { source: string; direction: string; source_span: Span; scope: string; choice: string; candidate: Pick<Candidate, 'candidate_id' | 'zh' | 'en' | 'category'> | null; basis: ReturnType<typeof basisOf> };
@@ -466,18 +472,18 @@ export function ReviewWorkbench() {
         source_revision: latest.report.source_revision, rule_version: latest.report.rule_version, dictionary_revision: latest.report.dictionary.revision, matcher_revision: latest.report.matcher_revision,
       } } : {}),
     };
-    if (new TextEncoder().encode(JSON.stringify(body)).length > 32768) {
+    if (new TextEncoder().encode(JSON.stringify(body)).length > REVIEW_REQUEST_LIMIT) {
       controller.current = null; setPhase('error'); setError({ code: 'bodyTooLarge' }); return;
     }
     try {
-      const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json' }, cache: 'no-store', body: JSON.stringify(body), signal: abort.signal });
+      const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json', 'X-WuwaTerm-Review-Features': REVIEW_FEATURES }, cache: 'no-store', body: JSON.stringify(body), signal: abort.signal });
       const value = await response.json();
       if (abort.signal.aborted || generation.current !== mine) return;
       if (!response.ok) {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof value.reason === 'string' ? value.reason : '';
         throw Object.assign(new Error((m.rMsg as Record<string, string>)[reason] ?? m.rMsg.fallback), { gahReason: reason, gahDetail: failureFields(response, value) });
       }
-      if (!validReport(value, source, target)) throw Object.assign(new Error(m.errors.responseInvalid), { gahCode: 'responseInvalid' });
+      if (!validReport(value, source, target, REPORT_V4)) throw Object.assign(new Error(m.errors.responseInvalid), { gahCode: 'responseInvalid' });
       const report = value as Report;
       if (report.rule_version !== 'review-v2' || !/^[0-9a-f]{64}$/u.test(report.matcher_revision ?? '')
         || report.source_revision !== await revisionOf(source)
@@ -686,7 +692,7 @@ export function ReviewWorkbench() {
       // come back with the manuscript; nothing in the file is trusted as current.
       // The long-mode records, choices, history and progress are matched to the
       // current segments (SPEC "Runtime", step 2); no request is sent (step 1).
-      const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3;
+      const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3 || value.format === WORKFILE_FORMAT_V4;
       const nextSemantic: SemanticState = { ...(withSemantic ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState), long: longFromWorkfile(value) as LongState };
       if (importAttempt.current !== attempt) return;
       if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
@@ -824,6 +830,7 @@ export function ReviewWorkbench() {
           const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
           const targetLocated = finding.target_span !== null && latest.target === target && highlightSegments(target, finding.target_span) !== null;
           return <article className="term-result" key={finding.id} data-mention-id={finding.id} data-active={active ? 'true' : 'false'} aria-current={active ? 'true' : undefined}><p className="result-summary">{active ? m.review.currentMark : ''}<span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span> · {fill(m.review.spanRange, { start: finding.source_span.start + 1, end: finding.source_span.end })}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
+            {finding.reason && <p className="finding-reason" data-reason={finding.reason}>{fill(m.review.reasonLabel, { reason: (m.review.reasons as Record<string, string>)[finding.reason] ?? finding.reason })}</p>}
             <div className="excerpt-labeled">
               <span className="excerpt-tag">{m.review.excerptSourceLabel}</span>
               <Excerpt text={source} span={sourceLocated ? finding.source_span : null} missing={fill(m.review.excerptMissingSource, { text: finding.source_span.text })} />
