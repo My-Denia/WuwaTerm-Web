@@ -382,3 +382,27 @@ test('blank lines inside the fenced source and target are kept exactly; only the
   // Outside the fences no run of more than one blank line is left.
   assert.equal(markdown.replace(source, '').replace(target, '').includes('\n\n\n'), false);
 });
+
+test('a not_evaluated finding\'s reason is written in the document report and in the segment term section, in both languages', () => {
+  const base = fixture('今汐。\n声骸。', 'Jinhsi.\nEcho.', 'en');
+  const withReason = reason => base.report.findings.map((f, i) => (i === 1 ? { ...f, verdict: 'not_evaluated', target_span: null, reason } : f));
+  for (const lang of ['zh', 'en']) {
+    const m = msg(lang);
+    for (const reason of ['not_a_term', 'ordinary_word', 'no_target_region', 'found_outside_region', 'ambiguous_repeat']) {
+      const latest = snapshotFor({ report: { ...base.report, findings: withReason(reason) } });
+      const documentMarkdown = renderMarkdownReport(inputFor(latest), lang);
+      const label = m.review.reasonLabel.replace('{reason}', m.review.reasons[reason]);
+      assert.equal(documentMarkdown.includes(label), true, `${lang} ${reason}: document report`);
+      const segmentTerms = [{ index: 0, state: 'current', stale: false, truncated: false, findings: [{
+        verdict: 'not_evaluated', source_span: { start: 0, end: 2, text: '今汐' }, target_span: null, candidates: [{ zh: '今汐', en: 'Jinhsi' }], candidates_truncated: false, reason,
+      }] }];
+      const segmentMarkdown = renderMarkdownReport({ ...inputFor(null, { draft: { source: '今汐。', target: 'Jinhsi.', direction: 'en' } }), segmentTerms }, lang);
+      assert.equal(segmentMarkdown.includes(label), true, `${lang} ${reason}: segment terms`);
+    }
+    // A finding without a reason writes none.
+    assert.equal(renderMarkdownReport(inputFor(snapshotFor()), lang).includes(m.review.reasonLabel.split('{')[0]), false);
+  }
+  // A value this build does not know is written as it is, escaped as inline text.
+  const odd = snapshotFor({ report: { ...base.report, findings: withReason('a_new_reason') } });
+  assert.equal(renderMarkdownReport(inputFor(odd), 'zh').includes('a_new_reason'), true);
+});

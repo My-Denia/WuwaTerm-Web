@@ -42,6 +42,25 @@ export function camellyaManuscript({ withMismatch = true } = {}) {
   return { source: paragraphs(source), target: paragraphs(target), direction: 'en' };
 }
 
+/**
+ * A zh→en manuscript whose first segment holds 52 places of 椿 (48 translated as Camellya, the last four without a hit), so one answer
+ * carries more than 32 findings; the other two segments are ordinary.
+ */
+export function denseManuscript() {
+  const places = Array.from({ length: 52 }, (_, i) => i);
+  const source = [
+    `${places.map(i => `椿${i % 2 ? '微笑' : '点头'}。`).join('')}${zhFiller(60)}`,
+    `今汐站在高处远望。${zhFiller(100)}`,
+    `声骸在夜里发出微光。${zhFiller(100)}`,
+  ];
+  const target = [
+    `${places.map(i => `${i >= 48 ? 'She' : 'Camellya'} ${i % 2 ? 'smiled' : 'nodded'}.`).join(' ')} ${enFiller(20)}`,
+    `Jinhsi stood high and looked far. ${enFiller(30)}`,
+    `The Echo glowed faintly in the night. ${enFiller(30)}`,
+  ];
+  return { source: paragraphs(source), target: paragraphs(target), direction: 'en' };
+}
+
 /** An en→zh manuscript (direction `zh`): the Tuner is 调谐器 twice and 调音师 once (not the official rendering), and 调音师 stands once more elsewhere. */
 export function tunerManuscript() {
   const leads = [

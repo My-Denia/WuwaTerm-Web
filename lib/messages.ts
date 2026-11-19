@@ -286,6 +286,7 @@ const zh = {
       not_evaluated: '未评估',
     },
     // Why Core did not evaluate a finding (review-v2 `reason`, only on not_evaluated; keys are lib/manuscript.js REASON_VALUES).
+    truncatedNote: '这次核对的发现太多，没有全部返回：一次最多返回 128 条发现，响应也不能超过 64 KiB，超出的部分没有列出。请把原文和译文拆成较小的几段，分别核对。',
     reasonLabel: '未评估原因：{reason}',
     reasons: {
       not_a_term: '判定此处不是术语',
@@ -876,6 +877,7 @@ const en: typeof zh = {
       needs_review: 'Needs review',
       not_evaluated: 'Not evaluated',
     },
+    truncatedNote: 'This check found more than could be returned: one check returns at most 128 findings and its response cannot exceed 64 KiB, so the rest are not listed. Split the source and translation into smaller parts and check each one.',
     reasonLabel: 'Not evaluated because: {reason}',
     reasons: {
       not_a_term: 'Judged not to be a term here',

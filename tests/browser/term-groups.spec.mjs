@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { parseWorkfile } from '../../lib/manuscript.js';
 import { S, downloadFrom, fill, fillPair, openWorkbench } from '../helpers/semantic-routes.mjs';
-import { camellyaManuscript, termGroupReport, tunerManuscript } from '../helpers/term-group-fixture.mjs';
+import { camellyaManuscript, denseManuscript, termGroupReport, tunerManuscript } from '../helpers/term-group-fixture.mjs';
 
 const M = msg('zh');
 const chips = page => page.locator('.segment-chip');
@@ -181,4 +181,33 @@ test('a saved manuscript with not_evaluated reasons is a v4 file, and reopening 
   await expect(again.locator('.finding-reason')).toHaveCount(3);
   // Saved results wait for the service before they count as current.
   await expect(places(groupOf(again, '椿')).first()).toHaveAttribute('data-term-state', 'saved');
+});
+
+test('a segment with more than 32 findings is stored, grouped place by place and saved as a v4 file', async ({ page }) => {
+  const rec = await open(page);
+  await load(page, denseManuscript(), 3);
+  await check(page, rec, 3);
+  // One answer of 52 findings is a valid, stored result (the v3 cap of 32 would have refused it).
+  await expect(page.locator('.error-panel')).toHaveCount(0);
+  expect(await chips(page).evaluateAll(list => list.map(li => li.getAttribute('data-term-state')))).toEqual(['current', 'current', 'current']);
+  const camellya = groupOf(page, '椿');
+  await expect(camellya).toHaveAttribute('data-group-status', 'inconsistent');
+  await expect(camellya.locator('.term-group-meta')).toHaveText(fill(S.groupHead, { n: 52, segments: '1' }));
+  await expect(camellya.locator('.term-group-renderings')).toHaveText(fill(S.groupRenderings, { items: `Camellya ×48 · ${S.renderingNone} ×4` }));
+  await expect(places(camellya)).toHaveCount(52);
+  const saved = parseWorkfile((await downloadFrom(page, M.review.save)).text);
+  // More than 32 findings alone make the file v4 (no reason is involved).
+  expect(saved.format).toBe('wuwaterm-manuscript-v4');
+  expect(saved.segments[0].result.findings).toHaveLength(52);
+  expect(saved.segments[0].result.findings.some(f => Object.hasOwn(f, 'reason'))).toBe(false);
+});
+
+test('a truncated document report says why: the count (128) and the response size (64 KiB) and what to do', async ({ page }) => {
+  await openWorkbench(page, { capabilities: [], reviewTruncated: () => true });
+  await fillPair(page, '今汐。\n声骸。', 'Jinhsi.\nEcho.');
+  await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();
+  const note = page.locator('.review-truncated-note');
+  await expect(note).toHaveText(M.review.truncatedNote);
+  expect(M.review.truncatedNote).toContain('128');
+  expect(M.review.truncatedNote).toContain('64 KiB');
 });
