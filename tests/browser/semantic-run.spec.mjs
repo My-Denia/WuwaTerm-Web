@@ -37,6 +37,45 @@ test('a semantic result finishing its document hashes cannot enter a newly opene
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
 });
 
+test('an obsolete not-reviewed result cannot fail a new run for the same manuscript text', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = crypto.subtle.digest.bind(crypto.subtle);
+    window.__holdDigest = false;
+    window.__releaseDigest = null;
+    crypto.subtle.digest = (algorithm, data) => {
+      if (window.__holdDigest && !window.__releaseDigest) {
+        return new Promise((resolve, reject) => { window.__releaseDigest = () => original(algorithm, data).then(resolve, reject); });
+      }
+      return original(algorithm, data);
+    };
+  });
+  const rec = await openWorkbench(page, { respond: (request, call) => call === 1
+    ? semanticResponse(request, [], { status: 'not_reviewed', status_reason: 'invalid_model_output', checked: [] })
+    : semanticResponse(request, []) });
+  const oldResponse = rec.gate(1);
+  const newResponse = rec.gate(2);
+  try {
+    await fillPair(page, TRIO.source, TRIO.target);
+    await start(page).click();
+    await expect.poll(() => rec.semantic.length).toBe(1);
+    await page.evaluate(() => { window.__holdDigest = true; });
+    oldResponse.release();
+    await expect.poll(() => page.evaluate(() => window.__releaseDigest !== null)).toBe(true);
+    const file = serializeWorkfile({ ...TRIO, direction: 'en', alignments: null, choices: [], history: [] });
+    await page.getByLabel('选择稿件文件').setInputFiles({ name: 'same-text.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+    await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+    await start(page).click();
+    await expect.poll(() => rec.semantic.length).toBe(2);
+    await page.evaluate(() => { window.__holdDigest = false; window.__releaseDigest(); });
+    await page.waitForTimeout(150);
+    await expect(status(page)).toHaveAttribute('data-run-state', 'running');
+  } finally {
+    newResponse.release();
+  }
+  await expect(status(page)).toHaveAttribute('data-run-state', 'done');
+  await expect(page.locator('.segment-chip').first()).toContainText(S.segReviewed);
+});
+
 test('the overview and the two tracks keep deterministic terms apart from model issues', async ({ page }) => {
   await openWorkbench(page, { respond: trioResponse() });
   const overview = page.getByRole('group', { name: S.overviewAria });

@@ -101,8 +101,11 @@ export function useSemanticRequests({ lang, work, choices, basisRef, documentEpo
       if (!live()) return;
       requestPoolRefresh();
       if (!response.ok) { failRun({ type: 'failed', key: item.key, ...failureOf(response, body), now: Date.now() }); return; }
-      if (!validSemanticReviewResponse(body, found.sCore, found.tCore) || !await verifySemanticReviewIdentity(body, found.sCore, found.tCore)) {
-        if (live()) failRun({ type: 'failed', key: item.key, code: 'responseInvalid', classification: { action: 'segment_failed' }, now: Date.now() });
+      const valid = validSemanticReviewResponse(body, found.sCore, found.tCore)
+        && await verifySemanticReviewIdentity(body, found.sCore, found.tCore);
+      if (!live()) return;
+      if (!valid) {
+        failRun({ type: 'failed', key: item.key, code: 'responseInvalid', classification: { action: 'segment_failed' }, now: Date.now() });
         return;
       }
       const report = body as unknown as SemanticReport;
