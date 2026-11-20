@@ -19,18 +19,19 @@ import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
 import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
+import { postWorkbench, REVIEW_REQUEST_LIMIT } from '../../lib/workbench-transport';
 import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
 import { useUiLanguage } from './ui-language-context';
-import { SemanticWorkbench, semanticFromWorkfile, semanticWorkfileParts, semanticExport, type Commit, type LongState, type SemanticState, type SessionBasis } from './semantic-workbench';
+import { SemanticWorkbench } from './semantic-workbench';
+import { semanticFromWorkfile, semanticWorkfileParts, semanticExport } from '../../lib/workbench-persistence';
+import type { Commit, LongState, SemanticState, SessionBasis } from '../../lib/workbench-model';
 import { emptySemantic, freshSemantic, longHoldsWork, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 
 // At most 128 kept choices (manuscript v4; a file with more than 32 is written as v4), and 64 KiB for one /api/reviews request.
 const MAX_CHOICES = MAX_V4_CHOICES;
-const REVIEW_REQUEST_LIMIT = 65_536;
 // The review-v2 features this client reads: up to 128 findings and resolutions, and a reason on a not_evaluated finding. The BFF
 // forwards them only to a service that is asked, and an older one answers in the old shape, which is still read.
-const REVIEW_FEATURES = 'dense-128,reason-v1';
 type Span = { start: number; end: number; text: string };
 type Alignment = { source: Span; target: Span | null };
 type Candidate = { candidate_id: string; zh: string; en: string; category: string; sources: { source_file: string; source_id: string }[] };
@@ -41,7 +42,7 @@ type Choice = { source: string; direction: string; source_span: Span; scope: str
 type Resolution = { mention_id: string; choice: string; candidate_id?: string };
 type Snapshot = Draft & { report: Report; trusted: boolean; signature: string; resolutions: Resolution[] | null };
 type RevisionIntent = { snapshot: Snapshot; generation: number; draft: Draft; choices: Choice[]; imported: Choice[]; finding: Finding; candidate: Candidate; trigger: HTMLButtonElement; fragment: string; selected: Span | null };
-type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[]; semantic: SemanticState; serial?: number };
+type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[]; semantic: SemanticState; serial?: number; replacedDocument?: boolean };
 // Status messages store language-independent codes (catalog notice keys, or
 // structured error identities); the visible text resolves from the catalog on
 // each render, so switching interface language re-localizes a message that is
@@ -133,6 +134,8 @@ export function ReviewWorkbench() {
   // The capability list while it loads, so a translation sent before it arrives still knows whether context is negotiated.
   const capabilitiesLoaded = useRef<Promise<string[]> | null>(null);
   const [semanticReset, setSemanticReset] = useState(0);
+  // Unlike text equality, this changes synchronously whenever another manuscript is installed.
+  const documentEpoch = useRef(0);
   const [semanticRunActive, setSemanticRunActive] = useState(false);
   const historySerial = useRef(0);
   const [phase, setPhase] = useState<'idle' | 'loading' | 'success' | 'error' | 'cancelled'>('idle');
@@ -179,6 +182,7 @@ export function ReviewWorkbench() {
     setSemanticState(next);
   }, []);
   const replaceSemantic = useCallback((next: SemanticState) => {
+    documentEpoch.current += 1;
     work.current = { ...work.current, semantic: next };
     setSemanticState(next);
     setSemanticReset(n => n + 1);
@@ -304,7 +308,7 @@ export function ReviewWorkbench() {
     handoffDialog.current?.close(); setPendingDraft(null);
     const before = work.current;
     if (before.draft.source === next.source && before.draft.target === next.target && before.draft.direction === next.direction) return;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
+    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
     const nextHistory = [...before.history.slice(-19), saved];
     // Update synchronously as well so successive events in one turn cannot
     // mistake an already received manuscript for an empty workbench.
@@ -476,8 +480,7 @@ export function ReviewWorkbench() {
       controller.current = null; setPhase('error'); setError({ code: 'bodyTooLarge' }); return;
     }
     try {
-      const response = await fetch(workbenchPath('/api/reviews'), { method: 'POST', headers: { 'content-type': 'application/json', 'X-WuwaTerm-Review-Features': REVIEW_FEATURES }, cache: 'no-store', body: JSON.stringify(body), signal: abort.signal });
-      const value = await response.json();
+      const { response, value } = await postWorkbench('/api/reviews', body, { signal: abort.signal, reviewFeatures: true });
       if (abort.signal.aborted || generation.current !== mine) return;
       if (!response.ok) {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof value.reason === 'string' ? value.reason : '';
@@ -521,14 +524,7 @@ export function ReviewWorkbench() {
       const known = capabilities ?? await (capabilitiesLoaded.current ?? Promise.resolve([]));
       if (abort.signal.aborted || generation.current !== mine) return;
       const context = known.includes(CAPABILITY_TRANSLATION_CONTEXT) ? { context: {} } : {};
-      const response = await fetch(workbenchPath('/api/translations'), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ text: source, to: direction, ...context }),
-        signal: abort.signal,
-      });
-      const value = await response.json();
+      const { response, value } = await postWorkbench('/api/translations', { text: source, to: direction, ...context }, { signal: abort.signal });
       if (abort.signal.aborted || generation.current !== mine) return;
       if (!response.ok || !value || typeof value !== 'object' || typeof (value as { text?: unknown }).text !== 'string') {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof (value as { reason?: unknown }).reason === 'string' ? String((value as { reason: string }).reason) : '';
@@ -633,7 +629,8 @@ export function ReviewWorkbench() {
     const last = history.at(-1); if (!last) return;
     discardInFlight(); setSourceDirtyForTranslation(false); setDraft(last.draft); setChoices(last.choices); setImported(last.imported); setHistory(stack => stack.slice(0, -1));
     work.current = { ...work.current, draft: last.draft, semantic: last.semantic };
-    setSemanticState(last.semantic);
+    if (last.replacedDocument) replaceSemantic(last.semantic);
+    else setSemanticState(last.semantic);
     if (last.reports) setReports(last.reports);
     setNotice(last.reports ? 'undoWithReports' : 'undoLocal');
   }
@@ -641,7 +638,7 @@ export function ReviewWorkbench() {
   function replaceWithText(text: string) {
     setPendingText(null);
     const before = work.current;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
+    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
     setHistory([...before.history.slice(-19), saved]);
     discardInFlight();
     setSourceDirtyForTranslation(false);
@@ -700,7 +697,7 @@ export function ReviewWorkbench() {
       // File reads can overlap a check finishing. Snapshot the accepted-time
       // work, including its reports; ordinary edit undo keeps its own semantics.
       const before = work.current;
-      const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
+      const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
       setHistory([...before.history.slice(-19), saved]);
       discardInFlight();
       setSourceDirtyForTranslation(false);
@@ -718,7 +715,7 @@ export function ReviewWorkbench() {
   function clearDraft() {
     if (!holdsWork) return;
     const before = work.current;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic };
+    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
     setHistory(stack => [...stack.slice(-19), saved]);
     discardInFlight();
     setSourceDirtyForTranslation(false);
@@ -992,7 +989,7 @@ export function ReviewWorkbench() {
       <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
     </div>}
     <SemanticWorkbench lang={lang} draft={draft} semantic={semantic} setSemantic={applySemantic} commit={commitSemantic} work={work}
-      choices={choices} pool={pool} capabilities={capabilities} resetSignal={semanticReset}
+      choices={choices} pool={pool} capabilities={capabilities} resetSignal={semanticReset} documentEpoch={documentEpoch}
       canUndoLast={serial => history.at(-1)?.serial === serial} undo={undo}
       locate={(side, span) => side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span)}
       onRunActive={setSemanticRunActive} termTrack={termTrack} basis={basis} basisRef={basisRef} setBasis={setBasis} resetAlignments={resetAlignments} />

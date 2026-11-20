@@ -3,6 +3,7 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { parseWorkfile } from '../../lib/manuscript.js';
+import { hash } from '../fixtures/manuscript.mjs';
 import { S, downloadFrom, fill, fillPair, openWorkbench } from '../helpers/semantic-routes.mjs';
 import { camellyaManuscript, denseManuscript, termGroupReport, tunerManuscript } from '../helpers/term-group-fixture.mjs';
 
@@ -28,6 +29,28 @@ async function check(page, rec, requests) {
   await expect.poll(() => rec.reviews.length).toBe(requests);
   await expect(status(page)).toHaveAttribute('data-run-state', 'done');
 }
+
+test('the group summary combines equal word pairs while each category stays selectable at each place', async ({ page }) => {
+  const rec = await open(page, { reviewReport: body => {
+    const report = termGroupReport(body);
+    for (const finding of report.findings.filter(row => row.source_span.text === '椿')) {
+      const candidate = finding.candidates[0];
+      finding.candidates.push({ ...candidate, candidate_id: hash('camellya-speaker'), category: 'speaker' });
+    }
+    return report;
+  } });
+  await load(page, camellyaManuscript(), 5);
+  await check(page, rec, 4);
+  const group = groupOf(page, '椿');
+  const summaryText = await group.locator('.term-group-candidates').innerText();
+  expect(summaryText.match(/椿 \/ Camellya/gu)).toHaveLength(1);
+  await expect(group.locator('.term-group-candidates')).toContainText('角色');
+  const first = places(group).first();
+  await expect(first.locator('.term-pair')).toHaveCount(2);
+  await expect(first.locator('.term-pair').last()).toContainText('角色');
+  await first.locator('.term-pair').last().getByRole('button', { name: M.review.adopt, exact: true }).click();
+  await expect(first.locator('[data-choice-view]')).toContainText('Camellya');
+});
 
 test('the term view groups findings by term: places, segments, the translation used, a status and a reason for what was not evaluated', async ({ page }) => {
   const rec = await open(page);

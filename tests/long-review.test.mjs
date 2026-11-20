@@ -38,6 +38,33 @@ const RESULTS = [
   ALL.segments[2].result,
 ];
 
+test('shared workbench cases derive segment state and the next review plan', () => {
+  const suite = JSON.parse(readFileSync(new URL('../contracts/workbench-state/cases.json', import.meta.url), 'utf8'));
+  assert.equal(suite.schema, 'wuwaterm-workbench-state-cases-v1');
+  const parsed = JSON.parse(readFileSync(new URL(suite.manuscript, new URL('../contracts/workbench-state/', import.meta.url)), 'utf8'));
+  const original = draftOf(parsed);
+  const originalLong = L.longFromWorkfile(parsed);
+  const matching = parsed.segments[suite.basis_record].basis;
+  for (const scenario of suite.cases) {
+    let draft = original;
+    let long = originalLong;
+    if (scenario.edit) {
+      const { side, find, replace, direction, alignments } = scenario.edit;
+      draft = side ? { ...original, [side]: original[side].replace(find, replace) }
+        : direction ? { ...original, direction } : { ...original, alignments };
+      long = L.reconcileLong(originalLong, original, draft);
+    }
+    const basis = scenario.basis === 'unknown' ? null : scenario.basis === 'matching' ? matching
+      : { ...matching, matcher_revision: 'a'.repeat(64) };
+    const context = { draft, basis };
+    const views = long.records.map((_, index) => L.recordView(long, index, context));
+    assert.deepEqual(views.map(view => view.state), scenario.states, scenario.id);
+    assert.deepEqual(views.flatMap((view, index) => view.needsCheck ? [index] : []), scenario.due, scenario.id);
+    assert.equal(L.termPlan(long, context).probe, scenario.probe, scenario.id);
+    assert.deepEqual(long.progress.completed, scenario.completed, scenario.id);
+  }
+});
+
 /** A review-v2 response as the BFF returns it, for the current cores of `index`. */
 function respond(draft, index, result, basis = B) {
   const it = item(draft, index);

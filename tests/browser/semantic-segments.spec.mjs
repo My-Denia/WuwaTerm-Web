@@ -9,6 +9,29 @@ const undo = page => page.getByRole('button', { name: '撤销修订', exact: tru
 const zhSentence = (tag, n) => `${tag}${'甲'.repeat(n)}。`;
 const enSentence = (tag, n) => `${tag} ${'b'.repeat(n)}.`;
 
+for (const failed of [false, true]) {
+  test(`an old single-pair ${failed ? 'failure' : 'translation'} cannot change a newly opened manuscript with the same text`, async ({ page }) => {
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const options = { translateHold: { 1: held } };
+    if (failed) options.translateFailures = { 1: { status: 502, body: { reason: 'upstream_network_error' } } };
+    const rec = await openWorkbench(page, options);
+    const source = '她看见三只鸟。';
+    await page.locator('#review-source').fill(source);
+    await page.getByRole('button', { name: S.segTranslate, exact: true }).click();
+    await expect.poll(() => rec.translations.length).toBe(1);
+    const file = serializeWorkfile({ source, target: '', direction: 'en', alignments: null, choices: [], history: [] });
+    await page.getByLabel('选择稿件文件').setInputFiles({ name: 'same-text.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+    await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+    const response = page.waitForResponse(result => new URL(result.url()).pathname === '/api/translations');
+    release();
+    await response;
+    await page.waitForTimeout(150);
+    await expect(page.locator('#review-target')).toHaveValue('');
+    await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+  });
+}
+
 test('single line breaks on one side need a manual split, and one click turns every line into a paragraph', async ({ page }) => {
   await openWorkbench(page);
   const paragraphs = [1, 2, 3].map(i => zhParagraph(i));
@@ -134,6 +157,49 @@ test('translating one untranslated pair sends an empty context once the service 
   await page.getByRole('button', { name: S.segTranslate, exact: true }).click();
   await expect(page.locator('#review-target')).toHaveValue('Translated 1.', { timeout: 30_000 });
   expect(rec.translations).toEqual([{ text: source, to: 'en', context: {} }]);
+});
+
+test('an in-flight pair translation survives the first term-basis check and remains undoable', async ({ page }) => {
+  let releaseTranslation;
+  let releaseReview;
+  const translationHeld = new Promise(resolve => { releaseTranslation = resolve; });
+  const reviewHeld = new Promise(resolve => { releaseReview = resolve; });
+  const rec = await openWorkbench(page, { capabilities: [], translateHold: { 1: translationHeld }, reviewHold: { 1: reviewHeld } });
+  const first = `今汐在第一段。${zhParagraph(1, 75)}`;
+  const second = zhParagraph(2, 85);
+  const source = `${first}\n\n${second}`;
+  const target = 'Jinhsi appears in the first paragraph.';
+  const file = serializeWorkfile({
+    source, target, direction: 'en', choices: [], history: [],
+    alignments: [
+      { source: { start: 0, end: first.length, text: first }, target: { start: 0, end: target.length, text: target } },
+      { source: { start: first.length + 2, end: source.length, text: second }, target: null },
+    ],
+  });
+  try {
+    await page.getByLabel('选择稿件文件').setInputFiles({ name: 'partially-translated.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+    await expect(chips(page)).toHaveCount(2);
+    await expect(chips(page).nth(1)).toContainText(S.segUntranslated);
+    await chips(page).nth(1).getByRole('button', { name: S.segTranslate, exact: true }).click();
+    await expect.poll(() => rec.translations.length).toBe(1);
+    await page.locator('.long-tools .long-terms button').click();
+    await expect.poll(() => rec.reviews.length).toBe(1);
+    releaseReview();
+    await expect(page.locator('.run-phase')).toHaveAttribute('data-run-state', 'done');
+    await expect(chips(page).first()).toHaveAttribute('data-term-state', 'current');
+    releaseTranslation();
+    await expect(page.locator('#review-target')).toHaveValue(`${target}\n\nTranslated 1.`);
+    await expect(page.locator('.notice-state')).toHaveText(S.notices.translated);
+    await expect(page.locator('.alignment-recovery')).toBeVisible();
+    await undo(page).click();
+    await expect(page.locator('#review-target')).toHaveValue(target);
+    await expect(chips(page).first()).toHaveAttribute('data-term-state', 'current');
+    expect(rec.reviews).toHaveLength(1);
+    expect(rec.translations).toHaveLength(1);
+  } finally {
+    releaseReview();
+    releaseTranslation();
+  }
 });
 
 test('the second pair translation still carries the previous pair as its before context', async ({ page }) => {

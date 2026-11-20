@@ -40,6 +40,16 @@ const choice = (span, kind, candidate, confirmed, view) => ({
 const SOURCE = '椿站在声骸旁边。香椿很好吃。椿回头看了看。';
 const TARGET = 'Camellya stood beside the Echo. Toon is tasty. She looked back.';
 
+test('a summary groups identical word pairs while retaining their distinct categories', () => {
+  const speaker = { ...camellya, candidate_id: hash('camellya-speaker'), category: 'speaker' };
+  const candidates = [camellya, speaker, camellya, tunerA];
+  assert.deepEqual(L.summarizeTermCandidates(candidates), [
+    { zh: '椿', en: 'Camellya', categories: ['character', 'speaker'] },
+    { zh: '调谐器', en: 'Tuner', categories: ['item'] },
+  ]);
+  assert.equal(candidates.length, 4);
+});
+
 test('a group counts its places, names the segments and tallies what the translation used, with no hit counted', () => {
   const segments = [segment(0, 'current', SOURCE, TARGET, [
     ['椿', 0, 'verified_constraint', 'Camellya'], ['椿', 1, 'not_evaluated', null, 0, [camellya], { reason: 'not_a_term' }], ['椿', 2, 'needs_review', null],
