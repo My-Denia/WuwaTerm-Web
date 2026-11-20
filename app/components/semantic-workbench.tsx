@@ -1016,7 +1016,7 @@ export function SemanticWorkbench(props: Props) {
     {long && truncatedRows.map(r => <p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>)}
     {long && termGroups.length > 0 && uncheckedSegments > 0 && <p className="track-note groups-unchecked" role="status">{fill(s.groupsUnchecked, { n: uncheckedSegments })}</p>}
     {long && termGroups.length > 0 && filteredGroups.length === 0 && <p className="track-note">{s.groupsNone}</p>}
-    {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} data-group-surface={g.surface} aria-label={g.surface}>
+    {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} data-group-surface={g.surface} data-group-saved={g.savedCount} aria-label={g.surface}>
       <header className="term-group-head">
         <h5 className="term-group-title"><span className="term-surface">{g.surface}</span>{g.surfaces.length > 1 && <span className="term-variants">（{g.surfaces.slice(1).join('、')}）</span>} <span className={`group-status group-status-${g.status}`}>{s.groupStatuses[g.status]}</span></h5>
         <p className="term-group-meta">{fill(s.groupHead, { n: g.occurrenceCount, segments: numberList(g.segments) })}</p>
@@ -1025,6 +1025,7 @@ export function SemanticWorkbench(props: Props) {
           g.confirmedCount > 0 && fill(s.groupTallyConfirmed, { n: g.confirmedCount }),
         ].filter(Boolean).join(' · ')}</p>
         {g.unverifiedSegments.length > 0 && <p className="term-group-unverified"><span className="group-status group-status-pending" data-unverified={g.unverifiedSegments.join(',')}>{fill(s.groupUnverified, { list: numberList(g.unverifiedSegments) })}</span></p>}
+        {g.savedCount > 0 && <p className="term-group-saved" data-saved={g.savedCount}><span className="group-status group-status-pending">{s.groupSaved}</span></p>}
         <p className="term-group-renderings">{fill(s.groupRenderings, { items: g.renderings.map(r => fill(s.renderingItem, { text: r.kind === 'not_evaluated' ? s.renderingNotEvaluated : r.text ?? s.renderingNone, n: r.count })).join(' · ') })}</p>
         {g.candidates.length > 0 && <p className="term-group-candidates">{fill(s.groupCandidates, { items: g.candidates.map(c => `${c.zh} / ${c.en}`).join(lang === 'en' ? '; ' : '；') })}</p>}
         {g.hidden > 0 && <button type="button" className="text-button group-rest-toggle" aria-expanded={openGroups.has(g.key)} onClick={() => toggleGroup(g.key)}>{fill(openGroups.has(g.key) ? s.groupHideRest : s.groupShowRest, { n: g.hidden })}</button>}

@@ -248,6 +248,21 @@ test('a saved manuscript with not_evaluated reasons is a v4 file, and reopening 
   await expect(again.locator('.finding-reason')).toHaveCount(3);
   // Saved results wait for the service before they count as current.
   await expect(places(groupOf(again, '椿')).first()).toHaveAttribute('data-term-state', 'saved');
+  // No group of a saved manuscript reads confirmed before the live basis arrives: the saved places are to do, the group says so, and
+  // the to do filter holds all three groups while the confirmed filter holds none.
+  expect(await groups(again).evaluateAll(list => list.map(el => [el.getAttribute('data-group-surface'), el.getAttribute('data-group-status')])))
+    .toEqual([['椿', 'inconsistent'], ['声骸', 'pending'], ['今汐', 'pending']]);
+  await expect(groupOf(again, '椿')).toHaveAttribute('data-group-saved', '5');
+  await expect(groupOf(again, '今汐')).toHaveAttribute('data-group-saved', '1');
+  await expect(groupOf(again, '今汐').locator('.term-group-saved')).toHaveText(S.groupSaved);
+  await expect(groupOf(again, '今汐').locator('.term-group-tally')).toHaveAttribute('data-pending', '1');
+  await expect(groupOf(again, '今汐').locator('.term-group-tally')).toHaveAttribute('data-confirmed', '0');
+  await expect(filterButton(again, 'pending')).toHaveAttribute('data-group-count', '3');
+  await expect(filterButton(again, 'confirmed')).toHaveAttribute('data-group-count', '0');
+  await filterButton(again, 'pending').click();
+  await expect(groups(again)).toHaveCount(3);
+  await filterButton(again, 'confirmed').click();
+  await expect(groups(again)).toHaveCount(0);
 });
 
 test('a segment with more than 32 findings is stored, grouped place by place and saved as a v4 file', async ({ page }) => {

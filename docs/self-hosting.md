@@ -84,6 +84,18 @@ Windows 0.6.0 reads and writes v4. Windows 0.5.1 and Web 0.3.1 reject a v4 file 
 explicit error and keep the manuscript they already have open. A manuscript that fits v1, v2
 or v3 is still written in that format, so old clients keep reading it.
 
+## Version 0.4.1 and saved term groups
+
+Web 0.4.1 changes what the term groups of a long manuscript read after you reopen a
+saved `wuwaterm-manuscript-v3` or `v4` file. A place that came from the saved file stays
+`pending` (待处理, and 已保存，尚未核对当前词典与规则) rather than `confirmed` until a live
+review request shows that the Core's dictionary and matcher basis still equal the saved
+basis, so the to-do filter lists that group instead of hiding it behind a confirmed
+status, and the group counts how many of its places rest on a saved result. Choices,
+renderings and per-place details are unchanged. The v3 and v4 file formats, the BFF
+response shape, the Core and Windows contract pins and the Core requirements are the
+same as for 0.4.0.
+
 ## Download the Linux x64 bundle
 
 The standalone release candidate contains the server, browser assets and
@@ -159,14 +171,14 @@ build:
 ```sh
 sha=$(git rev-parse origin/main)
 gh workflow run selfhost-release-build.yml --ref main \
-  -f source_sha="$sha" -f tag=v0.4.0 -f base_path=
+  -f source_sha="$sha" -f tag=v0.4.1 -f base_path=
 gh workflow run selfhost-release-build.yml --ref main \
-  -f source_sha="$sha" -f tag=v0.4.0 -f base_path=/private
+  -f source_sha="$sha" -f tag=v0.4.1 -f base_path=/private
 ```
 
 Dispatch both while `main` is still at that commit: the provenance job requires
 `source_sha` to equal the run's own `main` SHA and a successful main-push Web CI run for
-it. `tag` must be `v` plus the `version` in `package.json` (`v0.4.0` for this release).
+it. `tag` must be `v` plus the `version` in `package.json` (`v0.4.1` for this release).
 When both runs finish, note each run id, run attempt and artifact id:
 
 ```sh
@@ -180,7 +192,7 @@ creates nothing; it also reports whether the tag already points at the source:
 
 ```sh
 gh workflow run selfhost-release-publish.yml --ref main \
-  -f mode=validate -f source_sha="$sha" -f tag=v0.4.0 \
+  -f mode=validate -f source_sha="$sha" -f tag=v0.4.1 \
   -f root_run_id=<root run id> -f root_attempt=<root attempt> \
   -f root_artifact_id=<root artifact id> \
   -f prefix_run_id=<prefix run id> -f prefix_attempt=<prefix attempt> \
@@ -190,8 +202,8 @@ gh workflow run selfhost-release-publish.yml --ref main \
 Create the tag at that exact commit, as for earlier releases:
 
 ```sh
-git tag v0.4.0 "$sha"
-git push origin v0.4.0
+git tag v0.4.1 "$sha"
+git push origin v0.4.1
 ```
 
 Run the same dispatch again with `mode=publish` and identical values. Publication creates
