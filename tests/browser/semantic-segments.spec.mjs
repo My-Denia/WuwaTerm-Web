@@ -159,6 +159,49 @@ test('translating one untranslated pair sends an empty context once the service 
   expect(rec.translations).toEqual([{ text: source, to: 'en', context: {} }]);
 });
 
+test('an in-flight pair translation survives the first term-basis check and remains undoable', async ({ page }) => {
+  let releaseTranslation;
+  let releaseReview;
+  const translationHeld = new Promise(resolve => { releaseTranslation = resolve; });
+  const reviewHeld = new Promise(resolve => { releaseReview = resolve; });
+  const rec = await openWorkbench(page, { capabilities: [], translateHold: { 1: translationHeld }, reviewHold: { 1: reviewHeld } });
+  const first = `今汐在第一段。${zhParagraph(1, 75)}`;
+  const second = zhParagraph(2, 85);
+  const source = `${first}\n\n${second}`;
+  const target = 'Jinhsi appears in the first paragraph.';
+  const file = serializeWorkfile({
+    source, target, direction: 'en', choices: [], history: [],
+    alignments: [
+      { source: { start: 0, end: first.length, text: first }, target: { start: 0, end: target.length, text: target } },
+      { source: { start: first.length + 2, end: source.length, text: second }, target: null },
+    ],
+  });
+  try {
+    await page.getByLabel('选择稿件文件').setInputFiles({ name: 'partially-translated.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+    await expect(chips(page)).toHaveCount(2);
+    await expect(chips(page).nth(1)).toContainText(S.segUntranslated);
+    await chips(page).nth(1).getByRole('button', { name: S.segTranslate, exact: true }).click();
+    await expect.poll(() => rec.translations.length).toBe(1);
+    await page.locator('.long-tools .long-terms button').click();
+    await expect.poll(() => rec.reviews.length).toBe(1);
+    releaseReview();
+    await expect(page.locator('.run-phase')).toHaveAttribute('data-run-state', 'done');
+    await expect(chips(page).first()).toHaveAttribute('data-term-state', 'current');
+    releaseTranslation();
+    await expect(page.locator('#review-target')).toHaveValue(`${target}\n\nTranslated 1.`);
+    await expect(page.locator('.notice-state')).toHaveText(S.notices.translated);
+    await expect(page.locator('.alignment-recovery')).toBeVisible();
+    await undo(page).click();
+    await expect(page.locator('#review-target')).toHaveValue(target);
+    await expect(chips(page).first()).toHaveAttribute('data-term-state', 'current');
+    expect(rec.reviews).toHaveLength(1);
+    expect(rec.translations).toHaveLength(1);
+  } finally {
+    releaseReview();
+    releaseTranslation();
+  }
+});
+
 test('the second pair translation still carries the previous pair as its before context', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'] });
   // An imported aligned manuscript: the first pair is translated, the second has no target text.

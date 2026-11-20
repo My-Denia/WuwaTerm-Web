@@ -277,7 +277,6 @@ export function useSemanticRequests({ lang, work, choices, basisRef, documentEpo
     if (pairTranslating !== null || !view.sCore.trim()) return;
     const d = work.current.draft;
     const epoch = documentEpoch.current;
-    const sentBasis = basisRef.current;
     const list = inputsOf(d).items.map(item => item.pair);
     const before = contextBefore({ pairs: list, segmentIndex: view.pair.index, source: d.source, target: d.target });
     const precedents = usePrecedents ? selectPrecedents({ items: precedentItems(d, work.current.semantic), source: d.source, pairs: list, segmentIndex: view.pair.index }) : [];
@@ -300,8 +299,7 @@ export function useSemanticRequests({ lang, work, choices, basisRef, documentEpo
       const tc = chars(latest.target);
       const region = view.pair.target;
       if (latest.source !== d.source || latest.target !== d.target || latest.direction !== d.direction
-        || JSON.stringify(latest.alignments) !== JSON.stringify(d.alignments)
-        || (basisRef.current !== sentBasis && !sameV3Basis(basisRef.current, sentBasis))) { commit({ semantic: x => x, notice: 'sem:segmentChanged', remember: false }); return; }
+        || JSON.stringify(latest.alignments) !== JSON.stringify(d.alignments)) { commit({ semantic: x => x, notice: 'sem:segmentChanged', remember: false }); return; }
       const head = slice(tc, 0, region.start); const ws = slice(tc, region.start, region.end); const tail = slice(tc, region.end, tc.length);
       const lead = head && !/\n[ \t\r]*\n[ \t\r]*$/u.test(head + ws) ? '\n\n' : '';
       const trail = tail && !/^[ \t\r]*\n[ \t\r]*\n/u.test(tail) ? '\n\n' : '';
