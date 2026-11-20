@@ -9,6 +9,29 @@ const undo = page => page.getByRole('button', { name: '撤销修订', exact: tru
 const zhSentence = (tag, n) => `${tag}${'甲'.repeat(n)}。`;
 const enSentence = (tag, n) => `${tag} ${'b'.repeat(n)}.`;
 
+for (const failed of [false, true]) {
+  test(`an old single-pair ${failed ? 'failure' : 'translation'} cannot change a newly opened manuscript with the same text`, async ({ page }) => {
+    let release;
+    const held = new Promise(resolve => { release = resolve; });
+    const options = { translateHold: { 1: held } };
+    if (failed) options.translateFailures = { 1: { status: 502, body: { reason: 'upstream_network_error' } } };
+    const rec = await openWorkbench(page, options);
+    const source = '她看见三只鸟。';
+    await page.locator('#review-source').fill(source);
+    await page.getByRole('button', { name: S.segTranslate, exact: true }).click();
+    await expect.poll(() => rec.translations.length).toBe(1);
+    const file = serializeWorkfile({ source, target: '', direction: 'en', alignments: null, choices: [], history: [] });
+    await page.getByLabel('选择稿件文件').setInputFiles({ name: 'same-text.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+    await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+    const response = page.waitForResponse(result => new URL(result.url()).pathname === '/api/translations');
+    release();
+    await response;
+    await page.waitForTimeout(150);
+    await expect(page.locator('#review-target')).toHaveValue('');
+    await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+  });
+}
+
 test('single line breaks on one side need a manual split, and one click turns every line into a paragraph', async ({ page }) => {
   await openWorkbench(page);
   const paragraphs = [1, 2, 3].map(i => zhParagraph(i));

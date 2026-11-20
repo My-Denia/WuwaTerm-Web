@@ -1,0 +1,58 @@
+{
+  "schema": "wuwaterm-workbench-state-cases-v1",
+  "manuscript": "../manuscript-v3/valid-v3-all-parts.json",
+  "basis_record": 1,
+  "cases": [
+    {
+      "id": "opened-before-live-basis",
+      "basis": "unknown",
+      "states": ["pending", "saved", "stale"],
+      "due": [0, 2],
+      "probe": 0,
+      "completed": [1, 2]
+    },
+    {
+      "id": "matching-live-basis",
+      "basis": "matching",
+      "states": ["pending", "current", "stale"],
+      "due": [0, 2],
+      "probe": null,
+      "completed": [1, 2]
+    },
+    {
+      "id": "changed-matcher-basis",
+      "basis": "changed-matcher",
+      "states": ["pending", "stale", "stale"],
+      "due": [0, 1, 2],
+      "probe": null,
+      "completed": [1, 2]
+    },
+    {
+      "id": "local-target-edit",
+      "basis": "matching",
+      "edit": { "side": "target", "find": "Sample Name", "replace": "Changed Name" },
+      "states": ["pending", "pending", "stale"],
+      "due": [0, 1, 2],
+      "probe": null,
+      "completed": [2]
+    },
+    {
+      "id": "direction-changed",
+      "basis": "matching",
+      "edit": { "direction": "zh" },
+      "states": ["pending", "pending", "pending"],
+      "due": [0, 1, 2],
+      "probe": null,
+      "completed": []
+    },
+    {
+      "id": "alignment-changed",
+      "basis": "matching",
+      "edit": { "alignments": [] },
+      "states": ["pending", "stale", "stale"],
+      "due": [0, 1, 2],
+      "probe": null,
+      "completed": [1, 2]
+    }
+  ]
+}

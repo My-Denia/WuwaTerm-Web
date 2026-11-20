@@ -1,9 +1,41 @@
 import { test, expect } from '@playwright/test';
-import { S, SE, fill, busy, failure, openWorkbench, switchTo, fillPair, longPair, zhParagraph, enParagraph, TRIO, trioResponse } from '../helpers/semantic-routes.mjs';
+import { serializeWorkfile } from '../../lib/manuscript.js';
+import { S, SE, fill, busy, failure, openWorkbench, switchTo, fillPair, longPair, zhParagraph, enParagraph, TRIO, trioResponse, semanticResponse } from '../helpers/semantic-routes.mjs';
 
 const status = page => page.locator('.run-phase');
 const progress = page => page.locator('.segment-head p');
 const start = page => page.getByRole('button', { name: S.start, exact: true });
+
+test('a semantic result finishing its document hashes cannot enter a newly opened identical manuscript', async ({ page }) => {
+  await page.addInitScript(() => {
+    const original = crypto.subtle.digest.bind(crypto.subtle);
+    window.__holdDigests = false;
+    window.__digestCount = 0;
+    window.__digestReleases = [];
+    crypto.subtle.digest = (algorithm, data) => {
+      if (window.__holdDigests && ++window.__digestCount >= 3 && window.__digestReleases.length < 2) {
+        return new Promise((resolve, reject) => window.__digestReleases.push(() => original(algorithm, data).then(resolve, reject)));
+      }
+      return original(algorithm, data);
+    };
+  });
+  const rec = await openWorkbench(page, { respond: request => semanticResponse(request, []) });
+  const gate = rec.gate(1);
+  await fillPair(page, TRIO.source, TRIO.target);
+  await start(page).click();
+  await expect.poll(() => rec.semantic.length).toBe(1);
+  await page.evaluate(() => { window.__digestCount = 0; window.__holdDigests = true; });
+  gate.release();
+  await expect.poll(() => page.evaluate(() => window.__digestReleases.length)).toBe(2);
+  const file = serializeWorkfile({ ...TRIO, direction: 'en', alignments: null, choices: [], history: [] });
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'same-text.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+  await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+  await page.evaluate(() => { window.__holdDigests = false; window.__digestReleases.splice(0).forEach(release => release()); });
+  await page.waitForTimeout(150);
+  await expect(page.locator('.segment-chip')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: S.overviewSemanticNone, exact: true })).toBeVisible();
+  await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
+});
 
 test('the overview and the two tracks keep deterministic terms apart from model issues', async ({ page }) => {
   await openWorkbench(page, { respond: trioResponse() });
