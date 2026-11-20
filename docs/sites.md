@@ -144,7 +144,10 @@ an explicit error and keep the manuscript they already have open.
 In long mode the term list groups every segment's findings by term: how many
 places, which segments, the translation actually used at each place (for example
 `Camellya ×2`, no hit ×1) and a status (inconsistent or in conflict, to do, not
-evaluated, confirmed). Each place shows its context and can adopt an official pair,
+evaluated, confirmed). A place from a saved result that this session has not yet
+checked against the live dictionary and matcher basis is to do and says so, so a
+reopened manuscript's groups never read confirmed, and stay out of that filter,
+until the live basis makes their segments current. Each place shows its context and can adopt an official pair,
 be marked not a term, be confirmed again, have only that place replaced with a
 candidate, or, when the translation has no hit there, open an editor for that one
 segment's translation; each is one undo step. Segments that could not be paired

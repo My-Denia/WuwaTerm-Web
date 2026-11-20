@@ -92,11 +92,12 @@ test('Tuner x2 and a second Chinese rendering x1; the status of a conflict, an u
   // A confirmed_conflict that no choice settles is inconsistent even with one rendering.
   const conflict = [['Tuner', 0, 'confirmed_conflict', '调音师', 0, [tunerA]]];
   assert.equal(L.groupTermOccurrences([segment(0, 'current', source, target, conflict)], source, target, 'zh')[0].status, 'inconsistent');
-  // Verified, one rendering: confirmed. The same in a stale segment, with an unconfirmed choice, or with a needs_review: pending.
+  // Verified, one rendering: confirmed. The same in a stale segment or in a saved one this session has not checked against the live
+  // basis, with an unconfirmed choice, or with a needs_review: pending.
   const verified = [['Tuner', 0, 'verified_constraint', '调谐器', 0, [tunerA]]];
   assert.equal(L.groupTermOccurrences([segment(0, 'current', source, target, verified)], source, target, 'zh')[0].status, 'confirmed');
   assert.equal(L.groupTermOccurrences([segment(0, 'stale', source, target, verified)], source, target, 'zh')[0].status, 'pending');
-  assert.equal(L.groupTermOccurrences([segment(0, 'saved', source, target, verified)], source, target, 'zh')[0].status, 'confirmed');
+  assert.equal(L.groupTermOccurrences([segment(0, 'saved', source, target, verified)], source, target, 'zh')[0].status, 'pending');
   const unconfirmed = [choice(spanOf(source, 'Tuner', 0), 'official_pair', tunerA, false, 'needs_reconfirmation')];
   assert.equal(L.groupTermOccurrences([segment(0, 'current', source, target, verified, unconfirmed)], source, target, 'zh')[0].status, 'pending');
   assert.equal(L.groupTermOccurrences([segment(0, 'current', source, target, [['Tuner', 0, 'needs_review', null, 0, [tunerA]]])], source, target, 'zh')[0].status, 'pending');
@@ -105,6 +106,74 @@ test('Tuner x2 and a second Chinese rendering x1; the status of a conflict, an u
   assert.equal(L.groupTermOccurrences([segment(0, 'current', source, target, unevaluated)], source, target, 'zh')[0].status, 'not_evaluated');
   const notATerm = [choice(spanOf(source, 'Tuner', 0), 'not_a_term', null, true, 'applies')];
   assert.equal(L.groupTermOccurrences([segment(0, 'current', source, target, unevaluated, notATerm)], source, target, 'zh')[0].status, 'confirmed');
+});
+
+test('a saved result is to do until the live basis makes it current: saved, current and stale on the same 椿 -> Camellya data', () => {
+  const source = '椿站在这里。';
+  const target = 'Camellya stood here.';
+  const verified = [['椿', 0, 'verified_constraint', 'Camellya']];
+  const group = state => L.groupTermOccurrences([segment(0, state, source, target, verified)], source, target, 'en')[0];
+
+  // Reopened before the live check: the place and the translation used are still shown, but the group waits and says so.
+  const saved = group('saved');
+  assert.equal(saved.status, 'pending');
+  assert.equal(saved.pendingCount, 1);
+  assert.equal(saved.confirmedCount, 0);
+  assert.equal(saved.savedCount, 1);
+  assert.equal(saved.occurrences[0].freshness, 'saved');
+  assert.equal(saved.occurrences[0].attention, 'pending');
+  assert.deepEqual(saved.renderings, [{ text: 'Camellya', count: 1, kind: 'hit' }]);
+  // The live check agreed with the saved basis: current, and only then confirmed.
+  const current = group('current');
+  assert.deepEqual([current.status, current.pendingCount, current.confirmedCount, current.savedCount], ['confirmed', 0, 1, 0]);
+  // The live check says the saved result is out of date: pending again, and nothing is left of the saved basis.
+  const stale = group('stale');
+  assert.deepEqual([stale.status, stale.pendingCount, stale.confirmedCount, stale.savedCount], ['pending', 1, 0, 0]);
+  // The filters follow the status: saved and stale are under to do with their place, only current is under confirmed.
+  assert.deepEqual(L.termGroupCounts([saved]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(L.termGroupCounts([current]), { all: 1, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 1 });
+  assert.deepEqual(L.termGroupCounts([stale]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  for (const [, g] of [['saved', saved], ['current', current], ['stale', stale]]) {
+    const counts = L.termGroupCounts([g]);
+    for (const f of L.TERM_GROUP_FILTERS) assert.equal(L.filterTermGroups([g], f).length, counts[f], f);
+  }
+  assert.equal(L.filterTermGroups([saved], 'pending')[0].occurrences[0].freshness, 'saved');
+  assert.deepEqual(L.filterTermGroups([saved], 'confirmed'), []);
+  assert.equal(L.filterTermGroups([current], 'confirmed').length, 1);
+  assert.deepEqual(L.filterTermGroups([current], 'pending'), []);
+
+  // A confirmed not_a_term at a saved place is the user's decision, and it still waits for the live check: saved, not settled.
+  const notATerm = [choice(spanOf(source, '椿'), 'not_a_term', null, true, 'applies')];
+  const unevaluated = [['椿', 0, 'not_evaluated', null, 0, [camellya], { reason: 'not_a_term' }]];
+  const savedNotATerm = L.groupTermOccurrences([segment(0, 'saved', source, target, unevaluated, notATerm)], source, target, 'en')[0];
+  assert.deepEqual([savedNotATerm.status, savedNotATerm.pendingCount, savedNotATerm.confirmedCount, savedNotATerm.savedCount], ['pending', 1, 0, 1]);
+  // The same decision on a current result settles the place.
+  const currentNotATerm = L.groupTermOccurrences([segment(0, 'current', source, target, unevaluated, notATerm)], source, target, 'en')[0];
+  assert.deepEqual([currentNotATerm.status, currentNotATerm.pendingCount, currentNotATerm.confirmedCount], ['confirmed', 0, 1]);
+  // A confirmed choice that applies at a saved place does not settle it either; the same choice on a current place does.
+  const adopted = [choice(spanOf(source, '椿'), 'official_pair', camellya, true, 'applies')];
+  const savedAdopted = L.groupTermOccurrences([segment(0, 'saved', source, target, verified, adopted)], source, target, 'en')[0];
+  assert.deepEqual([savedAdopted.occurrences[0].attention, savedAdopted.status, savedAdopted.pendingCount], ['pending', 'pending', 1]);
+  const currentAdopted = L.groupTermOccurrences([segment(0, 'current', source, target, verified, adopted)], source, target, 'en')[0];
+  assert.deepEqual([currentAdopted.occurrences[0].attention, currentAdopted.status], ['settled', 'confirmed']);
+  // A confirmed conflict stays the more urgent trait of a saved group, and it is still to do.
+  const conflict = L.groupTermOccurrences([segment(0, 'saved', source, target, [['椿', 0, 'confirmed_conflict', 'Camellya']])], source, target, 'en')[0];
+  assert.deepEqual([conflict.status, conflict.pendingCount, conflict.savedCount, conflict.occurrences[0].attention], ['inconsistent', 1, 1, 'conflict']);
+  assert.equal(L.filterTermGroups([conflict], 'pending').length, 1);
+
+  // One current place and one saved place of the same surface: the saved place keeps the group from reading confirmed, and the to do
+  // filter shows that place, not the checked one.
+  const docSource = `${source}\n\n${source}`;
+  const docTarget = `${target}\n\n${target}`;
+  const [mixed] = L.groupTermOccurrences([
+    segment(0, 'current', source, target, verified, [], { source: 0, target: 0 }),
+    segment(1, 'saved', source, target, verified, [], { source: scalars(`${source}\n\n`).length, target: scalars(`${target}\n\n`).length }),
+  ], docSource, docTarget, 'en');
+  assert.deepEqual([mixed.status, mixed.pendingCount, mixed.confirmedCount, mixed.savedCount], ['pending', 1, 1, 1]);
+  assert.deepEqual(L.termGroupCounts([mixed]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  const under = L.filterTermGroups([mixed], 'pending');
+  assert.deepEqual(under.map(g => [g.occurrences.length, g.hidden, g.occurrences[0].freshness]), [[1, 1, 'saved']]);
+  assert.deepEqual(L.filterTermGroups([mixed], 'confirmed'), []);
 });
 
 test('English singular and plural surfaces merge only when they share a candidate set; a Chinese surface never merges', () => {
