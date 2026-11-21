@@ -120,6 +120,7 @@ test('a late generation N-1 report is not 当前已核', async () => {
 
 test('review UI imports the report module and does not insert manuscripts as HTML', () => {
   const component = readFileSync(fileURLToPath(new URL('../app/components/review-workbench.tsx', import.meta.url)), 'utf8');
+  const controller = readFileSync(fileURLToPath(new URL('../lib/workbench-controller.ts', import.meta.url)), 'utf8');
   const page = readFileSync(fileURLToPath(new URL('../app/page.tsx', import.meta.url)), 'utf8');
   const translation = readFileSync(fileURLToPath(new URL('../app/components/translation-workbench.tsx', import.meta.url)), 'utf8');
   assert.match(component, /review-report\.js/u);
@@ -127,13 +128,14 @@ test('review UI imports the report module and does not insert manuscripts as HTM
   assert.equal(component.includes('dangerouslySetInnerHTML'), false);
   assert.equal(component.includes('innerHTML'), false);
   assert.equal(page.includes('dangerouslySetInnerHTML'), false);
-  assert.match(component, /discardInFlight/u);
+  assert.match(controller, /discardInFlight/u);
   // Handoff and undo state transitions are exercised by the real browser
   // regression, rather than requiring the former destructive history reset.
-  assert.match(component, /parseWorkfile/u);
-  assert.match(component, /reconcileChoice/u);
-  assert.match(component, /forms\.includes\(finding\.target_span\.text\)/u);
-  assert.match(component, /generation\.current !== mine/u);
+  assert.match(controller, /parseWorkfile/u);
+  assert.match(component, /reconcileChoices/u);
+  assert.match(controller, /reconcileChoices/u);
+  assert.match(controller, /forms\.includes\(finding\.target_span\.text\)/u);
+  assert.match(controller, /this\.docGeneration !== mine/u);
   const limits = readFileSync(fileURLToPath(new URL('../app/components/limits-body.tsx', import.meta.url)), 'utf8');
   assert.match(limits, /reviewsPerDay/u);
   assert.match(limits, /rowReviewCeiling/u);
@@ -144,6 +146,6 @@ test('review UI imports the report module and does not insert manuscripts as HTM
   assert.match(zhCatalog, /rowReviewCeiling: '\{n\} 次 \/ UTC 日'/u);
   assert.match(component, /fill\(m\.review\.charCounts/u);
   assert.match(zhCatalog, /charCounts: '原文 \{s\} \/ 2,000 · 译文 \{t\} \/ 2,000'/u);
-  assert.match(component, /validReport\(value, source, target, REPORT_V4\)/u);
+  assert.match(controller, /validReport\(value, source, target, REPORT_V4\)/u);
   assert.match(translation, /const result = state\.data/u);
 });
