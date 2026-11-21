@@ -8,21 +8,14 @@ import {
   classifyFailure, itemDisplayState, runDisplayState, runProgress,
 } from '../../lib/semantic-run.js';
 import {
-  TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, reconfirmChoice,
-  removeChoice, removeHistoryEntry, restorableHistory, restoreHistoryEntry, reviseSegmentTarget,
-  segmentInputs, setFinished, spliceTargetSpan, summarizeTermCandidates, termGroupCounts,
-  termPlan, termSegments, uncheckedTermSegments,
+  TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, restorableHistory,
+  summarizeTermCandidates, termGroupCounts, termPlan, termSegments, uncheckedTermSegments,
 } from '../../lib/long-review.js';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES,
-  applySemanticSuggestion,
 } from '../../lib/semantic-review.js';
-import { makeSemanticDecision } from '../../lib/semantic-decisions.js';
-import {
-  isHandled, issueStatus, occurrenceKey,
-  removeDecision, semanticSegmentViews, upsertDecision,
-} from '../../lib/semantic-state.js';
-import { insertParagraphBreak, linesToParagraphs, mergeParagraphs, pairShape, singleBreaks, splitLayout } from '../../lib/manual-split.js';
+import { isHandled, issueStatus, semanticSegmentViews } from '../../lib/semantic-state.js';
+import { pairShape, singleBreaks, splitLayout } from '../../lib/manual-split.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { highlightSegments } from '../../lib/review-report.js';
 import { compactScalarContext } from '../../lib/review-navigation.js';
@@ -32,7 +25,7 @@ import type { Pool } from '../../lib/pool-snapshot';
 import { numberLocale, type UiLanguage } from '../../lib/ui-language';
 import { longExportRows as rowsOf } from '../../lib/workbench-persistence';
 import { isRunActive, PRECEDENTS_DEFAULT_ON, type WorkbenchController, type WorkbenchSnapshot } from '../../lib/workbench-controller';
-import type { Decision, Draft, LongCtx, LongState, Pair, PairView, Placed, RecordView, Region, SegmentInput, SemanticState, Span } from '../../lib/workbench-model';
+import type { Decision, LongCtx, Pair, PairView, Placed, RecordView, Region, SemanticDecisionKind, SemanticState, Span } from '../../lib/workbench-model';
 export { PRECEDENTS_DEFAULT_ON };
 export type { Commit, Draft, LongState, SemanticState, SessionBasis } from '../../lib/workbench-model';
 
@@ -44,7 +37,6 @@ type TermFinding = { id: string; verdict: string; source_span: Span; target_span
 type TermGroup = import('../../lib/long-review.js').TermGroup;
 type Occurrence = import('../../lib/long-review.js').Occurrence;
 type ContextSnippet = import('../../lib/long-review.js').Snippet;
-const inputsOf = (draft: Draft) => segmentInputs(draft) as { long: boolean; items: SegmentInput[] };
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
 type Props = {
   doc: WorkbenchController;
@@ -58,7 +50,6 @@ type Props = {
 
 const chars = (text: string) => Array.from(text);
 const slice = (list: string[], start: number, end: number) => list.slice(start, end).join('');
-const sliceEquals = (text: string, span: Span | null) => !!span && slice(chars(text), span.start, span.end) === span.text;
 const overlaps = (a: Region, b: Region) => a.start < b.end && b.start < a.end;
 
 /** Text with the active issue (and quieter marks for others) highlighted. */
@@ -95,7 +86,7 @@ function Snippet({ text, span, missing }: { text: string; span: Span | null; mis
 
 export function SemanticWorkbench(props: Props) {
   const { doc, snapshot, lang, pool, locate } = props;
-  const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents } = snapshot;
+  const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction } = snapshot;
   const { source, target, direction } = draft;
   const s = semanticMsg(lang);
   const m = msg(lang);
@@ -110,7 +101,6 @@ export function SemanticWorkbench(props: Props) {
   const [splitOpen, setSplitOpen] = useState<number | null>(null);
   const [pendingCut, setPendingCut] = useState<{ side: 'source' | 'target'; offset: number; label: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [lastAction, setLastAction] = useState<{ placedId: string; marker: number; kind: string } | null>(null);
   const [termView, setTermView] = useState<'groups' | 'segments'>('groups');
   const [groupFilter, setGroupFilterState] = useState<GroupFilter>('all');
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
@@ -139,7 +129,7 @@ export function SemanticWorkbench(props: Props) {
   const [resetSeen, setResetSeen] = useState(resetSignal);
   if (resetSeen !== resetSignal) {
     setResetSeen(resetSignal);
-    setActiveId(null); setLocalSegment(null); setSplitOpen(null); setLastAction(null); setRevising(null);
+    setActiveId(null); setLocalSegment(null); setSplitOpen(null); setRevising(null);
   }
 
   // ---- issue list ----
@@ -220,100 +210,52 @@ export function SemanticWorkbench(props: Props) {
       return p && !isHandled((issueStatus(nextState, p) as { status: string }).status) && !p.stale;
     }) ?? null;
     setActiveId(nextId);
-    if (!nextId) doc.commit({ notice: 'sem:allHandled', remember: false });
     if (nextId && statusFilter !== 'pending' && statusFilter !== 'all') setStatusFilter('pending');
   }
 
-  async function decide(row: (typeof rows)[number], kind: 'accepted' | 'adjusted' | 'ignored', text?: string) {
-    const p = row.placed;
-    const result = semantic.results.find(r => r.id === p.resultId);
-    if (!result) return;
-    const startDraft = doc.getSnapshot().draft;
-    let nextTarget: string | null = null;
-    let applied: string | null = null;
-    if (kind === 'accepted') {
-      if (!p.issue.suggestion || p.issue.suggestion_withheld !== null || !p.live.suggestion_span) return;
-      const replacement = choice === 'alternative' && p.issue.alternatives[0] ? p.issue.alternatives[0].replacement : p.issue.suggestion.replacement;
-      const applied0 = applySemanticSuggestion({ target: startDraft.target, issue: { suggestion: { ...p.issue.suggestion, target_span: p.live.suggestion_span }, suggestion_withheld: null }, offset: 0, replacement });
-      if (applied0.error || applied0.target === undefined) { doc.commit({ semantic: x => x, notice: 'sem:needsReconfirm', remember: false }); return; }
-      nextTarget = applied0.target; applied = replacement;
-    } else if (kind === 'adjusted') {
-      const range = p.live.suggestion_span ?? p.live.target_span;
-      if (!range || text === undefined || !text.trim() || chars(text).length > 2000 || !sliceEquals(startDraft.target, range)) { doc.commit({ semantic: x => x, notice: 'sem:needsReconfirm', remember: false }); return; }
-      const tc = chars(startDraft.target);
-      nextTarget = slice(tc, 0, range.start) + text + slice(tc, range.end, tc.length); applied = text;
-    }
-    const decision = await makeSemanticDecision({ issue: p.issue, segmentIndex: p.issue.segment_index, source: result.doc.source, target: result.doc.target, termBasis: result.report.term_basis, decision: kind, appliedText: applied }) as Decision;
-    const nowSnap = doc.getSnapshot();
-    if (nowSnap.draft !== startDraft) { doc.commit({ semantic: x => x, notice: 'sem:needsReconfirm', remember: false }); return; }
-    const probe = upsertDecision(nowSnap.semantic, decision, p.id);
-    if (!probe) { doc.commit({ semantic: x => x, notice: 'sem:decisionLimit', remember: false }); return; }
-    const nextDraft = nextTarget === null ? undefined : { ...startDraft, target: nextTarget, alignments: startDraft.alignments === null ? null : [] };
-    const serial = doc.commit({
-      draft: nextDraft,
-      semantic: state => (upsertDecision(state, decision, p.id) as SemanticState) ?? state,
-      notice: `sem:${kind}`,
-    });
-    setLastAction(serial === null ? null : { placedId: p.id, marker: serial, kind });
+  async function decide(row: (typeof rows)[number], kind: SemanticDecisionKind, text?: string) {
+    const outcome = await doc.applySemanticDecision(
+      kind === 'accepted'
+        ? { placedId: row.placed.id, kind, useAlternative: choice === 'alternative' }
+        : kind === 'adjusted'
+          ? { placedId: row.placed.id, kind, text: text ?? '' }
+          : { placedId: row.placed.id, kind },
+    );
+    if (!outcome.applied) return;
     setAdjusting(null);
-    advanceFrom(p.id, doc.getSnapshot().semantic);
+    advanceFrom(row.placed.id, doc.getSnapshot().semantic);
   }
+
   function undoDecision(row: (typeof rows)[number]) {
-    if (!row.decision) return;
-    if (row.decision.decision === 'ignored') {
-      doc.commit({ semantic: state => removeDecision(state, occurrenceKey(row.decision!)) as SemanticState, notice: 'sem:undone' });
-      setActiveId(row.placed.id); setLastAction(null);
-      return;
-    }
-    if (lastAction?.placedId === row.placed.id && doc.canUndoLast(lastAction.marker)) { doc.undo(); setActiveId(row.placed.id); setLastAction(null); }
+    if (doc.undoSemanticDecision(row.placed.id)) setActiveId(row.placed.id);
   }
 
   // ---- manual split: explicit, one-click text edits, each its own undo step ----
   function splitAt(side: 'source' | 'target', offset: number, paired: boolean, label: string) {
-    const d = doc.getSnapshot().draft;
     if (paired && (!pendingCut || pendingCut.side === side)) {
       setPendingCut(pendingCut?.side === side && pendingCut.offset === offset ? null : { side, offset, label });
       return;
     }
-    let next = { ...d };
-    const first = insertParagraphBreak(d[side], offset);
-    if (!first) return;
-    next = { ...next, [side]: first.text };
-    if (paired && pendingCut) {
-      const other = insertParagraphBreak(d[pendingCut.side], pendingCut.offset);
-      if (!other) { setPendingCut(null); return; }
-      next = { ...next, [pendingCut.side]: other.text };
-    }
+    const cuts = paired && pendingCut
+      ? [{ side, offset }, { side: pendingCut.side, offset: pendingCut.offset }]
+      : [{ side, offset }];
     setPendingCut(null);
-    doc.commit({ draft: { ...next, alignments: d.alignments === null ? null : [] }, notice: 'sem:split' });
+    doc.splitParagraphs(cuts);
   }
   function splitPendingOnly() {
     if (!pendingCut) return;
-    const d = doc.getSnapshot().draft;
-    const r = insertParagraphBreak(d[pendingCut.side], pendingCut.offset);
+    const cut = pendingCut;
     setPendingCut(null);
-    if (r) doc.commit({ draft: { ...d, [pendingCut.side]: r.text, alignments: d.alignments === null ? null : [] }, notice: 'sem:split' });
+    doc.splitParagraphs([{ side: cut.side, offset: cut.offset }]);
   }
   function linesEverywhere() {
-    const d = doc.getSnapshot().draft;
-    const s1 = linesToParagraphs(d.source); const t1 = linesToParagraphs(d.target);
-    if (!s1 && !t1) return;
-    setPendingCut(null);
-    doc.commit({ draft: { ...d, source: s1?.text ?? d.source, target: t1?.text ?? d.target, alignments: d.alignments === null ? null : [] }, notice: 'sem:lines' });
+    if (doc.convertLinesToParagraphs()) setPendingCut(null);
   }
   function merge(side: 'source' | 'target', gapStart: number, gapEnd: number) {
-    const d = doc.getSnapshot().draft;
-    const r = mergeParagraphs(d[side], gapStart, gapEnd);
-    if (!r) return;
-    setPendingCut(null);
-    doc.commit({ draft: { ...d, [side]: r.text, alignments: d.alignments === null ? null : [] }, notice: 'sem:merged' });
+    if (doc.mergeParagraphsAt(side, gapStart, gapEnd)) setPendingCut(null);
   }
   function linesAsParagraphs(side: 'source' | 'target', region: Region) {
-    const d = doc.getSnapshot().draft;
-    const r = linesToParagraphs(d[side], region);
-    if (!r) return;
-    setPendingCut(null);
-    doc.commit({ draft: { ...d, [side]: r.text, alignments: d.alignments === null ? null : [] }, notice: 'sem:lines' });
+    if (doc.convertLinesToParagraphs({ side, region })) setPendingCut(null);
   }
 
   // ---- derived view state ----
@@ -439,26 +381,14 @@ export function SemanticWorkbench(props: Props) {
 
   // ---- per-place edits in the term view: one place at a time, each its own undo step ----
   const rendering = (candidate: TermCandidate) => (direction === 'en' ? candidate.en : candidate.zh);
-  function replaceOccurrence(occ: Occurrence, candidate: TermCandidate) {
-    const d = doc.getSnapshot().draft;
-    if (!occ.docTarget) return;
-    const out = spliceTargetSpan(d.target, occ.docTarget, rendering(candidate)) as { target?: string; error?: string };
-    if (out.error === 'span_mismatch') { doc.commit({ semantic: x => x, notice: 'sem:longReplaceStale', remember: false }); return; }
-    if (out.target === undefined) return;
-    doc.commit({ draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] }, notice: 'sem:longTargetReplaced' });
-  }
   function openRevise(occ: Occurrence) {
-    const item = inputsOf(doc.getSnapshot().draft).items[occ.segmentIndex];
-    if (item) setRevising({ key: occ.key, index: occ.segmentIndex, base: item.targetCore, text: item.targetCore });
+    const base = doc.segmentTargetCore(occ.segmentIndex);
+    if (base !== null) setRevising({ key: occ.key, index: occ.segmentIndex, base, text: base });
   }
   function applyRevise() {
     if (!revising) return;
-    const d = doc.getSnapshot().draft;
-    const item = inputsOf(d).items[revising.index];
-    const out = (item ? reviseSegmentTarget(d.target, { start: item.range.target_start, end: item.range.target_end }, revising.base, revising.text) : { error: 'core_mismatch' }) as { target?: string; error?: string };
-    if (out.target === undefined) { if (out.error !== 'noop') doc.commit({ semantic: x => x, notice: 'sem:longReviseInvalid', remember: false }); return; }
-    setRevising(null);
-    doc.commit({ draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] }, notice: 'sem:longSegmentRevised' });
+    const outcome = doc.reviseSegmentText(revising.index, revising.base, revising.text);
+    if (outcome.applied) setRevising(null);
   }
   const numberList = (numbers: number[]) => numbers.slice(0, NUMBERS_SHOWN).join(lang === 'en' ? ', ' : '、') + (numbers.length > NUMBERS_SHOWN ? '…' : '');
   const renderOccurrence = (occ: Occurrence) => {
@@ -482,18 +412,18 @@ export function SemanticWorkbench(props: Props) {
       {(occ.translation !== null || occ.verdict !== 'not_evaluated') && <p className="occurrence-translation" data-hit={occ.translation === null ? 'false' : 'true'}>{occ.translation === null ? s.occurrenceNoHit : fill(s.occurrenceTranslation, { text: occ.translation })}</p>}
       {occ.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
         <div className="finding-actions">
-          <button type="button" className="text-button" onClick={() => doc.chooseLong(occ.segmentIndex, finding, c)}>{m.review.adopt}</button>
-          {live && rendering(c) !== occ.translation && <button type="button" className="text-button" title={fill(s.occReplaceAria, { n: occ.segmentNumber, term: rendering(c) })} onClick={() => replaceOccurrence(occ, c)}>{fill(s.occReplace, { term: rendering(c) })}</button>}
+          <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'adopt', segmentIndex: occ.segmentIndex, finding, candidate: c })}>{m.review.adopt}</button>
+          {live && rendering(c) !== occ.translation && <button type="button" className="text-button" title={fill(s.occReplaceAria, { n: occ.segmentNumber, term: rendering(c) })} onClick={() => doc.applyTermOccurrenceAction({ type: 'replace', docTarget: occ.docTarget, candidate: c })}>{fill(s.occReplace, { term: rendering(c) })}</button>}
         </div>
       </div>)}
       <div className="finding-actions">
-        <button type="button" className="text-button" onClick={() => doc.chooseLong(occ.segmentIndex, finding, null)}>{m.review.notTerm}</button>
+        <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'not_a_term', segmentIndex: occ.segmentIndex, finding })}>{m.review.notTerm}</button>
         <button type="button" className="text-button" onClick={() => locate('source', occ.docSource)}>{m.review.jumpSource}</button>
         <button type="button" className="text-button" disabled={!occ.docTarget} onClick={() => { if (occ.docTarget) locate('target', occ.docTarget); }}>{m.review.jumpTarget}</button>
         {!occ.docTarget && <button type="button" className="text-button" aria-expanded={!!editing} onClick={() => (editing ? setRevising(null) : openRevise(occ))}>{s.occRevise}</button>}
       </div>
       {chosen && <p className="long-choice-state" data-choice-view={chosen.view}>{chosen.candidate ? fill(m.review.choicePair, { span: chosen.source_span.text, zh: chosen.candidate.zh, en: chosen.candidate.en }) : fill(m.review.choiceNotTerm, { span: chosen.source_span.text })} — {choiceViewText(chosen.view)}
-        {chosen.view === 'needs_reconfirmation' && view?.record?.state !== 'pending' && <> <button type="button" className="text-button" onClick={() => doc.commitLong(state => reconfirmChoice(state, at) as { long: LongState; error: string | null }, 'sem:longChoiceRecorded')}>{s.choiceReconfirm}</button></>}</p>}
+        {chosen.view === 'needs_reconfirmation' && view?.record?.state !== 'pending' && <> <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'reconfirm', at })}>{s.choiceReconfirm}</button></>}</p>}
       {editing && <div className="term-revise" role="group" aria-label={fill(s.reviseTitle, { n: occ.segmentNumber })}>
         <h5>{fill(s.reviseTitle, { n: occ.segmentNumber })}</h5>
         <p className="track-note">{s.reviseHint}</p>
@@ -553,8 +483,8 @@ export function SemanticWorkbench(props: Props) {
         return <div className="choice-record" key={`${index}:${c.source_span.start}:${c.source_span.end}`} data-segment={index} data-choice-view={c.view}>
           <p>{fill(s.segmentLabel, { n: index + 1 })} · {c.candidate ? fill(m.review.choicePair, { span: c.source_span.text, zh: c.candidate.zh, en: c.candidate.en }) : fill(m.review.choiceNotTerm, { span: c.source_span.text })} — {choiceViewText(c.view)}</p>
           <div className="finding-actions">
-            {c.view === 'needs_reconfirmation' && view.record?.state !== 'pending' && <button type="button" className="text-button" onClick={() => doc.commitLong(state => reconfirmChoice(state, at) as { long: LongState; error: string | null }, 'sem:longChoiceRecorded')}>{s.choiceReconfirm}</button>}
-            <button type="button" className="text-button" onClick={() => doc.commitLong(state => removeChoice(state, at) as LongState)}>{m.review.choiceRemove}</button>
+            {c.view === 'needs_reconfirmation' && view.record?.state !== 'pending' && <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'reconfirm', at })}>{s.choiceReconfirm}</button>}
+            <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'clear_choice', at })}>{m.review.choiceRemove}</button>
           </div>
         </div>;
       })}
@@ -564,8 +494,8 @@ export function SemanticWorkbench(props: Props) {
       {semantic.long.history.map((entry, position) => <div className="choice-record" key={`${position}:${entry.source_hash}:${entry.source_span.start}`}>
         <p>{entry.candidate ? fill(m.review.choicePair, { span: entry.source_span.text, zh: entry.candidate.zh, en: entry.candidate.en }) : fill(m.review.choiceNotTerm, { span: entry.source_span.text })}</p>
         <div className="finding-actions">
-          {restorable[position] !== null && restorable[position] !== undefined && <button type="button" className="text-button" onClick={() => doc.commitLong(state => restoreHistoryEntry(state, position, restorable[position]!, { draft: doc.getSnapshot().draft, basis: doc.getSnapshot().basis }) as { long: LongState; error: string | null })}>{fill(s.historyRestore, { n: (restorable[position] ?? 0) + 1 })}</button>}
-          <button type="button" className="text-button" onClick={() => doc.commitLong(state => removeHistoryEntry(state, position) as LongState)}>{s.historyRemove}</button>
+          {restorable[position] !== null && restorable[position] !== undefined && <button type="button" className="text-button" onClick={() => doc.restoreTermHistoryEntry(position, restorable[position]!)}>{fill(s.historyRestore, { n: (restorable[position] ?? 0) + 1 })}</button>}
+          <button type="button" className="text-button" onClick={() => doc.removeTermHistoryEntry(position)}>{s.historyRemove}</button>
         </div>
       </div>)}
     </details>}
@@ -627,7 +557,7 @@ export function SemanticWorkbench(props: Props) {
             </button>
             {item?.status === 'failed' && !runActive && <button type="button" className="text-button" onClick={() => doc.retryRunItem(item.key)}>{s.segRetry}</button>}
             {record && (record.finished || record.state !== 'pending') && <button type="button" className="text-button" aria-pressed={record.finished}
-              onClick={() => doc.commitLong(state => setFinished(state, view.pair.index, !record.finished) as LongState)}>{record.finished ? s.segUnmarkFinished : s.segMarkFinished}</button>}
+              onClick={() => doc.toggleSegmentFinished(view.pair.index, !record.finished)}>{record.finished ? s.segUnmarkFinished : s.segMarkFinished}</button>}
             {semanticOn && view.pair.status === 'ready' && !runActive && (view.edited || (!view.result && item?.status !== 'failed')) && !translationClosed
               && <button type="button" className="text-button" onClick={() => startRun([view])}>{s.segReview}</button>}
             {view.pair.status === 'untranslated' && <button type="button" className="text-button" disabled={pairTranslating !== null || runActive || translationClosed || chars(view.sCore).length > SEGMENT_LIMIT} onClick={() => void doc.translatePair(view)}>{s.segTranslate}</button>}
@@ -660,8 +590,8 @@ export function SemanticWorkbench(props: Props) {
           <button type="button" disabled={runActive || pendingViews.length === 0 || translationClosed} onClick={() => startRun()}>{semantic.results.length ? s.startPending : s.start}</button>
         </div>
       </>}
-      {lastAction && doc.canUndoLast(lastAction.marker) && (() => {
-        const row = rows.find(r => r.placed.id === lastAction.placedId);
+      {lastSemanticAction && doc.canUndoLast(lastSemanticAction.marker) && (() => {
+        const row = rows.find(r => r.placed.id === lastSemanticAction.placedId);
         return row && row.decision ? <p className="semantic-last" role="status">{s.statuses[row.decision.decision]} · {s.categories[row.placed.issue.category]}
           <button type="button" className="text-button" onClick={() => undoDecision(row)}>{s.undoDecision}</button></p> : null;
       })()}
@@ -694,7 +624,7 @@ export function SemanticWorkbench(props: Props) {
         </div>
         {active && <IssueCard s={s} m={m} row={active} source={source} target={target} view={issueRegion} rows={rows} choice={choice} setChoice={setChoice}
           adjusting={adjusting} setAdjusting={setAdjusting} decide={(kind, text) => void decide(active, kind, text)} undo={() => undoDecision(active)}
-          canUndo={!!active.decision && (active.decision.decision === 'ignored' || (lastAction?.placedId === active.placed.id && doc.canUndoLast(lastAction.marker)))}
+          canUndo={doc.canUndoSemanticDecision(active.placed.id)}
           position={fill(s.position, { i: activeIndex < 0 ? 1 : activeIndex + 1, n: visible.length })} prev={() => move(-1)} next={() => move(1)} locate={locateActive}
           locateSide={locate} activeMark={activeMark} onReview={activeView && activeView.pair.status === 'ready' && semanticOn && !runActive ? () => startRun([activeView]) : null} />}
       </div>}

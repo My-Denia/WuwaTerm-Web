@@ -76,6 +76,43 @@ export type RunState = {
   kind: RunKind | null; phase: string; items: RunItem[]; waitUntil: number | null; stopCode: string | null; stopRequestId?: string | null;
   streak?: { code: string | null; count: number };
 };
+export type SemanticDecisionKind = 'accepted' | 'adjusted' | 'ignored';
+export type SemanticActionRecord = { placedId: string; marker: number; kind: SemanticDecisionKind };
+export type SemanticDecisionCommand =
+  | { placedId: string; kind: 'accepted'; useAlternative?: boolean }
+  | { placedId: string; kind: 'adjusted'; text: string }
+  | { placedId: string; kind: 'ignored' };
+export type SemanticDecisionResult =
+  | { applied: true; placedId: string; kind: SemanticDecisionKind; serial: number | null; allHandled: boolean }
+  | { applied: false; reason: 'missing' | 'invalid' | 'needs_reconfirm' | 'decision_limit' | 'stale' };
+
+export type TermCandidateRef = Pick<Candidate, 'candidate_id' | 'zh' | 'en' | 'category'>;
+export type TermFindingRef = { source?: number[]; source_span?: Span };
+export type TermChoiceRef = { index: number; start: number; end: number };
+export type TermOccurrenceAction =
+  | { type: 'adopt'; segmentIndex: number; finding: TermFindingRef; candidate: TermCandidateRef }
+  | { type: 'not_a_term'; segmentIndex: number; finding: TermFindingRef }
+  | { type: 'replace'; docTarget: Span | null; candidate: TermCandidateRef }
+  | { type: 'reconfirm'; at: TermChoiceRef }
+  | { type: 'clear_choice'; at: TermChoiceRef };
+
+export type ParagraphCut = { side: 'source' | 'target'; offset: number };
+export type TargetRevisionCommand = {
+  snapshot: Snapshot;
+  generation: number;
+  draft: Draft;
+  choices: Choice[];
+  imported: Choice[];
+  finding: Finding;
+  candidate: Candidate;
+  fragment: string;
+  selected: Span | null;
+};
+export type TargetRevisionResult =
+  | { status: 'applied'; target: string; span: Span }
+  | { status: 'stale' }
+  | { status: 'invalid'; error?: string };
+
 export type ExportArtifact = { filename: string; content: string; mimeType: string };
 export type ImportFileLike = { name: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
 export type ImportOutcome = { status: 'imported' | 'error' | 'ignored' } | { status: 'needs_confirm_text'; pendingText: string };

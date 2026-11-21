@@ -6,8 +6,8 @@ import {
 } from '../../lib/review-navigation.js';
 import { highlightSegments, scalarToUtf16, summarizeReviewParts } from '../../lib/review-report.js';
 import {
-  basisOf, compareReports, leaveGuardActive, manuscriptSaveView, mentionId,
-  reconcileChoices, recoverSpan, sameBasis, validSpan,
+  basisOf, compareReports, leaveGuardActive, manuscriptSaveView,
+  reconcileChoices, sameBasis,
 } from '../../lib/manuscript.js';
 import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
@@ -174,20 +174,6 @@ export function ReviewWorkbench() {
     if (message) doc.setNotice(message);
   }, [doc]);
   function updateRevision(intent: RevisionIntent) { revisionRef.current = intent; setRevision(intent); }
-  function eligibleRevision(snap: Snapshot | null, finding: Finding, candidate: Candidate, value: Draft) {
-    return !!snap?.trusted && snap.report.rule_version === 'review-v2' && !snap.report.truncated
-      && snap.source === value.source && snap.target === value.target && snap.direction === value.direction
-      && JSON.stringify(snap.alignments) === JSON.stringify(value.alignments)
-      && finding.target_span === null && validSpan(finding.source_span, value.source)
-      && snap.report.findings.includes(finding) && finding.candidates.includes(candidate);
-  }
-  function revisionCurrent(intent: RevisionIntent) {
-    const now = doc.getSnapshot();
-    const latestSnap = now.reports.at(-1) ?? null;
-    return now.generation === intent.generation && !now.inFlight && latestSnap === intent.snapshot
-      && now.draft === intent.draft && now.choices === intent.choices && now.imported === intent.imported
-      && eligibleRevision(latestSnap, intent.finding, intent.candidate, now.draft);
-  }
   useEffect(() => {
     const intent = revisionRef.current;
     if (intent && (draft !== intent.draft || choices !== intent.choices || imported !== intent.imported
@@ -206,7 +192,7 @@ export function ReviewWorkbench() {
   function openRevision(finding: Finding, candidate: Candidate, trigger: HTMLButtonElement) {
     const now = doc.getSnapshot();
     const latestSnap = now.reports.at(-1) ?? null;
-    if (now.inFlight || now.phase === 'loading' || !eligibleRevision(latestSnap, finding, candidate, now.draft) || !latestSnap) return;
+    if (now.inFlight || now.phase === 'loading' || !doc.isRevisionEligible(finding, candidate) || !latestSnap) return;
     updateRevision({
       snapshot: latestSnap, generation: now.generation, draft: now.draft,
       choices: now.choices, imported: now.imported, finding, candidate, trigger, fragment: '', selected: null,
@@ -215,13 +201,11 @@ export function ReviewWorkbench() {
   function confirmRevision() {
     const intent = revisionRef.current;
     if (!intent) return;
-    if (!revisionCurrent(intent)) { cancelRevision('revisionStale'); return; }
-    const replacement = intent.draft.direction === 'en' ? intent.candidate.en : intent.candidate.zh;
-    const result = spliceOccurrence(doc.getSnapshot().draft.target, intent.fragment, intent.selected, replacement);
-    if (result.error || result.target === undefined || !result.span) return;
+    const outcome = doc.applyTargetRevision(intent);
+    if (outcome.status === 'stale') { cancelRevision(); return; }
+    if (outcome.status !== 'applied') return;
     cancelRevision();
-    doc.editText('target', result.target);
-    requestAnimationFrame(() => jumpTo(targetBox.current, result.target!, result.span!));
+    requestAnimationFrame(() => jumpTo(targetBox.current, outcome.target, outcome.span));
   }
 
   const receiveDraft = useCallback((next: Draft) => {
@@ -339,19 +323,6 @@ export function ReviewWorkbench() {
   async function translateInReview() {
     await doc.translateInReview({ translationClosed });
   }
-  function confirmableChoice(choice: Choice): { finding: Finding; candidate: Candidate | null } | null {
-    if (!sourceCompatible || !latest || latest.report.truncated) return null;
-    const span = recoverSpan(choice.source, choice.source_span, source);
-    if (!span) return null;
-    const finding = latest.report.findings.find(f => f.id === mentionId(span));
-    if (!finding) return null;
-    if (choice.choice === 'not_a_term') return { finding, candidate: null };
-    const candidate = choice.candidate
-      ? finding.candidates.find(c => c.candidate_id === choice.candidate!.candidate_id
-          && c.zh === choice.candidate!.zh && c.en === choice.candidate!.en && c.category === choice.candidate!.category) ?? null
-      : null;
-    return candidate ? { finding, candidate } : null;
-  }
   function jumpTo(box: HTMLTextAreaElement | null, text: string, span: Span) {
     if (!box) return;
     const located = highlightSegments(text, span);
@@ -463,7 +434,7 @@ export function ReviewWorkbench() {
               <div className="finding-actions">
                 <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{m.review.adopt}</button>
                 {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.replaceTerm(finding, candidate)}>{m.review.replace}</button>}
-                {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !eligibleRevision(latest, finding, candidate, draft)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
+                {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !doc.isRevisionEligible(finding, candidate)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
               </div>
               <details className="candidate-sources"><summary>{m.review.viewSources}</summary>
                 <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
@@ -599,8 +570,8 @@ export function ReviewWorkbench() {
     {basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
     {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
       {choices.map((choice, i) => {
-        const confirmTarget = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' ? confirmableChoice(choice) : null;
-        return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{confirmTarget && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.choose(confirmTarget.finding, confirmTarget.candidate)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
+        const canConfirm = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' && doc.canConfirmChoice(i);
+        return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{canConfirm && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.confirmChoice(i)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
       })}
     </div>}
     {capabilities?.includes('semantic-review-v1') && <div className="issue-overview" role="group" aria-label={sm.overviewAria}>
