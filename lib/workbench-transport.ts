@@ -1,5 +1,5 @@
 import { classifyFailure } from './semantic-run.js';
-import { workbenchPath } from './ui-runtime';
+import { workbenchPath } from './ui-runtime.ts';
 
 export const REVIEW_FEATURES = 'dense-128,reason-v1';
 export const REVIEW_REQUEST_LIMIT = 65_536;

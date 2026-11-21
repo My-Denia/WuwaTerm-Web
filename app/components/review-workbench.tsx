@@ -1,67 +1,47 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   FILTERS, filterFindings, findingVerdictCounts, reconcileActiveId, compactScalarContext,
 } from '../../lib/review-navigation.js';
-import { highlightSegments, revisionOf, scalarToUtf16, summarizeReviewParts } from '../../lib/review-report.js';
+import { highlightSegments, scalarToUtf16, summarizeReviewParts } from '../../lib/review-report.js';
 import {
-  MAX_V3_WORKFILE_BYTES, MAX_V4_CHOICES, MAX_WORKFILE_BYTES, REPORT_V4, basisOf, canonicalManuscript, compareReports, leaveGuardActive,
-  makeChoice, manuscriptSaveView, mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent,
-  recoverSpan, sameBasis, serializeWorkfile, validAlignments, validReport, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
+  basisOf, compareReports, leaveGuardActive, manuscriptSaveView, mentionId,
+  reconcileChoices, recoverSpan, sameBasis, validSpan,
 } from '../../lib/manuscript.js';
-import { longFromWorkfile, recordView, segmentInputs, workfileParts } from '../../lib/long-review.js';
-import { fragmentOccurrences, spliceOccurrence } from '../../lib/target-revision.js';
-import { validSpan } from '../../lib/manuscript.js';
+import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
-import { CAPABILITY_TRANSLATION_CONTEXT } from '../../lib/semantic-review.js';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
-import { isPool, POOL_REFRESH_EVENT, requestPoolRefresh, type Pool } from '../../lib/pool-snapshot';
+import { isPool, POOL_REFRESH_EVENT, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
 import { workbenchPath } from '../../lib/ui-runtime';
-import { postWorkbench, REVIEW_REQUEST_LIMIT } from '../../lib/workbench-transport';
-import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from '../../lib/markdown-report';
+import { semanticCounts } from '../../lib/semantic-state.js';
+import { semanticMsg } from '../../lib/semantic-messages';
+import {
+  canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
+} from '../../lib/workbench-controller';
+import type { Candidate, Choice, Draft, Finding, Snapshot, Span } from '../../lib/workbench-model';
 import { useUiLanguage } from './ui-language-context';
 import { SemanticWorkbench } from './semantic-workbench';
-import { semanticFromWorkfile, semanticWorkfileParts, semanticExport } from '../../lib/workbench-persistence';
-import type { Commit, LongState, SemanticState, SessionBasis } from '../../lib/workbench-model';
-import { emptySemantic, freshSemantic, longHoldsWork, mapSemanticEdit, semanticCounts } from '../../lib/semantic-state.js';
-import { semanticMsg } from '../../lib/semantic-messages';
 
-// At most 128 kept choices (manuscript v4; a file with more than 32 is written as v4), and 64 KiB for one /api/reviews request.
-const MAX_CHOICES = MAX_V4_CHOICES;
-// The review-v2 features this client reads: up to 128 findings and resolutions, and a reason on a not_evaluated finding. The BFF
-// forwards them only to a service that is asked, and an older one answers in the old shape, which is still read.
-type Span = { start: number; end: number; text: string };
-type Alignment = { source: Span; target: Span | null };
-type Candidate = { candidate_id: string; zh: string; en: string; category: string; sources: { source_file: string; source_id: string }[] };
-type Finding = { id: string; rule_id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: Candidate[]; candidates_truncated: boolean; reason?: string };
-type Report = { request_id: string; source_revision: string; target_revision: string; rule_version: string; matcher_revision?: string; dictionary: { schema_version: string | null; source_commit: string | null; term_count: number; revision: string }; coverage: { evaluated: number; not_evaluated: number; rules: string[] }; findings: Finding[]; truncated: boolean };
-type Draft = { source: string; target: string; direction: 'en' | 'zh'; alignments: Alignment[] | null };
-type Choice = { source: string; direction: string; source_span: Span; scope: string; choice: string; candidate: Pick<Candidate, 'candidate_id' | 'zh' | 'en' | 'category'> | null; basis: ReturnType<typeof basisOf> };
-type Resolution = { mention_id: string; choice: string; candidate_id?: string };
-type Snapshot = Draft & { report: Report; trusted: boolean; signature: string; resolutions: Resolution[] | null };
-type RevisionIntent = { snapshot: Snapshot; generation: number; draft: Draft; choices: Choice[]; imported: Choice[]; finding: Finding; candidate: Candidate; trigger: HTMLButtonElement; fragment: string; selected: Span | null };
-type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[]; semantic: SemanticState; serial?: number; replacedDocument?: boolean };
-// Status messages store language-independent codes (catalog notice keys, or
-// structured error identities); the visible text resolves from the catalog on
-// each render, so switching interface language re-localizes a message that is
-// still on screen, including one stored by an async check or import.
-type NoticeState = string | null;
-type ErrorState = { reason?: string; code?: string; text?: string; kind?: 'translation' | 'review'; requestId?: string; retryAfter?: number } | null;
-// What a failed request's body and headers say beyond its reason: the request id and the wait the service asked for.
-function failureFields(response: Response, value: unknown): { requestId?: string; retryAfter?: number } {
-  const body = value && typeof value === 'object' ? value as { request_id?: unknown; retry_after_seconds?: unknown } : {};
-  const header = Number(response.headers.get('retry-after'));
-  const retryAfter = typeof body.retry_after_seconds === 'number' ? body.retry_after_seconds : Number.isFinite(header) && header > 0 ? header : undefined;
-  return { ...(typeof body.request_id === 'string' && body.request_id ? { requestId: body.request_id } : {}), ...(retryAfter !== undefined ? { retryAfter } : {}) };
-}
-const EMPTY: Draft = { source: '', target: '', direction: 'en', alignments: null };
+type RevisionIntent = {
+  snapshot: Snapshot;
+  generation: number;
+  draft: Draft;
+  choices: Choice[];
+  imported: Choice[];
+  finding: Finding;
+  candidate: Candidate;
+  trigger: HTMLButtonElement;
+  fragment: string;
+  selected: Span | null;
+};
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
+
 async function poolPayload(response: Response): Promise<unknown> {
   try { return await response.json(); } catch { return null; }
 }
-function signature(draft: Draft, resolutions: object[]) { return JSON.stringify({ ...draft, resolutions }); }
+
 function Excerpt({ text, span, missing }: { text: string; span: Span | null; missing: string }) {
   const { lang } = useUiLanguage();
   const located = span ? highlightSegments(text, span) : null;
@@ -74,38 +54,13 @@ function Excerpt({ text, span, missing }: { text: string; span: Span | null; mis
     </details>}
   </>;
 }
+
 function downloadFile(name: string, content: string, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([content], { type }));
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function cleanSnapshot(snapshot: Snapshot) {
-  const { source, target, direction, alignments, report } = snapshot;
-  return { source, target, direction, alignments, report, ...(snapshot.resolutions === null ? {} : { resolutions: snapshot.resolutions }) };
-}
-/**
- * The manuscript payload: the v1/v2 parts and, for long-mode term review, the v3 parts (manuscript-v3 SPEC "Writing").
- * `basis` is the session basis, so a record whose result another live response superseded is written stale.
- * Throws long_state_out_of_sync when the long state does not line up with the segments.
- */
-function manuscriptBody(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState, basis: SessionBasis) {
-  // workfileParts takes the draft object itself: its per-draft caches are keyed by identity.
-  const parts = workfileParts(semantic.long, nextDraft, { basis });
-  const base = { ...nextDraft, choices: nextChoices, history: nextReports.map(cleanSnapshot), ...parts };
-  return semanticWorkfileParts(base, semantic);
-}
-/**
- * Whether the workbench holds work that replacing the manuscript would lose: the texts, alignments, choices and reports,
- * semantic decisions and results, and the long-mode records, choices and choice history. One predicate for the save
- * state, clearing and a received draft, so they cannot disagree.
- */
-function workPresent(draft: Draft, choices: Choice[], reports: Snapshot[], semantic: SemanticState) {
-  return recoverableWorkPresent({ ...draft, choices, reports }) || semantic.decisions.length > 0 || semantic.results.length > 0
-    || longHoldsWork(semantic.long);
-}
-function canonicalOf(nextDraft: Draft, nextChoices: Choice[], nextReports: Snapshot[], semantic: SemanticState, basis: SessionBasis) {
-  try { return canonicalManuscript(manuscriptBody(nextDraft, nextChoices, nextReports, semantic, basis)); } catch { return null; }
-}
+
 function unloadUrl(anchor: HTMLAnchorElement): string | null {
   if (anchor.hasAttribute('download') || anchor.target === '_blank') return null;
   const raw = anchor.getAttribute('href');
@@ -118,38 +73,19 @@ function unloadUrl(anchor: HTMLAnchorElement): string | null {
 
 export function ReviewWorkbench() {
   const { lang } = useUiLanguage();
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [doc] = useState(() => createWorkbenchController({ initialLang: lang }));
+  const snapshot = useSyncExternalStore(doc.subscribe, doc.getSnapshot, doc.getSnapshot);
+  const {
+    draft, choices, imported, reports, history, semantic, basis, capabilities,
+    phase, translating, sourceDirtyForTranslation, notice, error,
+    importedCanonical, downloadedCanonical, run, pairTranslating, generation, inFlight,
+  } = snapshot;
   const { source, target, direction, alignments } = draft;
-  const [choices, setChoices] = useState<Choice[]>([]);
-  const [imported, setImported] = useState<Choice[]>([]);
-  const [reports, setReports] = useState<Snapshot[]>([]);
-  const [history, setHistory] = useState<Undo[]>([]);
-  const [semantic, setSemanticState] = useState<SemanticState>(() => emptySemantic() as SemanticState);
-  // The basis of the latest live segment term response (manuscript-v3 SPEC "Runtime", step 4). It describes the
-  // service, not the work: kept out of undo and of the file, and back to null whenever a manuscript is installed.
-  const [basis, setBasisState] = useState<SessionBasis>(null);
-  const basisRef = useRef<SessionBasis>(null);
-  const setBasis = useCallback((next: SessionBasis) => { basisRef.current = next; setBasisState(next); }, []);
-  const [capabilities, setCapabilities] = useState<string[] | null>(null);
-  // The capability list while it loads, so a translation sent before it arrives still knows whether context is negotiated.
-  const capabilitiesLoaded = useRef<Promise<string[]> | null>(null);
-  const [semanticReset, setSemanticReset] = useState(0);
-  // Unlike text equality, this changes synchronously whenever another manuscript is installed.
-  const documentEpoch = useRef(0);
-  const [semanticRunActive, setSemanticRunActive] = useState(false);
-  const historySerial = useRef(0);
-  const [phase, setPhase] = useState<'idle' | 'loading' | 'success' | 'error' | 'cancelled'>('idle');
-  const [translating, setTranslating] = useState(false);
-  const [sourceDirtyForTranslation, setSourceDirtyForTranslation] = useState(false);
-  const [notice, setNotice] = useState<NoticeState>(null);
-  const [error, setError] = useState<ErrorState>(null);
+
   const [pendingDraft, setPendingDraft] = useState<Draft | null>(null);
-  // A source text file waiting for the user to confirm that it may replace unsaved work.
   const [pendingText, setPendingText] = useState<string | null>(null);
   const importDialog = useRef<HTMLDialogElement>(null);
   const keepImportButton = useRef<HTMLButtonElement>(null);
-  const [importedCanonical, setImportedCanonical] = useState<string | null>(null);
-  const [downloadedCanonical, setDownloadedCanonical] = useState<string | null>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
   const [verdictFilter, setVerdictFilter] = useState<(typeof FILTERS)[number]['id']>('all');
   const [canonicalFindingId, setCanonicalFindingId] = useState<string | null>(null);
@@ -162,46 +98,35 @@ export function ReviewWorkbench() {
   const sourceBox = useRef<HTMLTextAreaElement>(null);
   const targetBox = useRef<HTMLTextAreaElement>(null);
   const fileBox = useRef<HTMLInputElement>(null);
-  const controller = useRef<AbortController | null>(null);
-  const generation = useRef(0);
-  const importAttempt = useRef(0);
   const handoffDialog = useRef<HTMLDialogElement>(null);
   const keepDraftButton = useRef<HTMLButtonElement>(null);
   const leaveDialog = useRef<HTMLDialogElement>(null);
   const stayLeaveButton = useRef<HTMLButtonElement>(null);
   const leaveBypass = useRef(false);
-  const work = useRef({ draft, choices, imported, reports, history, semantic });
-  // The window listener must see edits made after mount, including reports
-  // arriving while a replacement decision is open.
-  useLayoutEffect(() => { work.current = { draft, choices, imported, reports, history, semantic }; }, [draft, choices, imported, reports, history, semantic]);
-  // Semantic writes go through the ref first so a write in the same turn as an
-  // arriving segment result never overwrites it with an older state.
-  const applySemantic = useCallback((update: (state: SemanticState) => SemanticState) => {
-    const next = update(work.current.semantic);
-    work.current = { ...work.current, semantic: next };
-    setSemanticState(next);
-  }, []);
-  const replaceSemantic = useCallback((next: SemanticState) => {
-    documentEpoch.current += 1;
-    work.current = { ...work.current, semantic: next };
-    setSemanticState(next);
-    setSemanticReset(n => n + 1);
-    setBasis(null);
-  }, [setBasis]);
+
+  useEffect(() => {
+    doc.activate();
+    void doc.loadCapabilities();
+    return () => doc.dispose();
+  }, [doc]);
+  useEffect(() => {
+    doc.setLang(lang);
+  }, [doc, lang]);
+
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
   const visibleFindings = latest ? filterFindings(latest.report.findings, verdictFilter) : [];
   const findingCounts = findingVerdictCounts(latest?.report.findings ?? []);
   const activeFindingId = reconcileActiveId(canonicalFindingId, visibleFindings);
-  // A displayed fallback is the real selection; empty projections keep memory.
   if (activeFindingId !== null && activeFindingId !== canonicalFindingId) {
     setCanonicalFindingId(activeFindingId);
   }
   const activeVisibleIndex = visibleFindings.findIndex(finding => finding.id === activeFindingId);
   const reconciled = reconcileChoices(choices, draft, latest, imported);
-  const ready = reconciled.flatMap(item => item.resolution ? [item.resolution] : []);
-  const current = !!latest?.trusted && latest.signature === signature(draft, ready) && phase === 'success';
-  const sourceLength = Array.from(source).length; const targetLength = Array.from(target).length;
+  const ready = reconciled.flatMap(item => (item.resolution ? [item.resolution] : []));
+  const current = !!latest?.trusted && latest.signature === documentSignature(draft, ready) && phase === 'success';
+  const sourceLength = Array.from(source).length;
+  const targetLength = Array.from(target).length;
   const validInput = !!source.trim() && !!target.trim() && sourceLength <= 2000 && targetLength <= 2000;
   const reviewsClosed = pool.kind === 'success' && pool.data.reviews.remaining === 0;
   const translationClosed = pool.kind === 'success' && (!pool.data.translation_enabled || pool.data.translations.remaining === 0 || pool.data.characters.remaining === 0);
@@ -211,6 +136,7 @@ export function ReviewWorkbench() {
   const canonical = useMemo(() => canonicalOf(draft, choices, reports, semantic, basis), [draft, choices, reports, semantic, basis]);
   const holdsWork = workPresent(draft, choices, reports, semantic);
   const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
+  const semanticRunActive = isRunActive(run, pairTranslating);
   const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating || semanticRunActive });
   const m = msg(lang);
   const saveStateText = {
@@ -225,7 +151,6 @@ export function ReviewWorkbench() {
   const reasonText = (item: { reason: string; code?: string }) =>
     ((m.choiceReasons as Record<string, string>)[item.code ?? ''] ?? item.reason);
   const sm = semanticMsg(lang);
-  // A failed single-pair translation: 't:<reason>' or 't:<reason>#<request id>' (semantic-workbench translatePair).
   const translationNotice = (value: string) => {
     const at = value.indexOf('#');
     const reason = at < 0 ? value : value.slice(0, at);
@@ -237,46 +162,39 @@ export function ReviewWorkbench() {
     : notice.startsWith('t:') ? translationNotice(notice.slice(2))
     : ((m.notices as Record<string, string>)[notice] ?? '');
   const errorTextValue = !error ? ''
-    // Nullish (not falsy) check: an empty reason string from a reason-less
-    // error body must still land on the localized fallback, not a blank alert.
     : error.reason !== undefined && error.reason !== null ? ((m.rMsg as Record<string, string>)[error.reason] ?? (m.tMsg as Record<string, string>)[error.reason] ?? m.rMsg.fallback)
     : error.code && (m.errors as Record<string, string>)[error.code] ? (m.errors as Record<string, string>)[error.code]!
     : error.text ?? '';
-  // Library throws (parse/serialize) always carry stable codes; an uncoded
-  // failure is a browser-level error (unreadable file and similar), whose
-  // raw message is neither localizable nor fixed copy — use the catalog key.
   const errorDetails = error?.kind ? failureDetails(lang, { kind: error.kind, reason: error.reason, requestId: error.requestId, retryAfter: error.retryAfter }) : [];
-  const detailOf = (cause: unknown) => (cause && typeof cause === 'object' && 'gahDetail' in cause ? (cause as { gahDetail: { requestId?: string; retryAfter?: number } }).gahDetail : {});
-  const errorFrom = (cause: unknown, fallbackKey: string): ErrorState => {
-    const code = cause instanceof Error && 'code' in cause ? String((cause as Error & { code?: unknown }).code) : '';
-    return code && (msg(lang).errors as Record<string, string>)[code] ? { code } : { code: fallbackKey };
-  };
 
   const cancelRevision = useCallback((message = '') => {
     const intent = revisionRef.current;
     revisionRef.current = null; setRevision(null); revisionDialog.current?.close();
     if (intent?.trigger.isConnected) intent.trigger.focus({ preventScroll: true });
-    if (message) setNotice(message);
-  }, []);
+    if (message) doc.setNotice(message);
+  }, [doc]);
   function updateRevision(intent: RevisionIntent) { revisionRef.current = intent; setRevision(intent); }
-  function eligibleRevision(snapshot: Snapshot | null, finding: Finding, candidate: Candidate, value: Draft) {
-    return !!snapshot?.trusted && snapshot.report.rule_version === 'review-v2' && !snapshot.report.truncated
-      && snapshot.source === value.source && snapshot.target === value.target && snapshot.direction === value.direction
-      && JSON.stringify(snapshot.alignments) === JSON.stringify(value.alignments)
+  function eligibleRevision(snap: Snapshot | null, finding: Finding, candidate: Candidate, value: Draft) {
+    return !!snap?.trusted && snap.report.rule_version === 'review-v2' && !snap.report.truncated
+      && snap.source === value.source && snap.target === value.target && snap.direction === value.direction
+      && JSON.stringify(snap.alignments) === JSON.stringify(value.alignments)
       && finding.target_span === null && validSpan(finding.source_span, value.source)
-      && snapshot.report.findings.includes(finding) && finding.candidates.includes(candidate);
+      && snap.report.findings.includes(finding) && finding.candidates.includes(candidate);
   }
   function revisionCurrent(intent: RevisionIntent) {
-    const now = work.current;
-    const snapshot = now.reports.at(-1) ?? null;
-    return generation.current === intent.generation && controller.current === null && snapshot === intent.snapshot
+    const now = doc.getSnapshot();
+    const latestSnap = now.reports.at(-1) ?? null;
+    return now.generation === intent.generation && !now.inFlight && latestSnap === intent.snapshot
       && now.draft === intent.draft && now.choices === intent.choices && now.imported === intent.imported
-      && eligibleRevision(snapshot, intent.finding, intent.candidate, now.draft);
+      && eligibleRevision(latestSnap, intent.finding, intent.candidate, now.draft);
   }
-  useLayoutEffect(() => {
+  useEffect(() => {
     const intent = revisionRef.current;
-    if (intent && (draft !== intent.draft || choices !== intent.choices || imported !== intent.imported || reports.at(-1) !== intent.snapshot)) cancelRevision('revisionStale');
-  }, [draft, choices, imported, reports, cancelRevision]);
+    if (intent && (draft !== intent.draft || choices !== intent.choices || imported !== intent.imported
+      || reports.at(-1) !== intent.snapshot || generation !== intent.generation || inFlight)) {
+      cancelRevision('revisionStale');
+    }
+  }, [draft, choices, imported, reports, generation, inFlight, cancelRevision]);
   useEffect(() => {
     if (revision) {
       if (!revisionDialog.current?.open) { revisionDialog.current?.showModal(); fragmentBox.current?.focus(); }
@@ -286,79 +204,39 @@ export function ReviewWorkbench() {
   const revisionReplacement = revision ? (direction === 'en' ? revision.candidate.en : revision.candidate.zh) : '';
   const revisionPreview = revision?.selected ? spliceOccurrence(target, revision.fragment, revision.selected, revisionReplacement) : null;
   function openRevision(finding: Finding, candidate: Candidate, trigger: HTMLButtonElement) {
-    const now = work.current, snapshot = now.reports.at(-1) ?? null;
-    if (controller.current || phase === 'loading' || !eligibleRevision(snapshot, finding, candidate, now.draft) || !snapshot) return;
-    updateRevision({ snapshot, generation: generation.current, draft: now.draft, choices: now.choices, imported: now.imported, finding, candidate, trigger, fragment: '', selected: null });
+    const now = doc.getSnapshot();
+    const latestSnap = now.reports.at(-1) ?? null;
+    if (now.inFlight || now.phase === 'loading' || !eligibleRevision(latestSnap, finding, candidate, now.draft) || !latestSnap) return;
+    updateRevision({
+      snapshot: latestSnap, generation: now.generation, draft: now.draft,
+      choices: now.choices, imported: now.imported, finding, candidate, trigger, fragment: '', selected: null,
+    });
   }
   function confirmRevision() {
     const intent = revisionRef.current;
     if (!intent) return;
     if (!revisionCurrent(intent)) { cancelRevision('revisionStale'); return; }
     const replacement = intent.draft.direction === 'en' ? intent.candidate.en : intent.candidate.zh;
-    const result = spliceOccurrence(work.current.draft.target, intent.fragment, intent.selected, replacement);
+    const result = spliceOccurrence(doc.getSnapshot().draft.target, intent.fragment, intent.selected, replacement);
     if (result.error || result.target === undefined || !result.span) return;
-    cancelRevision(); editText('target', result.target);
+    cancelRevision();
+    doc.editText('target', result.target);
     requestAnimationFrame(() => jumpTo(targetBox.current, result.target!, result.span!));
   }
-  const discardInFlight = useCallback(() => {
-    cancelRevision(revisionRef.current ? 'revisionStale' : '');
-    controller.current?.abort(); controller.current = null; generation.current += 1; setPhase('idle'); setTranslating(false); setError(null);
-  }, [cancelRevision]);
+
   const receiveDraft = useCallback((next: Draft) => {
-    handoffDialog.current?.close(); setPendingDraft(null);
-    const before = work.current;
-    if (before.draft.source === next.source && before.draft.target === next.target && before.draft.direction === next.direction) return;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
-    const nextHistory = [...before.history.slice(-19), saved];
-    // Update synchronously as well so successive events in one turn cannot
-    // mistake an already received manuscript for an empty workbench.
-    work.current = { draft: next, choices: [], imported: [], reports: [], history: nextHistory, semantic: before.semantic };
-    setHistory(nextHistory); discardInFlight(); setChoices([]); setImported([]); setReports([]); setDraft(next); setSourceDirtyForTranslation(false);
-    replaceSemantic(freshSemantic(next) as SemanticState);
-    setNotice('receivedDraft');
+    handoffDialog.current?.close();
+    setPendingDraft(null);
+    if (!doc.receiveDraft(next)) return;
     sourceBox.current?.focus();
     if (typeof document !== 'undefined') { document.getElementById('review-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-  }, [discardInFlight, replaceSemantic]);
-  function remember() {
-    const serial = ++historySerial.current;
-    setHistory(stack => [...stack.slice(-19), { draft, choices, imported, semantic: work.current.semantic, serial }]);
-    return serial;
-  }
-  function followEdit(next: Draft) {
-    const before = work.current.draft;
-    work.current = { ...work.current, draft: next };
-    applySemantic(state => mapSemanticEdit(state, before, next) as SemanticState);
-  }
-  function edit(next: Draft, message = '') {
-    remember(); discardInFlight(); followEdit(next); setDraft(next); setNotice(message);
-  }
-  const commitSemantic: Commit = ({ draft: next, semantic: update, notice: code, remember: push = true }) => {
-    const before = work.current;
-    let serial: number | null = null;
-    if (push) {
-      serial = ++historySerial.current;
-      const entry: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, semantic: before.semantic, serial };
-      setHistory(stack => [...stack.slice(-19), entry]);
-    }
-    if (next && next !== before.draft) {
-      if (push) discardInFlight();
-      followEdit(next); setDraft(next); setSourceDirtyForTranslation(false);
-    }
-    if (update) applySemantic(update);
-    if (code !== undefined && code !== null) setNotice(code);
-    return serial;
-  };
-  function editText(side: 'source' | 'target', value: string) {
-    if (side === 'source') setSourceDirtyForTranslation(Boolean(value.trim() && target.trim()));
-    else setSourceDirtyForTranslation(false);
-    edit({ ...draft, [side]: value, alignments: alignments === null ? null : [] },
-      alignments !== null ? 'editedAlignments' : latest ? 'editedText' : '');
-  }
+  }, [doc]);
+
   useEffect(() => {
     function onDraft(event: Event) {
       const detail = (event as CustomEvent).detail;
       if (!detail || typeof detail.source !== 'string' || typeof detail.target !== 'string' || !['en', 'zh'].includes(detail.direction)) return;
-      const before = work.current;
+      const before = doc.getSnapshot();
       if (before.draft.source === detail.source && before.draft.target === detail.target && before.draft.direction === detail.direction) return;
       cancelRevision(revisionRef.current ? 'revisionStale' : '');
       const next: Draft = { source: detail.source, target: detail.target, direction: detail.direction, alignments: null };
@@ -371,8 +249,8 @@ export function ReviewWorkbench() {
     }
     window.addEventListener('wuwaterm-send-review', onDraft);
     return () => window.removeEventListener('wuwaterm-send-review', onDraft);
-  }, [receiveDraft, cancelRevision]);
-  useEffect(() => () => { controller.current?.abort(); importAttempt.current += 1; }, []);
+  }, [doc, receiveDraft, cancelRevision]);
+
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -384,51 +262,39 @@ export function ReviewWorkbench() {
     })();
     return () => controller.abort();
   }, [poolAttempt]);
-  useEffect(() => {
-    // An older service answers 404 here and the BFF reports an empty list: the
-    // workbench then behaves as before, with term review only.
-    const controller = new AbortController();
-    capabilitiesLoaded.current = (async () => {
-      try {
-        const response = await fetch(workbenchPath('/api/capabilities'), { cache: 'no-store', signal: controller.signal });
-        const value = await poolPayload(response) as { capabilities?: unknown } | null;
-        const list = response.ok && Array.isArray(value?.capabilities) ? value.capabilities.filter((x): x is string => typeof x === 'string') : [];
-        if (!controller.signal.aborted) setCapabilities(list);
-        return list;
-      } catch {
-        if (!controller.signal.aborted) setCapabilities([]);
-        return [];
-      }
-    })();
-    return () => controller.abort();
-  }, []);
+
   useEffect(() => {
     const onRefresh = () => setPoolAttempt(count => count + 1);
     window.addEventListener(POOL_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(POOL_REFRESH_EVENT, onRefresh);
   }, []);
+
   useEffect(() => {
     if (!activeFindingId) return;
     document.querySelector(`[data-mention-id="${CSS.escape(activeFindingId)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activeFindingId]);
+
   useEffect(() => {
     if (pendingDraft) {
       if (!handoffDialog.current?.open) handoffDialog.current?.showModal();
       keepDraftButton.current?.focus();
     } else handoffDialog.current?.close();
   }, [pendingDraft]);
+
   useEffect(() => {
     if (pendingText !== null) {
       if (!importDialog.current?.open) importDialog.current?.showModal();
       keepImportButton.current?.focus();
     } else importDialog.current?.close();
   }, [pendingText]);
+
   useEffect(() => {
     if (pendingLeaveUrl) {
       if (!leaveDialog.current?.open) leaveDialog.current?.showModal();
       stayLeaveButton.current?.focus();
     } else leaveDialog.current?.close();
   }, [pendingLeaveUrl]);
+
   useEffect(() => {
     if (!guard) return;
     function onClick(event: MouseEvent) {
@@ -445,12 +311,13 @@ export function ReviewWorkbench() {
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
   }, [guard]);
+
   useEffect(() => {
-    // A document restored by the browser must protect subsequent departures.
     function onPageShow() { leaveBypass.current = false; setPendingLeaveUrl(null); }
     window.addEventListener('pageshow', onPageShow);
     return () => window.removeEventListener('pageshow', onPageShow);
   }, []);
+
   useEffect(() => {
     if (!guard) return;
     function onBeforeUnload(event: BeforeUnloadEvent) {
@@ -463,90 +330,14 @@ export function ReviewWorkbench() {
   }, [guard]);
 
   async function check(withChoices = true) {
-    if (!validInput || reviewsClosed) return;
-    discardInFlight(); const mine = generation.current; const abort = new AbortController(); controller.current = abort;
-    const resolutions = withChoices ? ready : [];
-    const submitted = draft;
-    const submittedSignature = signature(submitted, resolutions);
-    setPhase('loading'); setNotice(null);
-    const body = {
-      source, target, direction, review_version: 'review-v2',
-      ...(alignments === null ? {} : { alignments }),
-      ...(resolutions.length && latest ? { resolutions, resolution_context: {
-        source_revision: latest.report.source_revision, rule_version: latest.report.rule_version, dictionary_revision: latest.report.dictionary.revision, matcher_revision: latest.report.matcher_revision,
-      } } : {}),
-    };
-    if (new TextEncoder().encode(JSON.stringify(body)).length > REVIEW_REQUEST_LIMIT) {
-      controller.current = null; setPhase('error'); setError({ code: 'bodyTooLarge' }); return;
-    }
-    try {
-      const { response, value } = await postWorkbench('/api/reviews', body, { signal: abort.signal, reviewFeatures: true });
-      if (abort.signal.aborted || generation.current !== mine) return;
-      if (!response.ok) {
-        const reason = value && typeof value === 'object' && 'reason' in value && typeof value.reason === 'string' ? value.reason : '';
-        throw Object.assign(new Error((m.rMsg as Record<string, string>)[reason] ?? m.rMsg.fallback), { gahReason: reason, gahDetail: failureFields(response, value) });
-      }
-      if (!validReport(value, source, target, REPORT_V4)) throw Object.assign(new Error(m.errors.responseInvalid), { gahCode: 'responseInvalid' });
-      const report = value as Report;
-      if (report.rule_version !== 'review-v2' || !/^[0-9a-f]{64}$/u.test(report.matcher_revision ?? '')
-        || report.source_revision !== await revisionOf(source)
-        || report.target_revision !== await revisionOf(target)) throw Object.assign(new Error(m.errors.responseBasisMismatch), { gahCode: 'responseBasisMismatch' });
-      if (abort.signal.aborted || generation.current !== mine) return;
-      const snapshot: Snapshot = { ...submitted, report, trusted: true, signature: submittedSignature, resolutions };
-      setReports(stack => [...stack.slice(-1), snapshot]); setPhase('success');
-      setNotice('checked');
-      requestPoolRefresh();
-    } catch (cause) {
-      if (!abort.signal.aborted && generation.current === mine) {
-        setPhase('error');
-        // Unmarked failures here are network-layer rejections or malformed
-        // JSON bodies; both use the fixed catalog copy instead of browser
-        // error text (public UI errors stay fixed copy and re-localizable).
-        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason), kind: 'review', ...detailOf(cause) }
-          : cause instanceof Error && 'gahCode' in cause ? { code: String((cause as Error & { gahCode?: unknown }).gahCode) }
-          : { code: 'requestFailed' });
-        requestPoolRefresh();
-      }
-    } finally { if (controller.current === abort) controller.current = null; }
+    await doc.check(withChoices, { reviewsClosed });
   }
-  async function submit(event: FormEvent) { event.preventDefault(); await check(); }
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    await check();
+  }
   async function translateInReview() {
-    if (!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed) return;
-    discardInFlight();
-    const mine = generation.current;
-    const abort = new AbortController();
-    controller.current = abort;
-    setTranslating(true);
-    setNotice(null);
-    try {
-      // With translation-context-v1 negotiated, the whole text goes out with context (even {}): Core then keeps its
-      // paragraphs, so review can pair them. Without it, nothing is added (MY-238).
-      const known = capabilities ?? await (capabilitiesLoaded.current ?? Promise.resolve([]));
-      if (abort.signal.aborted || generation.current !== mine) return;
-      const context = known.includes(CAPABILITY_TRANSLATION_CONTEXT) ? { context: {} } : {};
-      const { response, value } = await postWorkbench('/api/translations', { text: source, to: direction, ...context }, { signal: abort.signal });
-      if (abort.signal.aborted || generation.current !== mine) return;
-      if (!response.ok || !value || typeof value !== 'object' || typeof (value as { text?: unknown }).text !== 'string') {
-        const reason = value && typeof value === 'object' && 'reason' in value && typeof (value as { reason?: unknown }).reason === 'string' ? String((value as { reason: string }).reason) : '';
-        throw Object.assign(new Error(), { gahReason: reason, gahDetail: failureFields(response, value) });
-      }
-      const translated = (value as { text: string }).text;
-      remember();
-      setTranslating(false);
-      setSourceDirtyForTranslation(false);
-      const translatedDraft: Draft = { ...draft, target: translated, alignments: alignments === null ? null : [] };
-      followEdit(translatedDraft); setDraft(translatedDraft);
-      setNotice(alignments !== null ? 'editedAlignments' : 'translatedInReview');
-      requestPoolRefresh();
-    } catch (cause) {
-      if (!abort.signal.aborted && generation.current === mine) {
-        setTranslating(false);
-        setError(cause instanceof Error && 'gahReason' in cause ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason), kind: 'translation', ...detailOf(cause) } : { code: 'requestFailed' });
-        requestPoolRefresh();
-      }
-    } finally {
-      if (controller.current === abort) controller.current = null;
-    }
+    await doc.translateInReview({ translationClosed });
   }
   function confirmableChoice(choice: Choice): { finding: Finding; candidate: Candidate | null } | null {
     if (!sourceCompatible || !latest || latest.report.truncated) return null;
@@ -561,21 +352,6 @@ export function ReviewWorkbench() {
       : null;
     return candidate ? { finding, candidate } : null;
   }
-  function choose(finding: Finding, candidate: Candidate | null) {
-    if (!sourceCompatible || !latest) return;
-    const span = recoverSpan(latest.source, finding.source_span, source);
-    if (!span) return;
-    const selected = makeChoice({ source, direction, alignments, report: latest.report, finding: { ...finding, source_span: span }, candidate }) as Choice;
-    const existing = choices.findIndex(c => {
-      const recovered = recoverSpan(c.source, c.source_span, source);
-      return recovered && mentionId(recovered) === mentionId(span);
-    });
-    if (existing < 0 && choices.length >= MAX_CHOICES) { setNotice('choiceLimit'); return; }
-    remember(); discardInFlight();
-    setChoices(old => existing < 0 ? [...old, selected] : old.map((c, i) => i === existing ? selected : c));
-    setImported(old => old.filter(c => c !== choices[existing]));
-    setNotice('choiceStaged');
-  }
   function jumpTo(box: HTMLTextAreaElement | null, text: string, span: Span) {
     if (!box) return;
     const located = highlightSegments(text, span);
@@ -583,20 +359,9 @@ export function ReviewWorkbench() {
     const end = scalarToUtf16(text, span.end);
     if (!located || start === null || end === null) return;
     box.focus({ preventScroll: true });
-    // Textareas expose LF line endings even when an imported file retains CRLF.
-    // Keep the report coordinates and saved text raw; map only the DOM offsets.
     const domOffset = (offset: number) => text.slice(0, offset).replace(/\r\n?/g, '\n').length;
     box.setSelectionRange(domOffset(start), domOffset(end));
     box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }
-  function replace(finding: Finding, candidate: Candidate) {
-    if (!latest || latest.target !== target || !sourceCompatible || !finding.target_span) return;
-    const parts = highlightSegments(target, finding.target_span);
-    const forms = finding.candidates.flatMap(c => [c.zh, c.en]);
-    if (!parts || !forms.includes(finding.target_span.text)) return;
-    const result = spliceOccurrence(target, finding.target_span.text, finding.target_span, direction === 'en' ? candidate.en : candidate.zh);
-    if (result.error === 'revisionTooLong') setNotice('revisionTooLong');
-    if (result.target !== undefined) editText('target', result.target);
   }
   function selectedSpan(box: HTMLTextAreaElement | null, text: string): Span | null {
     if (!box || box.selectionStart === box.selectionEnd) return null;
@@ -614,191 +379,44 @@ export function ReviewWorkbench() {
     return { start: Array.from(text.slice(0, start)).length, end: Array.from(text.slice(0, end)).length, text: text.slice(start, end) };
   }
   function addAlignment(omit = false, whole = false) {
-    const a = whole ? { start: 0, end: sourceLength, text: source } : selectedSpan(sourceBox.current, source);
-    const b = omit ? null : whole ? { start: 0, end: targetLength, text: target } : selectedSpan(targetBox.current, target);
-    if (!a || (!omit && !b)) { setNotice('alignmentHint'); return; }
-    const next = [...(whole ? [] : alignments ?? []), { source: a, target: b }].sort((x, y) => x.source.start - y.source.start);
-    if (!validAlignments(next, source, target)) { setNotice('alignmentInvalid'); return; }
-    edit({ ...draft, alignments: next }, 'alignmentRecorded');
+    const a = whole ? null : selectedSpan(sourceBox.current, source);
+    const b = omit || whole ? null : selectedSpan(targetBox.current, target);
+    doc.recordAlignment(a, b, omit, whole);
   }
-  /** Back to automatic sentence correspondence: alignments null, as one undoable edit (also the long-mode tools' action). */
-  function resetAlignments() {
-    edit({ ...work.current.draft, alignments: null }, 'alignmentsReset');
-  }
-  function undo() {
-    const last = history.at(-1); if (!last) return;
-    discardInFlight(); setSourceDirtyForTranslation(false); setDraft(last.draft); setChoices(last.choices); setImported(last.imported); setHistory(stack => stack.slice(0, -1));
-    work.current = { ...work.current, draft: last.draft, semantic: last.semantic };
-    if (last.replacedDocument) replaceSemantic(last.semantic);
-    else setSemanticState(last.semantic);
-    if (last.reports) setReports(last.reports);
-    setNotice(last.reports ? 'undoWithReports' : 'undoLocal');
-  }
-  /** A plain source text replaces the manuscript as one undoable step. */
   function replaceWithText(text: string) {
     setPendingText(null);
-    const before = work.current;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
-    setHistory([...before.history.slice(-19), saved]);
-    discardInFlight();
-    setSourceDirtyForTranslation(false);
-    const textDraft: Draft = { source: text, target: '', direction: before.draft.direction, alignments: null };
-    work.current = { ...work.current, draft: textDraft };
-    setDraft(textDraft);
-    setChoices([]); setImported([]); setReports([]); setImportedCanonical(null);
-    replaceSemantic(freshSemantic(textDraft) as SemanticState);
-    setNotice('importedSourceText');
+    doc.replaceWithText(text);
   }
   async function importFile(file?: File) {
-    if (!file) return;
-    const attempt = ++importAttempt.current;
-    setError(curr => (curr && (curr.code === 'importInvalid' || curr.code === 'importReportExport' || curr.code?.startsWith('workfile_')) ? null : curr));
-    // A manuscript may be v3, up to 44 MiB (manuscript-v3 SPEC "Limits"); a plain-text source stays at 1 MiB.
-    if (file.size > (/\.(txt|md)$/iu.test(file.name) ? MAX_WORKFILE_BYTES : MAX_V3_WORKFILE_BYTES)) {
-      if (importAttempt.current === attempt) setError({ code: 'workfile_too_large' });
-      return;
-    }
-    const mine = generation.current;
-    try {
-      const bytes = await file.arrayBuffer();
-      if (importAttempt.current !== attempt) return;
-      if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-      if (/\.(txt|md)$/iu.test(file.name)) {
-        // A report this site exported is not a manuscript and not a backup (Finding 2026-10-06): say so, replace nothing.
-        if (isMarkdownReportExport(text)) { setError({ code: 'importReportExport' }); return; }
-        // Unsaved work is replaced only after the user confirms it.
-        if (leaveGuardActive({ view: saveView })) { setPendingText(text); return; }
-        replaceWithText(text);
-        return;
-      }
-      let value;
-      try { value = parseWorkfile(text); } catch (cause) {
-        // The current-result JSON this site exports (format wuwaterm-result-v2) is a report, not a manuscript; its writer puts
-        // the format first, so the start of the file tells it apart without parsing the file a second time.
-        if ((cause as { code?: unknown } | null)?.code === 'workfile_unsupported_format' && /^\s*\{\s*"format"\s*:\s*"wuwaterm-result-v2"/u.test(text.slice(0, 256))) {
-          setError({ code: 'importReportExport' });
-          return;
-        }
-        throw cause;
-      }
-      const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
-      const nextChoices = value.choices as Choice[];
-      const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({ ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '' }));
-      // Semantic decisions, the old texts they need and the reference history
-      // come back with the manuscript; nothing in the file is trusted as current.
-      // The long-mode records, choices, history and progress are matched to the
-      // current segments (SPEC "Runtime", step 2); no request is sent (step 1).
-      const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3 || value.format === WORKFILE_FORMAT_V4;
-      const nextSemantic: SemanticState = { ...(withSemantic ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState), long: longFromWorkfile(value) as LongState };
-      if (importAttempt.current !== attempt) return;
-      if (generation.current !== mine) { setNotice('importChangedDuringRead'); return; }
-      const importedBody = canonicalOf(nextDraft, nextChoices, nextReports, nextSemantic, null);
-      // File reads can overlap a check finishing. Snapshot the accepted-time
-      // work, including its reports; ordinary edit undo keeps its own semantics.
-      const before = work.current;
-      const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
-      setHistory([...before.history.slice(-19), saved]);
-      discardInFlight();
-      setSourceDirtyForTranslation(false);
-      setDraft(nextDraft); setChoices(nextChoices); setImported(nextChoices); setReports(nextReports);
-      work.current = { ...work.current, draft: nextDraft };
-      replaceSemantic(nextSemantic);
-      if (importedBody) setImportedCanonical(importedBody);
-      setNotice('imported');
-    } catch (cause) {
-      if (importAttempt.current === attempt && generation.current === mine) {
-        setError(errorFrom(cause, 'importInvalid'));
-      }
-    }
+    const outcome = await doc.importFile(file);
+    if (outcome.status === 'needs_confirm_text') setPendingText(outcome.pendingText);
   }
   function clearDraft() {
-    if (!holdsWork) return;
-    const before = work.current;
-    const saved: Undo = { draft: before.draft, choices: before.choices, imported: before.imported, reports: before.reports, semantic: before.semantic, replacedDocument: true };
-    setHistory(stack => [...stack.slice(-19), saved]);
-    discardInFlight();
-    setSourceDirtyForTranslation(false);
-    setDraft(EMPTY);
-    replaceSemantic(emptySemantic() as SemanticState);
-    setChoices([]);
-    setImported([]);
-    setReports([]);
-    setNotice('clearedDraft');
-    sourceBox.current?.focus();
+    if (doc.clearDraft()) sourceBox.current?.focus();
   }
   function save() {
-    try {
-      const content = serializeWorkfile(manuscriptBody(draft, choices, reports, semantic, basisRef.current));
-      downloadFile('wuwaterm-manuscript.json', content);
-      setDownloadedCanonical(content);
-      setError(null);
-      setNotice('saved');
-    } catch (cause) {
-      setError(errorFrom(cause, 'saveFailed'));
-    }
+    const out = doc.save();
+    if (out) downloadFile(out.filename, out.content, out.mimeType);
   }
   function exportTxt() {
-    downloadFile('wuwaterm-translation.txt', target, 'text/plain;charset=utf-8');
-    setNotice('exportTxt');
-  }
-  /** Long mode: every segment is ready and its term result is current under the session basis (all confirmed). */
-  function longResultsCurrent() {
-    const ctx = { draft, basis: basisRef.current };
-    const { long, items } = segmentInputs(draft) as { long: boolean; items: { pair: { status: string } }[] };
-    return long && items.length > 0 && items.every((item, i) => item.pair.status === 'ready'
-      && (recordView(semantic.long, i, ctx) as { state: string } | null)?.state === 'current');
+    const out = doc.exportTxt();
+    downloadFile(out.filename, out.content, out.mimeType);
   }
   function exportResult() {
-    // The exported JSON keeps the lib's canonical Chinese reason/label strings
-    // so the file format stays byte-stable regardless of interface language.
-    const strip = (items: { label: string; reason: string }[]) => items.map(({ label, reason }) => ({ label, reason }));
-    // In long mode the per-segment reports are the result: a document report left from a shorter text is not exported.
-    const long = (segmentInputs(draft) as { long: boolean }).long;
-    const resultCurrent = long ? longResultsCurrent() : current;
-    downloadFile('wuwaterm-result.json', JSON.stringify({ format: 'wuwaterm-result-v2', ...draft,
-      status: resultCurrent ? 'current_terminology_check' : 'requires_recheck', sentence_meaning_evaluated: false,
-      report: latest && !long ? cleanSnapshot(latest) : null, report_is_current: resultCurrent,
-      choices: choices.map((choice, i) => ({ ...choice, status: reconciled[i].status, reason: reconciled[i].reason })),
-      changes: current && comparison ? { new: strip(comparison.new), resolved: strip(comparison.resolved), pending: strip(comparison.pending), incomparable: strip(comparison.incomparable) } : null,
-      verified_stamp: { valid: false },
-      ...semanticExport(draft, semantic, basisRef.current).result,
-    }, null, 2));
-    setNotice(resultCurrent ? 'exportCurrent' : 'exportStale');
+    const out = doc.exportResult();
+    downloadFile(out.filename, out.content, out.mimeType);
   }
   function exportMarkdown() {
-    // Read-only local snapshot: no requests, no state change; the document
-    // renders the full report regardless of the UI's finding filter.
-    // Long mode follows the JSON export: the segment reports are the result, current only when every segment is, and a
-    // document report left from a shorter text is not rendered.
-    const long = (segmentInputs(draft) as { long: boolean }).long;
-    const parts = semanticExport(draft, semantic, basisRef.current);
-    const currency: MarkdownCurrency = long ? (!parts.segmentTerms?.length ? 'none' : longResultsCurrent() ? 'current' : 'stale')
-      : !latest ? 'none' : current ? 'current' : latest.trusted ? 'stale' : 'imported';
-    const strip = (snapshot: Snapshot) => ({
-      source: snapshot.source, target: snapshot.target, direction: snapshot.direction,
-      report: snapshot.report, resolutions: snapshot.resolutions,
-    });
-    downloadFile('wuwaterm-report.md', renderMarkdownReport({
-      draft: { source, target, direction },
-      latest: latest && !long ? strip(latest) : null,
-      previous: previous && !long ? strip(previous) : null,
-      currency,
-      choices,
-      reconciled,
-      comparison: long ? null : comparison,
-      semantic: parts.markdown,
-      segmentTerms: parts.segmentTerms,
-    }, lang), 'text/markdown;charset=utf-8');
-    setNotice('exportMarkdown');
+    const out = doc.exportMarkdown(lang);
+    downloadFile(out.filename, out.content, out.mimeType);
   }
+
   const summaryParts = latest ? summarizeReviewParts(latest.report) : null;
   const comparisonGroups = ([['new', m.review.comparisonNew], ['resolved', m.review.comparisonResolved], ['pending', m.review.comparisonPending], ['incomparable', m.review.comparisonIncomparable]] as const)
     .map(([key, label]) => ({ key, label, items: comparison ? comparison[key] : [] }));
   const semanticSummary = semanticCounts(semantic) as { total: number; pending: number; handled: number; reconfirm: number; stale: number };
   const termTotal = (latest?.report.findings.length ?? 0) + semantic.long.records.reduce((n, r) => n + (r.result?.findings.length ?? 0), 0);
-  // The term section. In long mode the per-segment findings, choices and history are rendered into it (`longTerms`),
-  // apart from the semantic track.
+
   const termTrack = (longTerms: ReactNode): ReactNode => <section className="term-track" aria-labelledby="term-track-title">
     <h3 id="term-track-title">{sm.termTrackTitle}</h3>
     <p className="track-note">{sm.termTrackNote}</p>
@@ -843,21 +461,22 @@ export function ReviewWorkbench() {
             </div>
             {finding.candidates.map((candidate: Candidate) => <div className="term-pair" key={candidate.candidate_id}><strong>{candidate.zh}</strong><span>{candidate.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, candidate.category)}</small>
               <div className="finding-actions">
-                <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => choose(finding, candidate)}>{m.review.adopt}</button>
-                {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => replace(finding, candidate)}>{m.review.replace}</button>}
+                <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{m.review.adopt}</button>
+                {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.replaceTerm(finding, candidate)}>{m.review.replace}</button>}
                 {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !eligibleRevision(latest, finding, candidate, draft)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
               </div>
               <details className="candidate-sources"><summary>{m.review.viewSources}</summary>
                 <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
               </details>
             </div>)}
-            <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => choose(finding, null)}>{m.review.notTerm}</button>
+            <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.choose(finding, null)}>{m.review.notTerm}</button>
           </article>;
         })}
       </div>
     </> : sourceLength > 2000 || targetLength > 2000 ? null : <p className="translation-placeholder">{m.review.placeholder}</p>}
     {longTerms}
   </section>;
+
   return <section className="workspace-card review-card" aria-labelledby="review-title">
     <dialog className="handoff-dialog revision-dialog" ref={revisionDialog} aria-labelledby="revision-title" aria-describedby="revision-description" onCancel={() => cancelRevision()}>
       <h3 id="revision-title">{m.review.revisionTitle}</h3>
@@ -923,10 +542,10 @@ export function ReviewWorkbench() {
     )}
     <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
     <form onSubmit={submit}>
-      <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => edit({ ...draft, direction: e.target.value as 'en' | 'zh', alignments: alignments === null ? null : [] }, 'directionChanged')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
-      <textarea ref={sourceBox} id="review-source" value={source} onChange={e => editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />
+      <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => doc.setDirection(e.target.value as 'en' | 'zh')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
+      <textarea ref={sourceBox} id="review-source" value={source} onChange={e => doc.editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />
       <label htmlFor="review-target">{m.review.targetLabel}</label>
-      <textarea ref={targetBox} id="review-target" value={target} onChange={e => editText('target', e.target.value)} rows={5} placeholder={m.review.targetPlaceholder} />
+      <textarea ref={targetBox} id="review-target" value={target} onChange={e => doc.editText('target', e.target.value)} rows={5} placeholder={m.review.targetPlaceholder} />
       <div className="field-hint"><span>{m.review.hintSafety}</span><span>{fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span></div>
       {(sourceLength > 2000 || targetLength > 2000) && <p role="status">{m.review.longManuscript}</p>}
       <details className="alignment-panel"><summary>{alignments === null ? m.review.alignmentSummaryNone : fill(m.review.alignmentSummaryCount, { n: alignments.length })}</summary>
@@ -935,10 +554,10 @@ export function ReviewWorkbench() {
           <button type="button" className="secondary-button" onClick={() => addAlignment()}>{m.review.alignmentConfirm}</button>
           <button type="button" className="secondary-button" onClick={() => addAlignment(true)}>{m.review.alignmentOmit}</button>
           <button type="button" className="secondary-button" disabled={!validInput} onClick={() => addAlignment(false, true)}>{m.review.alignmentWhole}</button>
-          <button type="button" className="secondary-button" onClick={() => edit({ ...draft, alignments: [] }, 'alignmentsCleared')}>{m.review.alignmentClear}</button>
-          <button type="button" className="secondary-button" onClick={resetAlignments}>{m.review.alignmentReset}</button>
+          <button type="button" className="secondary-button" onClick={() => doc.clearAlignments()}>{m.review.alignmentClear}</button>
+          <button type="button" className="secondary-button" onClick={() => doc.resetAlignments()}>{m.review.alignmentReset}</button>
         </div>
-        {alignments?.map((a, i) => <div className="alignment-row" key={i}><p>{fill(m.review.alignmentRowSource, { start: a.source.start + 1, end: a.source.end, text: a.source.text })}</p><p>{a.target ? fill(m.review.alignmentRowTarget, { start: a.target.start + 1, end: a.target.end, text: a.target.text }) : m.review.alignmentRowOmit}</p><button type="button" className="text-button" onClick={() => edit({ ...draft, alignments: alignments.filter((_, j) => i !== j) }, 'alignmentRemoved')}>{m.review.alignmentRemove}</button></div>)}
+        {alignments?.map((a, i) => <div className="alignment-row" key={i}><p>{fill(m.review.alignmentRowSource, { start: a.source.start + 1, end: a.source.end, text: a.source.text })}</p><p>{a.target ? fill(m.review.alignmentRowTarget, { start: a.target.start + 1, end: a.target.end, text: a.target.text }) : m.review.alignmentRowOmit}</p><button type="button" className="text-button" onClick={() => doc.removeAlignment(i)}>{m.review.alignmentRemove}</button></div>)}
       </details>
       <div className="review-quota">
         {pool.kind === 'success' ? <>
@@ -950,8 +569,8 @@ export function ReviewWorkbench() {
         <button type="submit" disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
         <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
         {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className="secondary-button" type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
-        {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => { discardInFlight(); setPhase('cancelled'); setNotice('cancelledWait'); requestPoolRefresh(); }}>{m.review.cancelWait}</button>}
-        <button className="secondary-button" type="button" onClick={undo} disabled={!history.length}>{m.review.undo}</button>
+        {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.review.cancelWait}</button>}
+        <button className="secondary-button" type="button" onClick={() => doc.undo()} disabled={!history.length}>{m.review.undo}</button>
       </div>
     </form>
     <div className="actions draft-actions">
@@ -972,7 +591,7 @@ export function ReviewWorkbench() {
       <p>{m.review.alignmentEmptyPrompt}</p>
       <div className="actions">
         <button type="button" className="secondary-button" disabled={!validInput || phase === 'loading'} onClick={() => addAlignment(false, true)}>{m.review.alignmentReconfirmWhole}</button>
-        <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={resetAlignments}>{m.review.alignmentFallbackReset}</button>
+        <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={() => doc.resetAlignments()}>{m.review.alignmentFallbackReset}</button>
       </div>
     </div>}
     {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}</div>}
@@ -981,17 +600,20 @@ export function ReviewWorkbench() {
     {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
       {choices.map((choice, i) => {
         const confirmTarget = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' ? confirmableChoice(choice) : null;
-        return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{confirmTarget && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => choose(confirmTarget.finding, confirmTarget.candidate)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => { remember(); discardInFlight(); setChoices(old => old.filter((_, j) => i !== j)); setImported(old => old.filter(c => c !== choice)); }}>{m.review.choiceRemove}</button></div></div>;
+        return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{confirmTarget && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.choose(confirmTarget.finding, confirmTarget.candidate)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
       })}
     </div>}
     {capabilities?.includes('semantic-review-v1') && <div className="issue-overview" role="group" aria-label={sm.overviewAria}>
       <button type="button" className="secondary-button" onClick={() => document.getElementById('term-track-title')?.scrollIntoView({ block: 'start' })}>{fill(sm.overviewTerms, { n: termTotal })}</button>
       <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
     </div>}
-    <SemanticWorkbench lang={lang} draft={draft} semantic={semantic} setSemantic={applySemantic} commit={commitSemantic} work={work}
-      choices={choices} pool={pool} capabilities={capabilities} resetSignal={semanticReset} documentEpoch={documentEpoch}
-      canUndoLast={serial => history.at(-1)?.serial === serial} undo={undo}
-      locate={(side, span) => side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span)}
-      onRunActive={setSemanticRunActive} termTrack={termTrack} basis={basis} basisRef={basisRef} setBasis={setBasis} resetAlignments={resetAlignments} />
+    <SemanticWorkbench
+      doc={doc}
+      snapshot={snapshot}
+      lang={lang}
+      pool={pool}
+      locate={(side, span) => (side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span))}
+      termTrack={termTrack}
+    />
   </section>;
 }
