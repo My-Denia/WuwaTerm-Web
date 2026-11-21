@@ -21,5 +21,5 @@ export function isPool(v: unknown): v is Pool {
 export const POOL_REFRESH_EVENT = 'wuwaterm-pool-refresh';
 
 export function requestPoolRefresh(): void {
-  window.dispatchEvent(new Event(POOL_REFRESH_EVENT));
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(POOL_REFRESH_EVENT));
 }
