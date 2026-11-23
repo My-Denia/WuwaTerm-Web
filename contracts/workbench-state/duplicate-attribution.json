@@ -1,0 +1,1574 @@
+{
+  "schema": "wuwaterm-duplicate-attribution-cases-v1",
+  "basis": {
+    "rule_version": "review-v2",
+    "dictionary": {
+      "schema_version": "2",
+      "source_commit": "synthetic-commit-current",
+      "term_count": 4,
+      "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "cases": [
+    {
+      "id": "edit-first-duplicate",
+      "mode": "session",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": null,
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1198,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1200,
+            "source_end": 2398,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1
+          ]
+        }
+      },
+      "edits": [
+        {
+          "side": "source",
+          "start": 1190,
+          "old_end": 1190,
+          "insert": "新增"
+        }
+      ],
+      "expected": {
+        "statuses": [
+          "pending",
+          "done"
+        ],
+        "choices": [
+          [
+            [
+              "official_pair",
+              false
+            ]
+          ],
+          [
+            [
+              "not_a_term",
+              true
+            ]
+          ]
+        ],
+        "completed": [
+          1
+        ],
+        "history_choices": []
+      }
+    },
+    {
+      "id": "insert-duplicate-before",
+      "mode": "session",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "标题文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Header hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": null,
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1198,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "e49ae158769fd9e23a9cfe146aea031f4b8fb773a74eff7597f2ecda0889e88d",
+            "target_hash": "250008dd6f90a74727978a0cdedbb574264dc1ac81aeabcfaec3fdb854ce5e2a",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": []
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1200,
+            "source_end": 2398,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 2400,
+            "source_end": 3598,
+            "target_start": 804,
+            "target_end": 1204,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1,
+            2
+          ]
+        }
+      },
+      "edits": [
+        {
+          "side": "source",
+          "start": 0,
+          "old_end": 0,
+          "insert": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n"
+        },
+        {
+          "side": "target",
+          "start": 0,
+          "old_end": 0,
+          "insert": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\n"
+        }
+      ],
+      "expected": {
+        "statuses": [
+          "pending",
+          "done",
+          "done",
+          "done"
+        ],
+        "choices": [
+          [],
+          [],
+          [
+            [
+              "official_pair",
+              true
+            ]
+          ],
+          [
+            [
+              "not_a_term",
+              true
+            ]
+          ]
+        ],
+        "completed": [
+          1,
+          2,
+          3
+        ],
+        "history_choices": []
+      }
+    },
+    {
+      "id": "delete-first-duplicate",
+      "mode": "session",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "乙术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n丙术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Beta yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nGamma zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": null,
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1198,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "a94448234282e2269f0b71de1a3ce884ebd9523542337fba6331651ae6576305",
+            "target_hash": "0326149212c15455794d4d27c8744d14150c70ed1b560701ee4e891e74895054",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": []
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1200,
+            "source_end": 2398,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 2400,
+            "source_end": 3598,
+            "target_start": 804,
+            "target_end": 1204,
+            "source_hash": "b954c8176afde870c20c7e64f7748649017771bd7a3ebd26fb9178d529a97dd3",
+            "target_hash": "5cfb333caccb1bb03e092a010d677a5ae6910c0be5e9b5878fdbdf4eda6e8cd2",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": []
+          },
+          {
+            "index": 3,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 3600,
+            "source_end": 4798,
+            "target_start": 1206,
+            "target_end": 1606,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "edits": [
+        {
+          "side": "source",
+          "start": 1200,
+          "old_end": 2400,
+          "insert": ""
+        },
+        {
+          "side": "target",
+          "start": 402,
+          "old_end": 804,
+          "insert": ""
+        }
+      ],
+      "expected": {
+        "statuses": [
+          "done",
+          "done",
+          "done"
+        ],
+        "choices": [
+          [],
+          [],
+          [
+            [
+              "not_a_term",
+              true
+            ]
+          ]
+        ],
+        "completed": [
+          0,
+          1,
+          2
+        ],
+        "history_choices": [
+          [
+            "official_pair",
+            "甲术"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "re-pair-alignment-shift",
+      "mode": "session",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "丁术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 1500,
+              "text": "丁术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+            },
+            "target": {
+              "start": 0,
+              "end": 400,
+              "text": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          },
+          {
+            "source": {
+              "start": 1502,
+              "end": 2700,
+              "text": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+            },
+            "target": {
+              "start": 402,
+              "end": 802,
+              "text": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          }
+        ],
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1500,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "2d298e7fee6a66d84cb3ec16840aea9fc29558e900f7757bdb6d23fc16c3bf7c",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "23053c09db3c6c8693a947ae1642dcbd0c27302e42262cff9b5f33eb1b102cbd",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    302,
+                    304
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 302,
+                  "end": 304,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1502,
+            "source_end": 2700,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "0cc6f43145acb19e19d6695b389182f379059a7feb6bd32a731e760fa0ac3c50",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1
+          ]
+        }
+      },
+      "edits": [
+        {
+          "alignments": [
+            {
+              "source": {
+                "start": 0,
+                "end": 300,
+                "text": "丁术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+              },
+              "target": null
+            },
+            {
+              "source": {
+                "start": 302,
+                "end": 1500,
+                "text": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+              },
+              "target": {
+                "start": 0,
+                "end": 400,
+                "text": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              }
+            },
+            {
+              "source": {
+                "start": 1502,
+                "end": 2700,
+                "text": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+              },
+              "target": {
+                "start": 402,
+                "end": 802,
+                "text": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "statuses": [
+          "pending",
+          "pending",
+          "done"
+        ],
+        "choices": [
+          [],
+          [
+            [
+              "official_pair",
+              false
+            ]
+          ],
+          [
+            [
+              "not_a_term",
+              true
+            ]
+          ]
+        ],
+        "completed": [
+          2
+        ],
+        "history_choices": []
+      }
+    },
+    {
+      "id": "direction-change-after-edit",
+      "mode": "session",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": null,
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1198,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1200,
+            "source_end": 2398,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1
+          ]
+        }
+      },
+      "edits": [
+        {
+          "side": "source",
+          "start": 1190,
+          "old_end": 1190,
+          "insert": "新增"
+        },
+        {
+          "direction": "zh"
+        }
+      ],
+      "expected": {
+        "statuses": [
+          "pending",
+          "pending"
+        ],
+        "choices": [
+          [
+            [
+              "official_pair",
+              false
+            ]
+          ],
+          [
+            [
+              "not_a_term",
+              false
+            ]
+          ]
+        ],
+        "completed": [],
+        "history_choices": []
+      }
+    },
+    {
+      "id": "reopen-stale-ranges",
+      "mode": "reopen",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文新增文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": null,
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1198,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1200,
+            "source_end": 2398,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1
+          ]
+        }
+      },
+      "edits": [],
+      "expected": {
+        "statuses": [
+          "pending",
+          "done"
+        ],
+        "choices": [
+          [],
+          [
+            [
+              "not_a_term",
+              true
+            ]
+          ]
+        ],
+        "completed": [
+          1
+        ],
+        "history_choices": [
+          [
+            "official_pair",
+            "甲术"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "reopen-target-edited-duplicate",
+      "mode": "reopen",
+      "workfile": {
+        "format": "wuwaterm-manuscript-v3",
+        "source": "甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n甲术文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文",
+        "target": "Alpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx edited xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n\nAlpha xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "direction": "en",
+        "alignments": null,
+        "choices": [],
+        "history": [],
+        "semantic_decisions": [],
+        "semantic_texts": [],
+        "semantic_history": [],
+        "segments": [
+          {
+            "index": 0,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 0,
+            "source_end": 1198,
+            "target_start": 0,
+            "target_end": 400,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "official_pair",
+                "candidate": {
+                  "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                  "zh": "甲术",
+                  "en": "Alpha",
+                  "category": "character"
+                },
+                "offered": [],
+                "confirmed": true
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "segmentation_version": "segmentation-v1",
+            "source_start": 1200,
+            "source_end": 2398,
+            "target_start": 402,
+            "target_end": 802,
+            "source_hash": "8eb59ef4248fb97d2a10de223cee7c17d98e1ded2ac64fe44f5ef27537a3b92d",
+            "target_hash": "e71e987208abd19d24d0e9a9284d08bfea05434bdd6154bec67fe387044172cf",
+            "status": "done",
+            "direction": "en",
+            "alignment_input": "automatic",
+            "basis": {
+              "rule_version": "review-v2",
+              "dictionary": {
+                "schema_version": "2",
+                "source_commit": "synthetic-commit-current",
+                "term_count": 4,
+                "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+              },
+              "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            "result": {
+              "truncated": false,
+              "evaluated": 1,
+              "not_evaluated": 0,
+              "findings": [
+                {
+                  "verdict": "verified_constraint",
+                  "source": [
+                    0,
+                    2
+                  ],
+                  "target": [
+                    0,
+                    5
+                  ],
+                  "candidates": [
+                    {
+                      "candidate_id": "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621",
+                      "zh": "甲术",
+                      "en": "Alpha",
+                      "category": "character"
+                    }
+                  ],
+                  "candidates_truncated": false
+                }
+              ]
+            },
+            "choices": [
+              {
+                "source_span": {
+                  "start": 0,
+                  "end": 2,
+                  "text": "甲术"
+                },
+                "choice": "not_a_term",
+                "candidate": null,
+                "offered": [
+                  "2a6983af5fc0a2413fb91b4b17e66fc5df429d2ae0a570f02578d1866e304621"
+                ],
+                "confirmed": true
+              }
+            ]
+          }
+        ],
+        "segment_choice_history": [],
+        "progress": {
+          "current": null,
+          "completed": [
+            0,
+            1
+          ]
+        }
+      },
+      "edits": [],
+      "expected": {
+        "statuses": [
+          "pending",
+          "done"
+        ],
+        "choices": [
+          [
+            [
+              "official_pair",
+              false
+            ]
+          ],
+          [
+            [
+              "not_a_term",
+              true
+            ]
+          ]
+        ],
+        "completed": [
+          1
+        ],
+        "history_choices": []
+      }
+    }
+  ]
+}
