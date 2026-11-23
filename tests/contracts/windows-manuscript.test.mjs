@@ -148,6 +148,29 @@ def v3_runtime(operation, payload):
     pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
     parts = records.normalize(payload, pairs)
     return {'segments': parts.segments, 'segment_choice_history': parts.history, 'progress': parts.progress}
+
+
+def duplicate_case(module, case, basis):
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    payload = module.parse_workfile(json.dumps(case['workfile']))
+    parts = records.parts_of(payload)
+    for edit in case['edits']:
+        if 'side' in edit:
+            side = edit['side']
+            before = payload[side]
+            start, old_end, inserted = edit['start'], edit['old_end'], edit['insert']
+            parts = records.apply_edit(parts, before, side, start, old_end, len(inserted))
+            payload = records.with_parts({**payload, side: before[:start] + inserted + before[old_end:]}, parts)
+        elif 'direction' in edit:
+            payload = records.with_parts({**payload, 'direction': edit['direction']}, parts)
+        else:
+            payload = records.with_parts({**payload, 'alignments': edit['alignments']}, parts)
+    pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
+    normalized = records.normalize(payload, pairs, basis)
+    return module.serialize_workfile(records.with_parts(payload, normalized))
+
+
 try:
     if request['operation'] == 'parse':
         result = module.parse_workfile(request['content'])
@@ -159,6 +182,8 @@ try:
         result = build_v3(module, request['scenario'])
     elif request['operation'] in ('alignment_inputs', 'normalize'):
         result = v3_runtime(request['operation'], request['payload'])
+    elif request['operation'] == 'duplicate_case':
+        result = duplicate_case(module, request['case'], request['basis'])
     elif request['operation'] == 'groups':
         result = module.choice_conflict_groups(request['payload'])
     else:
@@ -503,6 +528,46 @@ test('a long manuscript with choices, a target-only edit and progress: Web and W
   assert.deepEqual(windows({ operation: 'normalize', payload: fromWindows.result }).result,
     { segments: parsed.segments, segment_choice_history: parsed.segment_choice_history, progress: parsed.progress });
   assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, web.content);
+});
+
+const duplicateCasesPath = fileURLToPath(new URL('../../contracts/workbench-state/duplicate-attribution.json', import.meta.url));
+const duplicateCases = JSON.parse(readFileSync(duplicateCasesPath, 'utf8'));
+
+test('MY-350 duplicate attribution: Web and Windows produce identical v3 bytes and round-trip each other', () => {
+  assert.equal(duplicateCases.schema, 'wuwaterm-duplicate-attribution-cases-v1');
+  for (const c of duplicateCases.cases) {
+    const parsed = parseWorkfile(JSON.stringify(c.workfile));
+    let draft = { source: parsed.source, target: parsed.target, direction: parsed.direction, alignments: parsed.alignments };
+    let long = L.longFromWorkfile(parsed);
+    if (c.edits.length > 0) {
+      const next = { ...draft };
+      for (const ed of c.edits) {
+        if ('side' in ed) {
+          const chars = Array.from(next[ed.side]);
+          next[ed.side] = chars.slice(0, ed.start).join('') + ed.insert + chars.slice(ed.old_end).join('');
+        } else if ('direction' in ed) {
+          next.direction = ed.direction;
+        } else {
+          next.alignments = ed.alignments;
+        }
+      }
+      long = L.reconcileLong(long, draft, next);
+      draft = next;
+    }
+    const webBytes = serializeWorkfile({ ...parsed, ...draft, ...L.workfileParts(long, draft, { basis: duplicateCases.basis }) });
+    const winBytes = windows({ operation: 'duplicate_case', case: c, basis: duplicateCases.basis }).result;
+    assert.equal(winBytes, webBytes, `${c.id}: Windows bytes differ from Web bytes`);
+    // Bidirectional reopen parity: Web opens Windows's bytes and writes identically; Windows opens Web's bytes identically.
+    const winParsedByWeb = parseWorkfile(winBytes);
+    const webReopened = L.longFromWorkfile(winParsedByWeb);
+    assert.equal(serializeWorkfile({ ...winParsedByWeb, ...L.workfileParts(webReopened, {
+      source: winParsedByWeb.source, target: winParsedByWeb.target, direction: winParsedByWeb.direction, alignments: winParsedByWeb.alignments,
+    }, { basis: duplicateCases.basis }) }), winBytes, `${c.id}: Web reopen of Windows bytes drifted`);
+    const webParsedByWin = windows({ operation: 'parse', content: webBytes }).result;
+    assert.deepEqual(webParsedByWin, winParsedByWeb, `${c.id}: Windows parse of Web bytes differs`);
+    const winNorm = windows({ operation: 'normalize', payload: webParsedByWin }).result;
+    assert.equal(windows({ operation: 'serialize', payload: { ...webParsedByWin, ...winNorm } }).result, webBytes, `${c.id}: Windows reopen of Web bytes drifted`);
+  }
 });
 
 // ---- Manuscript v4: both consumers read, write and reject it alike -----------------------------------------------------------
