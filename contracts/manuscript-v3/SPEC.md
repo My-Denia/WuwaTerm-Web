@@ -582,11 +582,23 @@ rest. v1 and v2 files themselves stay pretty-printed, exactly as today.
 2. **Matching records to segments.** The reader pairs the current text with
    segmentation-v1. If the number of segments and every core range equal the records,
    records map by position. Otherwise:
-   - Each current segment takes the first unused record with equal `source_hash` and
-     `target_hash`.
-   - A segment still unmatched takes the first unused record with an equal
-     `source_hash`. It keeps that record's choices, unconfirmed; the result is not
-     reused.
+   - Each record carries comparison spans: its stored `(source_start, source_end,
+     target_start, target_end)` when reopening, or those spans mapped through the edit's
+     source and target splices during an editing session.
+   - Matching runs in three passes, assigning each old record and each current segment at
+     most once. Let `overlap(a, b, c, d) = max(0, min(b, d) - max(a, c))`, and rank
+     candidate pairs `(r, item[j])` with record `r` at index `k` by the 5-tuple:
+     `(overlap(r.source_start, r.source_end, item.source_start, item.source_end),
+     overlap(r.target_start, r.target_end, item.target_start, item.target_end),
+     -|r.source_start - item.source_start|, -j, -k)`.
+     1. **Exact source occurrence**: match every `(k, j)` where `r.source_start ==
+        item.source_start`, `r.source_end == item.source_end`, and `r.source_hash ==
+        item.source_hash`.
+     2. **Both hashes equal**: repeatedly assign the highest-ranked unmatched `(k, j)`
+        where `r.source_hash == item.source_hash` and `r.target_hash == item.target_hash`.
+     3. **Source hash equal only**: repeatedly assign the highest-ranked unmatched `(k, j)`
+        where `r.source_hash == item.source_hash`. It keeps that record's choices,
+        unconfirmed; the result is not reused.
    - Every other segment is pending.
    - Choices of records left unused move to `segment_choice_history`.
    - `progress` follows the mapping. When the record at `progress.current` is left
