@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import * as L from '../lib/long-review.js';
+import { parseWorkfile } from '../lib/manuscript.js';
 import { alignmentInput as generatorInput, alignmentList as generatorList, canonicalV3 } from '../scripts/build-manuscript-v3-fixtures.mjs';
 
 // Each test names the SPEC step (contracts/manuscript-v3/SPEC.md) its expectation comes from.
@@ -640,8 +641,9 @@ test('Runtime step 2: shared duplicate-attribution contract cases preserve each 
   const suite = JSON.parse(readFileSync(new URL('../contracts/workbench-state/duplicate-attribution.json', import.meta.url), 'utf8'));
   assert.equal(suite.schema, 'wuwaterm-duplicate-attribution-cases-v1');
   for (const c of suite.cases) {
-    let draft = draftOf(c.workfile);
-    let long = L.longFromWorkfile(c.workfile);
+    const parsed = parseWorkfile(JSON.stringify(c.workfile));
+    let draft = draftOf(parsed);
+    let long = L.longFromWorkfile(parsed);
     if (c.edits.length > 0) {
       const next = { ...draft };
       for (const ed of c.edits) {
@@ -659,12 +661,12 @@ test('Runtime step 2: shared duplicate-attribution contract cases preserve each 
     }
     const { segments, segment_choice_history, progress } = L.workfileParts(long, draft, { basis: suite.basis });
     assert.deepEqual(segments.map(r => r.status), c.expected.statuses, `${c.id}: statuses`);
-    assert.deepEqual(long.records.map(r => r.choices.map(x => [x.choice, x.confirmed])), c.expected.choices, `${c.id}: choices`);
+    assert.deepEqual(segments.map(r => r.choices.map(x => [x.choice, x.confirmed])), c.expected.choices, `${c.id}: choices`);
     assert.deepEqual(progress.completed, c.expected.completed, `${c.id}: completed`);
     assert.deepEqual(segment_choice_history.map(h => [h.choice, h.source_span.text]), c.expected.history_choices, `${c.id}: history`);
     // Reopening the serialized result with unchanged text is idempotent.
-    const saved = save(c.workfile, long, draft, suite.basis);
-    const reopened = L.longFromWorkfile(JSON.parse(saved));
+    const saved = save(parsed, long, draft, suite.basis);
+    const reopened = L.longFromWorkfile(parseWorkfile(saved));
     assert.deepEqual(L.workfileParts(reopened, draft, { basis: suite.basis }), L.workfileParts(long, draft, { basis: suite.basis }), `${c.id}: idempotent`);
   }
 });
