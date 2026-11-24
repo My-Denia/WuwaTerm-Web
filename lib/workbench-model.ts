@@ -1,3 +1,19 @@
+import type {
+  ChoiceKind,
+  Direction,
+  ReasonValue,
+  RecordStatus,
+  SemanticCategory,
+  SemanticConfidence,
+  SemanticDecisionKind,
+  SemanticOrigin,
+  SemanticResponseStatus,
+  SuggestionWithheldReason,
+  TermEffect,
+  TruncatedReason,
+  Verdict,
+} from './generated/manuscript-contract.ts';
+
 export type ScalarOffset = number & { readonly __coordinate?: 'scalar' };
 export type Utf16Offset = number & { readonly __coordinate?: 'utf16' };
 export type SegmentIndex = number & { readonly __coordinate?: 'segment-index' };
@@ -6,31 +22,27 @@ export const scalarOffset = (value: number): ScalarOffset => value as ScalarOffs
 export const utf16Offset = (value: number): Utf16Offset => value as Utf16Offset;
 export const segmentIndex = (value: number): SegmentIndex => value as SegmentIndex;
 
-export type Direction = 'en' | 'zh';
-export type Verdict = 'verified_constraint' | 'confirmed_conflict' | 'needs_review' | 'not_evaluated';
-export type ReasonValue = 'not_a_term' | 'ordinary_word' | 'no_target_region' | 'found_outside_region' | 'ambiguous_repeat';
+export type {
+  ChoiceKind,
+  Direction,
+  ReasonValue,
+  RecordStatus,
+  SemanticCategory,
+  SemanticConfidence,
+  SemanticDecisionKind,
+  SemanticOrigin,
+  SemanticResponseStatus,
+  SuggestionWithheldReason,
+  TermEffect,
+  TruncatedReason,
+  Verdict,
+};
 export type PairStatus = 'ready' | 'needs_manual_split' | 'untranslated' | 'unpaired_target';
-export type ChoiceKind = 'official_pair' | 'not_a_term';
-export type RecordStatus = 'pending' | 'done' | 'stale';
 export type RecordState = 'pending' | 'saved' | 'current' | 'stale';
 export type ChoiceView = 'applies' | 'needs_reconfirmation' | 'waiting';
 export type RunPhase = 'idle' | 'running' | 'waiting' | 'paused' | 'stopped' | 'done';
 export type RunItemStatus = 'queued' | 'sending' | 'done' | 'failed' | 'skipped';
-export type SemanticCategory =
-  | 'omission'
-  | 'unsupported_addition'
-  | 'meaning_shift'
-  | 'negation_change'
-  | 'quantity_change'
-  | 'reference_inconsistency'
-  | 'term_sense';
-export type SemanticOrigin = 'model';
-export type SemanticConfidence = 'high' | 'medium' | 'low';
-export type TermEffect = 'none' | 'alters_official_match' | 'introduces_official_form' | 'not_checked';
-export type SuggestionWithheldReason = 'span_too_long' | 'replacement_too_long';
-export type TruncatedReason = 'issue_limit' | 'byte_limit';
 export type PrecedentChoice = 'official_pair' | 'not_a_term' | 'user_rendering';
-export type SemanticResponseStatus = 'complete' | 'not_reviewed';
 export type IssueStatusKind =
   | 'accepted'
   | 'adjusted'
@@ -118,7 +130,6 @@ export type RunState = {
   kind: RunKind | null; phase: RunPhase; items: RunItem[]; waitUntil: number | null; stopCode: string | null; stopRequestId?: string | null;
   streak?: { code: string | null; count: number };
 };
-export type SemanticDecisionKind = 'accepted' | 'adjusted' | 'ignored';
 export type SemanticActionRecord = { placedId: string; marker: number; kind: SemanticDecisionKind };
 export type SemanticDecisionCommand =
   | { placedId: string; kind: 'accepted'; useAlternative?: boolean }
