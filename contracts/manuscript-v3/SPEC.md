@@ -98,7 +98,7 @@ pins). This PR leaves them untouched.
 - **Scalar**: a Unicode scalar value. All offsets count scalars, as in v1 and v2. In
   Python they are `str` indexes; in JavaScript, `Array.from(text)` indexes.
 - **Segment core**: segmentation-v1 (Core `contracts/segmentation-v1.json`; Web
-  `lib/segmentation.js`, `pairSegments`) splits the whole `source` and `target` into
+  `lib/segmentation.ts`, `pairSegments`) splits the whole `source` and `target` into
   pairs. Each side's core is its region without leading and trailing segmentation-v1
   whitespace: `core_start..core_end`. A client sends exactly the core to Core for that
   segment's term check.

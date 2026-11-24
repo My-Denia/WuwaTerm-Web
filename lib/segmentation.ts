@@ -1,16 +1,36 @@
 // Browser-safe port of Core's segmentation-v1 reference implementation
 // (src/wuwaterm/segmentation.py). All offsets are Unicode scalar indices.
 
+import type { Alignment, Pair, PairRegion, PairStatus, ScalarOffset, SegmentIndex } from './workbench-model.ts';
+import { scalarOffset, segmentIndex } from './workbench-model.ts';
+
+export type Segment = {
+  start: ScalarOffset;
+  end: ScalarOffset;
+  core_start: ScalarOffset;
+  core_end: ScalarOffset;
+  hard_cut: boolean;
+};
+
+type RawPair = {
+  status: PairStatus;
+  hard: boolean;
+  sStart: ScalarOffset;
+  sEnd: ScalarOffset;
+  tStart: ScalarOffset;
+  tEnd: ScalarOffset;
+};
+
 export const SEGMENTATION_VERSION = 'segmentation-v1';
 export const SEGMENT_LIMIT = 1800;
 export const HARD_CUT_WINDOW = 200;
 export const BOUNDARY_PUNCTUATION = '，、；：,;:';
 
 // Exactly the scalars of the spec; not JS \s and not Python isspace().
-const WS_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680];
+const WS_CODES: number[] = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0xa0, 0x1680];
 for (let c = 0x2000; c <= 0x200a; c++) WS_CODES.push(c);
 WS_CODES.push(0x2028, 0x2029, 0x202f, 0x205f, 0x3000);
-export const WHITESPACE = Object.freeze(WS_CODES);
+export const WHITESPACE: readonly number[] = Object.freeze(WS_CODES);
 
 const WS = new Set(WS_CODES.map(c => String.fromCodePoint(c)));
 const PUNCT = new Set(Array.from(BOUNDARY_PUNCTUATION));
@@ -20,7 +40,7 @@ const PY_SPACE_EXTRA = new Set(['\x1c', '\x1d', '\x1e', '\x1f', '\x85']);
 const SENTENCE_END = new Set(Array.from('。．.！？!?\n'));
 
 // Code points where Python str.isdigit() is true (Unicode 15.0 as shipped in Python 3.12).
-const DIGIT_RANGES = (
+const DIGIT_RANGES: [number, number][] = (
   '30-39,b2-b3,b9,660-669,6f0-6f9,7c0-7c9,966-96f,9e6-9ef,a66-a6f,ae6-aef,b66-b6f,be6-bef,c66-c6f,ce6-cef,' +
   'd66-d6f,de6-def,e50-e59,ed0-ed9,f20-f29,1040-1049,1090-1099,1369-1371,17e0-17e9,1810-1819,1946-194f,' +
   '19d0-19da,1a80-1a89,1a90-1a99,1b50-1b59,1bb0-1bb9,1c40-1c49,1c50-1c59,2070,2074-2079,2080-2089,2460-2468,' +
@@ -37,21 +57,21 @@ const DIGIT_RANGES = (
     return [parseInt(a, 16), parseInt(b ?? a, 16)];
   });
 
-const STATUS_READY = 'ready';
-const STATUS_MANUAL = 'needs_manual_split';
-const STATUS_UNTRANSLATED = 'untranslated';
-const STATUS_UNPAIRED_TARGET = 'unpaired_target';
+const STATUS_READY: PairStatus = 'ready';
+const STATUS_MANUAL: PairStatus = 'needs_manual_split';
+const STATUS_UNTRANSLATED: PairStatus = 'untranslated';
+const STATUS_UNPAIRED_TARGET: PairStatus = 'unpaired_target';
 
-const isDigit = ch => {
+const isDigit = (ch: string): boolean => {
   const c = ch.codePointAt(0);
-  return DIGIT_RANGES.some(([a, b]) => c >= a && c <= b);
+  return c !== undefined && DIGIT_RANGES.some(([a, b]) => c >= a && c <= b);
 };
-const isPySpace = ch => WS.has(ch) || PY_SPACE_EXTRA.has(ch);
-const ceilDiv = (a, b) => Math.floor((a + b - 1) / b);
+const isPySpace = (ch: string): boolean => WS.has(ch) || PY_SPACE_EXTRA.has(ch);
+const ceilDiv = (a: number, b: number): number => Math.floor((a + b - 1) / b);
 
 // ---- review-v2 sentence ranges (review._sentence_ranges_v2) ----
 
-function isSentenceEndV2(t, i) {
+function isSentenceEndV2(t: readonly string[], i: number): boolean {
   const ch = t[i];
   if (!SENTENCE_END.has(ch)) return false;
   if ((ch === '.' || ch === '．') && i > 0 && i + 1 < t.length && isDigit(t[i - 1]) && isDigit(t[i + 1])) {
@@ -60,7 +80,7 @@ function isSentenceEndV2(t, i) {
   return true;
 }
 
-function separatorOnly(t, start, end) {
+function separatorOnly(t: readonly string[], start: number, end: number): boolean {
   if (!(start < end)) return false;
   for (let i = start; i < end; i++) {
     if (!SENTENCE_END.has(t[i]) && !isPySpace(t[i])) return false;
@@ -68,8 +88,8 @@ function separatorOnly(t, start, end) {
   return true;
 }
 
-export function sentenceRangesV2(t) {
-  const ranges = [];
+export function sentenceRangesV2(t: readonly string[]): [ScalarOffset, ScalarOffset][] {
+  const ranges: [ScalarOffset, ScalarOffset][] = [];
   const length = t.length;
   let start = 0;
   let index = 0;
@@ -77,43 +97,43 @@ export function sentenceRangesV2(t) {
     if (isSentenceEndV2(t, index)) {
       let end = index + 1;
       while (end < length && isSentenceEndV2(t, end)) end++;
-      if (start < end && !separatorOnly(t, start, end)) ranges.push([start, end]);
+      if (start < end && !separatorOnly(t, start, end)) ranges.push([scalarOffset(start), scalarOffset(end)]);
       start = end;
       index = end;
       continue;
     }
     index++;
   }
-  if (start < length && !separatorOnly(t, start, length)) ranges.push([start, length]);
-  if (!ranges.length && length && !separatorOnly(t, 0, length)) ranges.push([0, length]);
+  if (start < length && !separatorOnly(t, start, length)) ranges.push([scalarOffset(start), scalarOffset(length)]);
+  if (!ranges.length && length && !separatorOnly(t, 0, length)) ranges.push([scalarOffset(0), scalarOffset(length)]);
   return ranges;
 }
 
 // ---- building blocks ----
 
-function core(t, start, end) {
+function core(t: readonly string[], start: number, end: number): [ScalarOffset, ScalarOffset] {
   let a = start;
   while (a < end && WS.has(t[a])) a++;
-  if (a === end) return [start, start];
+  if (a === end) return [scalarOffset(start), scalarOffset(start)];
   let b = end;
   while (WS.has(t[b - 1])) b--;
-  return [a, b];
+  return [scalarOffset(a), scalarOffset(b)];
 }
 
-function coreLen(t, start, end) {
+function coreLen(t: readonly string[], start: number, end: number): number {
   const [a, b] = core(t, start, end);
   return b - a;
 }
 
-function pairsOf(bounds) {
-  const out = [];
-  for (let i = 0; i + 1 < bounds.length; i++) out.push([bounds[i], bounds[i + 1]]);
+function pairsOf(bounds: readonly number[]): [ScalarOffset, ScalarOffset][] {
+  const out: [ScalarOffset, ScalarOffset][] = [];
+  for (let i = 0; i + 1 < bounds.length; i++) out.push([scalarOffset(bounds[i]), scalarOffset(bounds[i + 1])]);
   return out;
 }
 
-export function paragraphRanges(t) {
+export function paragraphRanges(t: readonly string[]): [ScalarOffset, ScalarOffset][] {
   const length = t.length;
-  const cuts = [];
+  const cuts: number[] = [];
   let i = 0;
   while (i < length) {
     if (!WS.has(t[i])) {
@@ -134,10 +154,10 @@ export function paragraphRanges(t) {
   return pairsOf([0, ...cuts, length]);
 }
 
-function sentencePieces(t, start, end) {
+function sentencePieces(t: readonly string[], start: number, end: number): [ScalarOffset, ScalarOffset][] {
   const [cs, ce] = core(t, start, end);
-  if (cs === ce) return [[start, end]];
-  const cuts = [];
+  if (cs === ce) return [[scalarOffset(start), scalarOffset(end)]];
+  const cuts: number[] = [];
   for (const [rangeStart] of sentenceRangesV2(t.slice(cs, ce)).slice(1)) {
     let p = cs + rangeStart;
     while (p < ce && WS.has(t[p])) p++;
@@ -146,7 +166,7 @@ function sentencePieces(t, start, end) {
   return pairsOf([start, ...cuts, end]);
 }
 
-function hardCutPoint(t, pos, limit) {
+function hardCutPoint(t: readonly string[], pos: number, limit: number): number {
   const hi = pos + limit;
   const lo = Math.max(pos + limit - HARD_CUT_WINDOW, pos + 1);
   for (const chars of [WS, PUNCT]) {
@@ -157,15 +177,15 @@ function hardCutPoint(t, pos, limit) {
   return hi;
 }
 
-function hardCut(t, start, end, limit) {
+function hardCut(t: readonly string[], start: number, end: number, limit: number): [ScalarOffset, ScalarOffset][] {
   const [s, e] = core(t, start, end);
-  const cuts = [];
-  let pos = s;
+  const cuts: number[] = [];
+  let pos: number = s;
   while (e - pos > limit) {
     pos = hardCutPoint(t, pos, limit);
     cuts.push(pos);
   }
-  const pieces = [];
+  const pieces: [ScalarOffset, ScalarOffset][] = [];
   for (const [a, b] of pairsOf([start, ...cuts, end])) {
     if (pieces.length && coreLen(t, a, b) === 0) {
       pieces[pieces.length - 1] = [pieces[pieces.length - 1][0], b];
@@ -176,7 +196,7 @@ function hardCut(t, start, end, limit) {
   return pieces;
 }
 
-function checkPartition(regions, length, name) {
+function checkPartition(regions: readonly [number, number][], length: number, name: string): void {
   let pos = 0;
   for (const [start, end] of regions) {
     if (start !== pos || end < start) throw new Error(`${name} regions do not partition the text`);
@@ -185,7 +205,13 @@ function checkPartition(regions, length, name) {
   if (pos !== length) throw new Error(`${name} regions do not cover the text`);
 }
 
-const makeSegment = (start, end, coreStart, coreEnd, hard) => ({
+const makeSegment = (
+  start: ScalarOffset,
+  end: ScalarOffset,
+  coreStart: ScalarOffset,
+  coreEnd: ScalarOffset,
+  hard: boolean,
+): Segment => ({
   start,
   end,
   core_start: coreStart,
@@ -195,14 +221,14 @@ const makeSegment = (start, end, coreStart, coreEnd, hard) => ({
 
 // ---- single side ----
 
-export function segmentText(text, limit = SEGMENT_LIMIT) {
+export function segmentText(text: string, limit: number = SEGMENT_LIMIT): Segment[] {
   const t = Array.from(text);
   const length = t.length;
   if (length === 0) return [];
   const paragraphs = paragraphRanges(t);
-  if (!paragraphs.length) return [makeSegment(0, length, 0, 0, false)];
+  if (!paragraphs.length) return [makeSegment(scalarOffset(0), scalarOffset(length), scalarOffset(0), scalarOffset(0), false)];
 
-  const units = [];
+  const units: [ScalarOffset, ScalarOffset, boolean][] = [];
   for (const [pStart, pEnd] of paragraphs) {
     if (coreLen(t, pStart, pEnd) <= limit) {
       units.push([pStart, pEnd, false]);
@@ -217,8 +243,8 @@ export function segmentText(text, limit = SEGMENT_LIMIT) {
     }
   }
 
-  const segments = [];
-  let cur = null;
+  const segments: Segment[] = [];
+  let cur: Segment | null = null;
   for (const [start, end, hard] of units) {
     const [cs, ce] = core(t, start, end);
     const nxt = makeSegment(start, end, cs, ce, hard);
@@ -238,33 +264,37 @@ export function segmentText(text, limit = SEGMENT_LIMIT) {
 
 // ---- bilingual pairing ----
 
-const isMapping = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-const hasExactKeys = (v, keys) => {
+const isMapping = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const hasExactKeys = (v: Record<string, unknown>, keys: readonly string[]): boolean => {
   const k = Object.keys(v);
   return k.length === keys.length && keys.every(x => k.includes(x));
 };
 
-function coerceSpan(name, item, t) {
+function coerceSpan(name: string, item: unknown, t: readonly string[]): [ScalarOffset, ScalarOffset] {
   if (!isMapping(item) || !hasExactKeys(item, ['start', 'end', 'text'])) {
     throw new Error(`${name} span is not valid`);
   }
   const { start, end } = item;
-  if (!Number.isInteger(start) || !Number.isInteger(end)) throw new Error(`${name} offsets must be integers`);
+  if (typeof start !== 'number' || typeof end !== 'number' || !Number.isInteger(start) || !Number.isInteger(end)) {
+    throw new Error(`${name} offsets must be integers`);
+  }
   if (start < 0 || start >= end || end > t.length) throw new Error(`${name} span is out of bounds`);
   if (typeof item.text !== 'string' || t.slice(start, end).join('') !== item.text) {
     throw new Error(`${name} span text does not match the text`);
   }
-  return [start, end];
+  return [scalarOffset(start), scalarOffset(end)];
 }
 
-function hasNonWs(t, start, end) {
+function hasNonWs(t: readonly string[], start: number, end: number): boolean {
   for (let i = start; i < end; i++) if (!WS.has(t[i])) return true;
   return false;
 }
 
-function alignmentRegionPairs(s, t, alignments) {
-  const srcSpans = [];
-  const tgtSpans = [];
+type Bounds4 = [ScalarOffset, ScalarOffset, ScalarOffset, ScalarOffset];
+
+function alignmentRegionPairs(s: readonly string[], t: readonly string[], alignments: readonly unknown[]): Bounds4[] | null {
+  const srcSpans: [ScalarOffset, ScalarOffset][] = [];
+  const tgtSpans: ([ScalarOffset, ScalarOffset] | null)[] = [];
   let prevS = 0;
   let prevT = 0;
   for (const item of alignments) {
@@ -296,32 +326,40 @@ function alignmentRegionPairs(s, t, alignments) {
   if (hasNonWs(t, pos, t.length)) return null;
 
   const n = alignments.length;
-  const sBounds = [0];
+  const sBounds: number[] = [0];
   for (let i = 1; i < n; i++) sBounds.push(srcSpans[i][0]);
   sBounds.push(s.length);
-  const tBounds = new Array(n + 1).fill(0);
+  const tBounds: number[] = new Array<number>(n + 1).fill(0);
   tBounds[n] = t.length;
-  for (let i = n - 1; i > 0; i--) tBounds[i] = tgtSpans[i] !== null ? tgtSpans[i][0] : tBounds[i + 1];
-  return Array.from({ length: n }, (_, i) => [sBounds[i], sBounds[i + 1], tBounds[i], tBounds[i + 1]]);
+  for (let i = n - 1; i > 0; i--) {
+    const tSpan = tgtSpans[i];
+    tBounds[i] = tSpan !== null ? tSpan[0] : tBounds[i + 1];
+  }
+  return Array.from({ length: n }, (_, i): Bounds4 => [
+    scalarOffset(sBounds[i]),
+    scalarOffset(sBounds[i + 1]),
+    scalarOffset(tBounds[i]),
+    scalarOffset(tBounds[i + 1]),
+  ]);
 }
 
-function dropEmptyPairs(s, t, regions) {
+function dropEmptyPairs(s: readonly string[], t: readonly string[], regions: readonly Bounds4[]): Bounds4[] {
   const kept = regions.filter(r => coreLen(s, r[0], r[1]) || coreLen(t, r[2], r[3]));
-  return kept.map((r, k) => {
-    const sStart = k === 0 ? 0 : r[0];
-    const tStart = k === 0 ? 0 : r[2];
+  return kept.map((r, k): Bounds4 => {
+    const sStart = k === 0 ? scalarOffset(0) : r[0];
+    const tStart = k === 0 ? scalarOffset(0) : r[2];
     const last = k + 1 >= kept.length;
-    return [sStart, last ? s.length : kept[k + 1][0], tStart, last ? t.length : kept[k + 1][2]];
+    return [sStart, last ? scalarOffset(s.length) : kept[k + 1][0], tStart, last ? scalarOffset(t.length) : kept[k + 1][2]];
   });
 }
 
-function fallbackCuts(t, a, b, k) {
-  const cuts = [];
+function fallbackCuts(t: readonly string[], a: number, b: number, k: number): ScalarOffset[] | null {
+  const cuts: ScalarOffset[] = [];
   let prev = a;
   const n = b - a;
   for (let i = 1; i < k; i++) {
     const ti = a + Math.floor((i * n) / k);
-    let found = null;
+    let found: number | null = null;
     for (let d = 0; d <= HARD_CUT_WINDOW && found === null; d++) {
       for (const p of [ti - d, ti + d]) {
         if (a < p && p < b && p > prev && NATURAL.has(t[p - 1])) {
@@ -331,25 +369,38 @@ function fallbackCuts(t, a, b, k) {
       }
     }
     if (found === null) return null;
-    cuts.push(found);
+    cuts.push(scalarOffset(found));
     prev = found;
   }
   return cuts;
 }
 
-const makePair = (status, hard, sStart, sEnd, tStart, tEnd) => ({ status, hard, sStart, sEnd, tStart, tEnd });
+const makePair = (
+  status: PairStatus,
+  hard: boolean,
+  sStart: ScalarOffset,
+  sEnd: ScalarOffset,
+  tStart: ScalarOffset,
+  tEnd: ScalarOffset,
+): RawPair => ({ status, hard, sStart, sEnd, tStart, tEnd });
 
-function fallbackPairs(s, t, sRange, tRange, limit) {
+function fallbackPairs(
+  s: readonly string[],
+  t: readonly string[],
+  sRange: [ScalarOffset, ScalarOffset],
+  tRange: [ScalarOffset, ScalarOffset],
+  limit: number,
+): RawPair[] {
   const [sA, sB] = core(s, sRange[0], sRange[1]);
   const [tA, tB] = core(t, tRange[0], tRange[1]);
   const k = Math.max(ceilDiv(sB - sA, limit), ceilDiv(tB - tA, limit));
-  const manual = [makePair(STATUS_MANUAL, false, ...sRange, ...tRange)];
+  const manual: RawPair[] = [makePair(STATUS_MANUAL, false, sRange[0], sRange[1], tRange[0], tRange[1])];
   const sCuts = fallbackCuts(s, sA, sB, k);
   const tCuts = fallbackCuts(t, tA, tB, k);
   if (sCuts === null || tCuts === null) return manual;
-  const sBounds = [sRange[0], ...sCuts, sRange[1]];
-  const tBounds = [tRange[0], ...tCuts, tRange[1]];
-  const pairs = [];
+  const sBounds: ScalarOffset[] = [sRange[0], ...sCuts, sRange[1]];
+  const tBounds: ScalarOffset[] = [tRange[0], ...tCuts, tRange[1]];
+  const pairs: RawPair[] = [];
   for (let i = 0; i < k; i++) {
     const sLen = coreLen(s, sBounds[i], sBounds[i + 1]);
     const tLen = coreLen(t, tBounds[i], tBounds[i + 1]);
@@ -359,22 +410,28 @@ function fallbackPairs(s, t, sRange, tRange, limit) {
   return pairs;
 }
 
-function classifyRegionPair(s, t, r, limit, aligned) {
+function classifyRegionPair(
+  s: readonly string[],
+  t: readonly string[],
+  r: Bounds4,
+  limit: number,
+  aligned: boolean,
+): RawPair[] {
   const [sStart, sEnd, tStart, tEnd] = r;
   const sLen = coreLen(s, sStart, sEnd);
   const tLen = coreLen(t, tStart, tEnd);
-  if (sLen && !tLen) return [makePair(STATUS_UNTRANSLATED, false, ...r)];
-  if (tLen && !sLen) return [makePair(STATUS_UNPAIRED_TARGET, false, ...r)];
-  if (sLen <= limit && tLen <= limit) return [makePair(STATUS_READY, false, ...r)];
-  if (!aligned) return [makePair(STATUS_MANUAL, false, ...r)];
+  if (sLen && !tLen) return [makePair(STATUS_UNTRANSLATED, false, sStart, sEnd, tStart, tEnd)];
+  if (tLen && !sLen) return [makePair(STATUS_UNPAIRED_TARGET, false, sStart, sEnd, tStart, tEnd)];
+  if (sLen <= limit && tLen <= limit) return [makePair(STATUS_READY, false, sStart, sEnd, tStart, tEnd)];
+  if (!aligned) return [makePair(STATUS_MANUAL, false, sStart, sEnd, tStart, tEnd)];
   const sSents = sentencePieces(s, sStart, sEnd);
   const tSents = sentencePieces(t, tStart, tEnd);
-  if (sSents.length !== tSents.length) return [makePair(STATUS_MANUAL, false, ...r)];
-  const pairs = [];
+  if (sSents.length !== tSents.length) return [makePair(STATUS_MANUAL, false, sStart, sEnd, tStart, tEnd)];
+  const pairs: RawPair[] = [];
   sSents.forEach((sp, i) => {
     const tp = tSents[i];
-    if (coreLen(s, ...sp) <= limit && coreLen(t, ...tp) <= limit) {
-      pairs.push(makePair(STATUS_READY, false, ...sp, ...tp));
+    if (coreLen(s, sp[0], sp[1]) <= limit && coreLen(t, tp[0], tp[1]) <= limit) {
+      pairs.push(makePair(STATUS_READY, false, sp[0], sp[1], tp[0], tp[1]));
     } else {
       pairs.push(...fallbackPairs(s, t, sp, tp, limit));
     }
@@ -382,11 +439,11 @@ function classifyRegionPair(s, t, r, limit, aligned) {
   return pairs;
 }
 
-function validatePairs(s, t, pairs, limit) {
+function validatePairs(s: readonly string[], t: readonly string[], pairs: readonly Pair[], limit: number): void {
   for (const pair of pairs) {
     if (pair.status !== STATUS_READY) continue;
-    for (const region of [pair.source, pair.target]) {
-      const len = region.core_end - region.core_start;
+    for (const r of [pair.source, pair.target]) {
+      const len = r.core_end - r.core_start;
       if (!(len > 0 && len <= limit)) throw new Error('ready pair core is empty or over the limit');
     }
   }
@@ -394,9 +451,19 @@ function validatePairs(s, t, pairs, limit) {
   checkPartition(pairs.map(p => [p.target.start, p.target.end]), t.length, 'target');
 }
 
-const region = (start, end, [coreStart, coreEnd]) => ({ start, end, core_start: coreStart, core_end: coreEnd });
+const region = (start: ScalarOffset, end: ScalarOffset, [coreStart, coreEnd]: [ScalarOffset, ScalarOffset]): PairRegion => ({
+  start,
+  end,
+  core_start: coreStart,
+  core_end: coreEnd,
+});
 
-export function pairSegments(source, target, limit = SEGMENT_LIMIT, alignments = null) {
+export function pairSegments(
+  source: string,
+  target: string,
+  limit: number = SEGMENT_LIMIT,
+  alignments: readonly Alignment[] | null | undefined = null,
+): Pair[] {
   if (alignments !== null && alignments !== undefined && !Array.isArray(alignments)) {
     throw new Error('alignments must be an array');
   }
@@ -407,12 +474,12 @@ export function pairSegments(source, target, limit = SEGMENT_LIMIT, alignments =
     return [];
   }
 
-  let pairs = [];
-  const whole = [0, s.length, 0, t.length];
+  let pairs: RawPair[] = [];
+  const whole: Bounds4 = [scalarOffset(0), scalarOffset(s.length), scalarOffset(0), scalarOffset(t.length)];
   if (alignments && alignments.length) {
     const regions = alignmentRegionPairs(s, t, alignments);
     if (regions === null) {
-      pairs = [makePair(STATUS_MANUAL, false, ...whole)];
+      pairs = [makePair(STATUS_MANUAL, false, whole[0], whole[1], whole[2], whole[3])];
     } else {
       for (const r of dropEmptyPairs(s, t, regions)) pairs.push(...classifyRegionPair(s, t, r, limit, true));
     }
@@ -428,9 +495,9 @@ export function pairSegments(source, target, limit = SEGMENT_LIMIT, alignments =
     }
   }
 
-  const merged = [];
+  const merged: RawPair[] = [];
   for (const pair of pairs) {
-    const prev = merged.length ? merged[merged.length - 1] : null;
+    const prev: RawPair | null = merged.length ? merged[merged.length - 1] : null;
     if (prev && prev.status === STATUS_READY && pair.status === STATUS_READY && !prev.hard && !pair.hard) {
       const sA = core(s, prev.sStart, prev.sEnd)[0];
       const sB = core(s, pair.sStart, pair.sEnd)[1];
@@ -444,8 +511,8 @@ export function pairSegments(source, target, limit = SEGMENT_LIMIT, alignments =
     merged.push(pair);
   }
 
-  const result = merged.map((p, index) => ({
-    index,
+  const result: Pair[] = merged.map((p, index): Pair => ({
+    index: segmentIndex(index) as SegmentIndex,
     status: p.status,
     hard_cut: p.hard,
     source: region(p.sStart, p.sEnd, core(s, p.sStart, p.sEnd)),
@@ -457,9 +524,9 @@ export function pairSegments(source, target, limit = SEGMENT_LIMIT, alignments =
 
 // Never let an oversized or empty-core request go out: a ready pair that
 // violates the limit is downgraded to needs_manual_split.
-export function guardPairForRequest(pair, limit = SEGMENT_LIMIT) {
+export function guardPairForRequest(pair: Pair, limit: number = SEGMENT_LIMIT): Pair {
   if (pair.status !== STATUS_READY) return pair;
-  const ok = side => {
+  const ok = (side: PairRegion): boolean => {
     const len = side.core_end - side.core_start;
     return len > 0 && len <= limit;
   };

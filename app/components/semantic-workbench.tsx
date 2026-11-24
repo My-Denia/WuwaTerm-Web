@@ -3,19 +3,19 @@
 // Semantic review, segmented runs and manual splitting for the review workbench (W2).
 // Thin React view layer over lib/workbench-controller.ts.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import { SEGMENT_LIMIT } from '../../lib/segmentation.js';
+import { SEGMENT_LIMIT } from '../../lib/segmentation.ts';
 import {
   classifyFailure, itemDisplayState, runDisplayState, runProgress,
 } from '../../lib/semantic-run.js';
 import {
   TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, restorableHistory,
   summarizeTermCandidates, termGroupCounts, termPlan, termSegments, uncheckedTermSegments,
-} from '../../lib/long-review.js';
+} from '../../lib/long-review.ts';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES,
 } from '../../lib/semantic-review.js';
 import { isHandled, issueStatus, semanticSegmentViews } from '../../lib/semantic-state.js';
-import { pairShape, singleBreaks, splitLayout } from '../../lib/manual-split.js';
+import { pairShape, singleBreaks, splitLayout } from '../../lib/manual-split.ts';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { highlightSegments } from '../../lib/review-report.js';
 import { compactScalarContext } from '../../lib/review-navigation.js';
@@ -31,12 +31,12 @@ export type { Commit, Draft, LongState, SemanticState, SessionBasis } from '../.
 
 /** Longest list of segment numbers a banner spells out. */
 const NUMBERS_SHOWN = 8;
-type GroupFilter = import('../../lib/long-review.js').TermGroupFilter;
+type GroupFilter = import('../../lib/long-review.ts').TermGroupFilter;
 type TermCandidate = { candidate_id: string; zh: string; en: string; category: string };
 type TermFinding = { id: string; verdict: string; source_span: Span; target_span: Span | null; candidates: TermCandidate[]; candidates_truncated: boolean; reason?: string };
-type TermGroup = import('../../lib/long-review.js').TermGroup;
-type Occurrence = import('../../lib/long-review.js').Occurrence;
-type ContextSnippet = import('../../lib/long-review.js').Snippet;
+type TermGroup = import('../../lib/long-review.ts').TermGroup;
+type Occurrence = import('../../lib/long-review.ts').Occurrence;
+type ContextSnippet = import('../../lib/long-review.ts').Snippet;
 type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
 type Props = {
   doc: WorkbenchController;
@@ -361,7 +361,7 @@ export function SemanticWorkbench(props: Props) {
     return term ? `${semanticText} · ${term}` : semanticText;
   };
 
-  const shape = (view: PairView) => pairShape(source, target, view.pair) as { sourceParagraphs: number; targetParagraphs: number; sourceSentences: number; targetSentences: number; sourceLength: number; targetLength: number };
+  const shape = (view: PairView) => pairShape(source, target, view.pair);
   const manualViews = views.filter(v => v.pair.status === 'needs_manual_split');
   const splitView = splitOpen === null ? null : manualViews.find(v => v.pair.index === splitOpen) ?? manualViews.find(v => v.pair.index >= splitOpen) ?? manualViews.at(-1) ?? null;
   function jumpToManual() {
@@ -641,8 +641,7 @@ function SplitHelper({ s, locale, source, target, view, splitAt, merge, linesAsP
   innerRef: MutableRefObject<HTMLDivElement | null>;
 }) {
   const sc = chars(source); const tc = chars(target);
-  type Para = { start: number; end: number; coreStart: number; coreEnd: number; length: number; sentences: { start: number; end: number }[] };
-  const layout = { source: splitLayout(source, view.pair.source), target: splitLayout(target, view.pair.target) } as Record<'source' | 'target', Para[]>;
+  const layout = { source: splitLayout(source, view.pair.source), target: splitLayout(target, view.pair.target) };
   const rows = Math.max(layout.source.length, layout.target.length);
   const sideName = { source: s.splitSource, target: s.splitTarget };
   const paired = layout.source.length === layout.target.length;

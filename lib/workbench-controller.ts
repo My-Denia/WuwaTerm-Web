@@ -1,14 +1,14 @@
 // Standalone, React-free document controller for the WuwaTerm review workbench.
 // Owns canonical manuscript state, request orchestration, abort/generation/epoch
 // guards, serial run scheduling, waiting timers, and persistence/export shaping.
-import { segmentText } from './segmentation.js';
+import { segmentText } from './segmentation.ts';
 import { contextBefore, fitRequestBody, initialRun, nextToSend, runReducer, selectPrecedents } from './semantic-run.js';
 import {
   applyResult, chooseTerm, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
   removeChoice, removeHistoryEntry, restorableHistory, restoreHistoryEntry, reviseSegmentTarget,
   sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished, spliceTargetSpan,
   termPlan, termSegmentKey, workfileParts,
-} from './long-review.js';
+} from './long-review.ts';
 import {
   CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_REVIEW_VERSION,
   applySemanticSuggestion, validSemanticReviewResponse, verifySemanticReviewIdentity,
@@ -19,7 +19,7 @@ import {
   longHoldsWork, mapSemanticEdit, occurrenceKey, placeSemanticResult, reconcileState,
   removeDecision, semanticSegmentViews, upsertDecision,
 } from './semantic-state.js';
-import { insertParagraphBreak, linesToParagraphs, mergeParagraphs } from './manual-split.js';
+import { insertParagraphBreak, linesToParagraphs, mergeParagraphs } from './manual-split.ts';
 import {
   MAX_V3_WORKFILE_BYTES, MAX_V4_CHOICES, MAX_WORKFILE_BYTES, REPORT_V4,
   canonicalManuscript, compareReports, leaveGuardActive, makeChoice, manuscriptSaveView,
@@ -39,7 +39,7 @@ import type { UiLanguage } from './ui-language.ts';
 import type {
   Candidate, Choice, Decision, DocumentPhase, Draft, ErrorState, ExportArtifact,
   Finding, ImportFileLike, ImportOutcome, LongCtx, LongState, NoticeState, Pair, PairView,
-  ParagraphCut, RecordView, Region, Report, Resolution, RunItem, RunKind, RunState,
+  ParagraphCut, Region, Report, Resolution, RunItem, RunKind, RunState,
   SegmentInput, SemanticActionRecord, SemanticDecisionCommand, SemanticDecisionResult,
   SemanticReport, SemanticState, SessionBasis, Snapshot, Span, TargetRevisionCommand,
   TargetRevisionResult, TermCandidateRef, TermFindingRef, TermOccurrenceAction, Undo,
@@ -58,8 +58,8 @@ export const PRECEDENTS_DEFAULT_ON = true;
 const chars = (text: string) => Array.from(text);
 const slice = (list: string[], start: number, end: number) => list.slice(start, end).join('');
 const sliceEquals = (text: string, span: Span | null) => !!span && slice(chars(text), span.start, span.end) === span.text;
-const inputsOf = (draft: Draft) => segmentInputs(draft) as { long: boolean; items: SegmentInput[] };
-const viewOf = (long: LongState, index: number, ctx: LongCtx) => recordView(long, index, ctx) as RecordView | null;
+const inputsOf = segmentInputs;
+const viewOf = recordView;
 const defaultUid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 export type WorkbenchPost = (
@@ -777,19 +777,19 @@ export class WorkbenchController {
     switch (action.type) {
       case 'adopt':
         return this.commitLong(
-          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: action.candidate }, { draft: this.state.draft, basis: this.state.basis }) as { long: LongState; error: string | null },
+          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: action.candidate }, { draft: this.state.draft, basis: this.state.basis }),
           'sem:longChoiceRecorded',
         );
       case 'not_a_term':
         return this.commitLong(
-          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: null }, { draft: this.state.draft, basis: this.state.basis }) as { long: LongState; error: string | null },
+          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: null }, { draft: this.state.draft, basis: this.state.basis }),
           'sem:longChoiceRecorded',
         );
       case 'replace': {
         if (!action.docTarget) return false;
         const d = this.state.draft;
         const replacement = d.direction === 'en' ? action.candidate.en : action.candidate.zh;
-        const out = spliceTargetSpan(d.target, action.docTarget, replacement) as { target?: string; error?: string };
+        const out = spliceTargetSpan(d.target, action.docTarget, replacement);
         if (out.error === 'span_mismatch') {
           this.commit({ semantic: x => x, notice: 'sem:longReplaceStale', remember: false });
           return false;
@@ -803,11 +803,11 @@ export class WorkbenchController {
       }
       case 'reconfirm':
         return this.commitLong(
-          state => reconfirmChoice(state, action.at) as { long: LongState; error: string | null },
+          state => reconfirmChoice(state, action.at),
           'sem:longChoiceRecorded',
         );
       case 'clear_choice':
-        return this.commitLong(state => removeChoice(state, action.at) as LongState);
+        return this.commitLong(state => removeChoice(state, action.at));
     }
   }
 
@@ -826,9 +826,11 @@ export class WorkbenchController {
   reviseSegmentText(index: number, expectedBase: string, nextText: string): { applied: boolean; error?: string } {
     const d = this.state.draft;
     const item = inputsOf(d).items[index];
-    const out = (item
-      ? reviseSegmentTarget(d.target, { start: item.range.target_start, end: item.range.target_end }, expectedBase, nextText)
-      : { error: 'core_mismatch' }) as { target?: string; error?: string };
+    if (!item) {
+      this.commit({ semantic: x => x, notice: 'sem:longReviseInvalid', remember: false });
+      return { applied: false, error: 'core_mismatch' };
+    }
+    const out = reviseSegmentTarget(d.target, { start: item.range.target_start, end: item.range.target_end }, expectedBase, nextText);
     if (out.target === undefined) {
       if (out.error !== 'noop') this.commit({ semantic: x => x, notice: 'sem:longReviseInvalid', remember: false });
       return { applied: false, error: out.error };
@@ -844,24 +846,24 @@ export class WorkbenchController {
     const currentlyFinished = this.state.semantic.long.progress.completed.includes(index);
     const target = finished ?? !currentlyFinished;
     if (target === currentlyFinished) return false;
-    return this.commitLong(state => setFinished(state, index, target) as LongState);
+    return this.commitLong(state => setFinished(state, index, target));
   }
 
   restoreTermHistoryEntry(position: number, targetSegmentIndex?: number): boolean {
-    const targetIndex = targetSegmentIndex ?? (restorableHistory(this.state.semantic.long, { draft: this.state.draft, basis: this.state.basis }) as (number | null)[])[position];
+    const targetIndex = targetSegmentIndex ?? restorableHistory(this.state.semantic.long, { draft: this.state.draft, basis: this.state.basis })[position];
     if (targetIndex === null || targetIndex === undefined) return false;
     return this.commitLong(
-      state => restoreHistoryEntry(state, position, targetIndex, { draft: this.state.draft, basis: this.state.basis }) as { long: LongState; error: string | null },
+      state => restoreHistoryEntry(state, position, targetIndex, { draft: this.state.draft, basis: this.state.basis }),
     );
   }
 
   removeTermHistoryEntry(position: number): boolean {
-    return this.commitLong(state => removeHistoryEntry(state, position) as LongState);
+    return this.commitLong(state => removeHistoryEntry(state, position));
   }
 
   selectLongSegment(index: number | null): void {
     this.commit({
-      semantic: state => ({ ...state, long: setCurrent(state.long, index) as LongState }),
+      semantic: state => ({ ...state, long: setCurrent(state.long, index) }),
       remember: false,
     });
   }
@@ -915,14 +917,14 @@ export class WorkbenchController {
     const latest = reports.at(-1) ?? null;
     const sourceCompatible = !!latest?.trusted && latest.source === draft.source && latest.direction === draft.direction;
     if (!sourceCompatible || !latest) return;
-    const span = recoverSpan(latest.source, finding.source_span, draft.source) as Span | null;
+    const span = recoverSpan(latest.source, finding.source_span, draft.source);
     if (!span) return;
     const selected = makeChoice({
       source: draft.source, direction: draft.direction, alignments: draft.alignments,
       report: latest.report, finding: { ...finding, source_span: span }, candidate,
-    }) as Choice;
+    });
     const existing = choices.findIndex(c => {
-      const recovered = recoverSpan(c.source, c.source_span, draft.source) as Span | null;
+      const recovered = recoverSpan(c.source, c.source_span, draft.source);
       return !!recovered && mentionId(recovered) === mentionId(span);
     });
     if (existing < 0 && choices.length >= MAX_CHOICES) {
@@ -974,7 +976,7 @@ export class WorkbenchController {
     const latest = reports.at(-1) ?? null;
     const sourceCompatible = !!latest?.trusted && latest.source === draft.source && latest.direction === draft.direction;
     if (!choice || !sourceCompatible || !latest || latest.report.truncated) return null;
-    const span = recoverSpan(choice.source, choice.source_span, draft.source) as Span | null;
+    const span = recoverSpan(choice.source, choice.source_span, draft.source);
     if (!span) return null;
     const finding = latest.report.findings.find(f => f.id === mentionId(span));
     if (!finding) return null;
@@ -1176,14 +1178,14 @@ export class WorkbenchController {
         throw cause;
       }
       const nextDraft: Draft = { source: value.source, target: value.target, direction: value.direction, alignments: value.alignments };
-      const nextChoices = value.choices as Choice[];
+      const nextChoices = value.choices;
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({
         ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '',
       }));
       const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3 || value.format === WORKFILE_FORMAT_V4;
       const nextSemantic: SemanticState = {
         ...(withSemantic ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState),
-        long: longFromWorkfile(value) as LongState,
+        long: longFromWorkfile(value),
       };
       if (this.disposed || this.importAttempt !== attempt) return { status: 'ignored' };
       if (this.docGeneration !== mine) {
@@ -1587,7 +1589,7 @@ export class WorkbenchController {
   private precedentItems(d: Draft, state: SemanticState) {
     const items: { span: Span; choice: string; rendering: string | null }[] = [];
     for (const c of this.state.choices) {
-      const span = recoverSpan(c.source, c.source_span, d.source) as Span | null;
+      const span = recoverSpan(c.source, c.source_span, d.source);
       if (!span) continue;
       items.push({
         span,
@@ -1697,9 +1699,7 @@ export class WorkbenchController {
     let withResolutions = recheckPlan(this.state.semantic.long, at, ctx) === 'with_resolutions';
     let sent = 0;
     for (;;) {
-      const request = segmentRequest(this.state.semantic.long, at, ctx, { withResolutions }) as {
-        index: number; body: Record<string, unknown>; alignmentInput: string; sentKey: string;
-      } | null;
+      const request = segmentRequest(this.state.semantic.long, at, ctx, { withResolutions });
       if (!request) { this.dispatchRun({ type: 'skip', key: item.key }); return; }
       if (new TextEncoder().encode(JSON.stringify(request.body)).length > REVIEW_REQUEST_LIMIT) {
         fail('bodyTooLarge');
@@ -1730,7 +1730,7 @@ export class WorkbenchController {
           { draft: this.state.draft, basis: before },
           request,
           body,
-        ) as { long: LongState; basis: SessionBasis; secondRequest: boolean; error: string | null };
+        );
         if (result.error === 'response_invalid') { fail('responseBasisMismatch'); return; }
         const nextSemantic = result.long !== this.state.semantic.long
           ? { ...this.state.semantic, long: result.long }
@@ -1845,7 +1845,7 @@ export class WorkbenchController {
   startTranslateRun(): void {
     const d = this.state.draft;
     if (!d.source.trim() || d.target.trim()) return;
-    const segments = segmentText(d.source) as { start: number; end: number; core_start: number; core_end: number }[];
+    const segments = segmentText(d.source);
     this.translateRun = { source: d.source, direction: d.direction, segments, pieces: [], base: '' };
     // One undo step for the whole generated translation: the blank target before it.
     this.commit({ draft: { ...d, target: '' }, remember: true, notice: null });

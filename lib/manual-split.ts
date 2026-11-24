@@ -1,31 +1,62 @@
 // Manual paragraph repair for pairs that need a manual split. Pure and
 // browser-safe; all coordinates are Unicode scalar indices (Array.from).
-import { WHITESPACE, paragraphRanges, sentenceRangesV2 } from './segmentation.js';
+import { WHITESPACE, paragraphRanges, sentenceRangesV2 } from './segmentation.ts';
 import { diffSplice } from './semantic-run.js';
+import type { Pair, Region, ScalarOffset } from './workbench-model.ts';
+import { scalarOffset } from './workbench-model.ts';
+
+export type SplitSentence = { start: ScalarOffset; end: ScalarOffset };
+export type SplitParagraph = {
+  start: ScalarOffset;
+  end: ScalarOffset;
+  coreStart: ScalarOffset;
+  coreEnd: ScalarOffset;
+  length: number;
+  sentences: SplitSentence[];
+};
+export type Splice = { start: ScalarOffset; oldEnd: ScalarOffset; newEnd: ScalarOffset };
+export type ManualEdit = { text: string; splice: Splice | null };
+export type PairShape = {
+  sourceParagraphs: number;
+  targetParagraphs: number;
+  sourceSentences: number;
+  targetSentences: number;
+  sourceLength: number;
+  targetLength: number;
+};
 
 const WS = new Set(WHITESPACE.map(c => String.fromCodePoint(c)));
 const CJK = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}|[　-〿＀-￯]/u;
 
-function trimmed(chars, start, end) {
+function trimmed(chars: readonly string[], start: number, end: number): [ScalarOffset, ScalarOffset] {
   let a = start; let b = end;
   while (a < b && WS.has(chars[a])) a++;
   while (b > a && WS.has(chars[b - 1])) b--;
-  return [a, b];
+  return [scalarOffset(a), scalarOffset(b)];
 }
 
 /**
  * Paragraphs inside a region of the text, with their core and sentences, using
  * segmentation's blank-line and sentence rules.
- * @returns {{start: number, end: number, coreStart: number, coreEnd: number, length: number, sentences: {start: number, end: number}[]}[]}
  */
-export function splitLayout(text, region) {
+export function splitLayout(text: string, region: Region): SplitParagraph[] {
   const chars = Array.from(text);
   const base = Math.max(0, region.start);
   const slice = chars.slice(base, Math.min(chars.length, region.end));
-  return paragraphRanges(slice).map(([a, b]) => {
+  return paragraphRanges(slice).map(([a, b]): SplitParagraph => {
     const [cs, ce] = trimmed(slice, a, b);
-    const sentences = sentenceRangesV2(slice.slice(cs, ce)).map(([x, y]) => ({ start: base + cs + x, end: base + cs + y }));
-    return { start: base + a, end: base + b, coreStart: base + cs, coreEnd: base + ce, length: ce - cs, sentences };
+    const sentences: SplitSentence[] = sentenceRangesV2(slice.slice(cs, ce)).map(([x, y]) => ({
+      start: scalarOffset(base + cs + x),
+      end: scalarOffset(base + cs + y),
+    }));
+    return {
+      start: scalarOffset(base + a),
+      end: scalarOffset(base + b),
+      coreStart: scalarOffset(base + cs),
+      coreEnd: scalarOffset(base + ce),
+      length: ce - cs,
+      sentences,
+    };
   });
 }
 
@@ -33,48 +64,48 @@ export function splitLayout(text, region) {
  * Insert a blank line at a scalar offset. Spaces and tabs next to the offset
  * are dropped; an existing line break there is reused. null when the offset is
  * invalid, nothing precedes or follows it, or a blank line is already there.
- * @returns {{text: string, splice: {start: number, oldEnd: number, newEnd: number}} | null}
  */
-export function insertParagraphBreak(text, offset) {
+export function insertParagraphBreak(text: string, offset: ScalarOffset): ManualEdit | null {
   const chars = Array.from(text);
   if (!Number.isInteger(offset) || offset < 0 || offset > chars.length) return null;
-  let runStart = offset; let runEnd = offset;
+  let runStart: number = offset; let runEnd: number = offset;
   while (runStart > 0 && WS.has(chars[runStart - 1])) runStart--;
   while (runEnd < chars.length && WS.has(chars[runEnd])) runEnd++;
   if (runStart === 0 || runEnd === chars.length) return null;
   const newlines = chars.slice(runStart, runEnd).filter(c => c === '\n').length;
   if (newlines >= 2) return null;
-  let left = offset; let right = offset;
+  let left: number = offset; let right: number = offset;
   while (left > 0 && (chars[left - 1] === ' ' || chars[left - 1] === '\t')) left--;
   while (right < chars.length && (chars[right] === ' ' || chars[right] === '\t')) right++;
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const next = chars.slice(0, left).join('') + eol.repeat(2 - newlines) + chars.slice(right).join('');
-  return { text: next, splice: diffSplice(text, next) };
+  return { text: next, splice: diffSplice(text, next) as Splice | null };
 }
 
 /**
  * Replace the pure-whitespace gap [gapStart, gapEnd), which must contain a blank
  * line, with one space, or nothing next to CJK text.
- * @returns {{text: string, splice: {start: number, oldEnd: number, newEnd: number}} | null}
  */
-export function mergeParagraphs(text, gapStart, gapEnd) {
+export function mergeParagraphs(text: string, gapStart: ScalarOffset, gapEnd: ScalarOffset): ManualEdit | null {
   const chars = Array.from(text);
   if (!Number.isInteger(gapStart) || !Number.isInteger(gapEnd) || gapStart <= 0 || gapStart >= gapEnd || gapEnd >= chars.length) return null;
   const gap = chars.slice(gapStart, gapEnd);
   if (!gap.every(c => WS.has(c)) || gap.filter(c => c === '\n').length < 2) return null;
   const joiner = CJK.test(chars[gapStart - 1]) || CJK.test(chars[gapEnd]) ? '' : ' ';
   const next = chars.slice(0, gapStart).join('') + joiner + chars.slice(gapEnd).join('');
-  return { text: next, splice: diffSplice(text, next) };
+  return { text: next, splice: diffSplice(text, next) as Splice | null };
 }
 
 /** Counts for the manual-split hint of one pair. */
-export function pairShape(source, target, pair) {
+export function pairShape(source: string, target: string, pair: Pair): PairShape {
   const s = splitLayout(source, pair.source);
   const t = splitLayout(target, pair.target);
-  const sentences = list => list.reduce((n, p) => n + p.sentences.length, 0);
+  const sentences = (list: readonly SplitParagraph[]): number => list.reduce((n, p) => n + p.sentences.length, 0);
   return {
-    sourceParagraphs: s.length, targetParagraphs: t.length,
-    sourceSentences: sentences(s), targetSentences: sentences(t),
+    sourceParagraphs: s.length,
+    targetParagraphs: t.length,
+    sourceSentences: sentences(s),
+    targetSentences: sentences(t),
     sourceLength: pair.source.core_end - pair.source.core_start,
     targetLength: pair.target.core_end - pair.target.core_start,
   };
@@ -85,16 +116,13 @@ export function pairShape(source, target, pair) {
  * blank line, so each line is its own paragraph. An explicit, user-triggered
  * formatting edit for texts that separate paragraphs by single line breaks; it
  * changes no words and pairs nothing by itself.
- * @param {string} text
- * @param {{start: number, end: number} | null} [region]
- * @returns {{text: string, count: number} | null} null when there is nothing to change
  */
-export function linesToParagraphs(text, region = null) {
+export function linesToParagraphs(text: string, region: Region | null = null): { text: string; count: number } | null {
   const chars = Array.from(text);
   const from = region ? Math.max(0, region.start) : 0;
   const to = region ? Math.min(chars.length, region.end) : chars.length;
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const out = [];
+  const out: string[] = [];
   let count = 0;
   for (let i = 0; i < chars.length; i++) {
     const c = chars[i];
@@ -113,9 +141,7 @@ export function linesToParagraphs(text, region = null) {
 
 /**
  * Single line breaks inside `region` that linesToParagraphs would turn into blank lines.
- * @param {string} text
- * @param {{start: number, end: number} | null} [region]
  */
-export function singleBreaks(text, region = null) {
+export function singleBreaks(text: string, region: Region | null = null): number {
   return linesToParagraphs(text, region)?.count ?? 0;
 }

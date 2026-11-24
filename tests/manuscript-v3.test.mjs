@@ -5,7 +5,7 @@ import test from 'node:test';
 // The v3 reference reader falls back to the frozen Web 0.3.1 reader (the last v3-only one) for every other format: lib/manuscript.js now also reads v4.
 import { WORKFILE_FORMAT_V2, parseWorkfile, validAlignments } from './legacy/web-0.3.1/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
-import { pairSegments } from '../lib/segmentation.js';
+import { pairSegments } from '../lib/segmentation.ts';
 import { parseWorkfile as parseWorkfileWeb020 } from './legacy/web-0.2.0/manuscript.js';
 import {
   MAX_V3_BYTES, MODEL_NAMES, REVIEW_MAX_JSON_BYTES, V3_FORMAT, alignmentInput, alignmentList, budgetManuscript, buildFixtures, canonicalV3, padContent,

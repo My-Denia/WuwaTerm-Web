@@ -9,7 +9,7 @@ import {
 import { parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';
 import { makeSemanticDecision } from '../lib/semantic-decisions.js';
-import { pairSegments } from '../lib/segmentation.js';
+import { pairSegments } from '../lib/segmentation.ts';
 import { excerptOf, validPrecedent } from '../lib/semantic-review.js';
 
 const sp = (text, needle, from = 0) => {

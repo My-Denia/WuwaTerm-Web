@@ -11,7 +11,7 @@ import {
   guardPairForRequest,
   pairSegments,
   segmentText,
-} from '../../lib/segmentation.js';
+} from '../../lib/segmentation.ts';
 import { requireBackendCheckout } from './backend-source.mjs';
 
 const root = requireBackendCheckout();

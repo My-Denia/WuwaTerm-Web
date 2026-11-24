@@ -20,7 +20,7 @@ import { semanticMsg } from '../../lib/semantic-messages';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
-import type { Candidate, Choice, Draft, Finding, Snapshot, Span } from '../../lib/workbench-model';
+import type { Candidate, Choice, Draft, Finding, Snapshot, Span, Utf16Offset } from '../../lib/workbench-model';
 import { useUiLanguage } from './ui-language-context';
 import { SemanticWorkbench } from './semantic-workbench';
 
@@ -330,7 +330,7 @@ export function ReviewWorkbench() {
     const end = scalarToUtf16(text, span.end);
     if (!located || start === null || end === null) return;
     box.focus({ preventScroll: true });
-    const domOffset = (offset: number) => text.slice(0, offset).replace(/\r\n?/g, '\n').length;
+    const domOffset = (offset: Utf16Offset) => text.slice(0, offset).replace(/\r\n?/g, '\n').length;
     box.setSelectionRange(domOffset(start), domOffset(end));
     box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }

@@ -7,36 +7,157 @@
 import { REASON_VALUES, mentionId } from './manuscript.js';
 import { scalarToUtf16 } from './review-report.js';
 import { diffSplice, mapRegion, shiftSpan } from './semantic-run.js';
-import { SEGMENT_LIMIT, SEGMENTATION_VERSION, guardPairForRequest, pairSegments } from './segmentation.js';
+import { SEGMENT_LIMIT, SEGMENTATION_VERSION, guardPairForRequest, pairSegments } from './segmentation.ts';
 import { sha256Hex } from './sha256.js';
+import type {
+  Alignment, Basis, ChoiceKind, ChoiceView, Direction, Draft, Pair, ReasonValue, RecordStatus,
+  RecordView, Report, Resolution, ScalarOffset, SegmentIndex, SegmentInput, SegmentRange,
+  SessionBasis, Span, Verdict,
+} from './workbench-model.ts';
+import { scalarOffset, segmentIndex } from './workbench-model.ts';
+
+export type { Basis, Direction } from './workbench-model.ts';
+
+export type Candidate = {
+  candidate_id: string;
+  zh: string;
+  en: string;
+  category: string;
+};
+
+export type CompactFinding = {
+  verdict: Verdict;
+  source: [ScalarOffset, ScalarOffset];
+  target: [ScalarOffset, ScalarOffset] | null;
+  candidates: Candidate[];
+  candidates_truncated: boolean;
+  /** `reason` (one of REASON_VALUES) only on `not_evaluated`, and last: such a result is a v4 segment record. */
+  reason?: ReasonValue;
+};
+
+export type CompactResult = {
+  truncated: boolean;
+  evaluated: number;
+  not_evaluated: number;
+  findings: CompactFinding[];
+};
+
+export type Choice = {
+  source_span: Span;
+  choice: ChoiceKind;
+  candidate: Candidate | null;
+  offered: string[];
+  confirmed: boolean;
+};
+
+export type SegmentChoice = Choice;
+
+export type HistoryEntry = {
+  source_hash: string;
+  source_span: Span;
+  choice: ChoiceKind;
+  candidate: Candidate | null;
+  offered: string[];
+};
+
+export type Prior = {
+  source_hash: string;
+  direction: Direction;
+  basis: Basis;
+};
 
 /**
- * @typedef {'en' | 'zh'} Direction
- * @typedef {{start: number, end: number, text: string}} Span
- * @typedef {{source: Span, target: Span | null}} Alignment
- * @typedef {{source: string, target: string, direction: Direction, alignments: Alignment[] | null}} Draft
- * @typedef {{candidate_id: string, zh: string, en: string, category: string}} Candidate
- * @typedef {{rule_version: string, dictionary: {schema_version: string, source_commit: string, term_count: number, revision: string}, matcher_revision: string}} Basis
- * @typedef {{verdict: string, source: number[], target: number[] | null, candidates: Candidate[], candidates_truncated: boolean, reason?: string}} CompactFinding
- *   `reason` (one of REASON_VALUES) only on `not_evaluated`, and last: such a result is a v4 segment record.
- * @typedef {{truncated: boolean, evaluated: number, not_evaluated: number, findings: CompactFinding[]}} CompactResult
- * @typedef {{source_span: Span, choice: 'official_pair' | 'not_a_term', candidate: Candidate | null, offered: string[], confirmed: boolean}} Choice
- * @typedef {{source_hash: string, source_span: Span, choice: 'official_pair' | 'not_a_term', candidate: Candidate | null, offered: string[]}} HistoryEntry
- * @typedef {{source_hash: string, direction: Direction, basis: Basis}} Prior
- * @typedef {{
- *   index: number, segmentation_version: string, source_start: number, source_end: number, target_start: number, target_end: number,
- *   source_hash: string, target_hash: string, status: 'pending' | 'done' | 'stale', direction: Direction | null,
- *   alignment_input: string | null, basis: Basis | null, result: CompactResult | null, choices: Choice[],
- *   report: object | null, sent: string | null, prior: Prior | null,
- * }} RuntimeRecord
- *   The SPEC segment record plus: `report`, the full review-v2 response obtained in this session (null when restored);
- *   `sent`, the key of the resolutions sent with the request that produced `result` (null: unknown, so never current);
- *   `prior`, kept after an in-session target-only edit so the re-check is one request with resolutions.
- * @typedef {{records: RuntimeRecord[], history: HistoryEntry[], progress: {current: number | null, completed: number[]}}} LongState
- * @typedef {{draft: Draft, basis: Basis | null | false}} Context
- *   `basis` is the session basis: null before the first live response, false when live responses carry no v3 basis.
- * @typedef {{index: number, body: Record<string, unknown>, alignmentInput: string, sentKey: string, withResolutions?: boolean}} SegmentRequest
+ * The SPEC segment record plus:
+ * - `report`, the full review-v2 response obtained in this session (null when restored);
+ * - `sent`, the key of the resolutions sent with the request that produced `result` (null: unknown, so never current);
+ * - `prior`, kept after an in-session target-only edit so the re-check is one request with resolutions.
  */
+export type RuntimeRecord = {
+  index: SegmentIndex;
+  segmentation_version: typeof SEGMENTATION_VERSION | string;
+  source_start: ScalarOffset;
+  source_end: ScalarOffset;
+  target_start: ScalarOffset;
+  target_end: ScalarOffset;
+  source_hash: string;
+  target_hash: string;
+  status: RecordStatus;
+  direction: Direction | null;
+  alignment_input: string | null;
+  basis: Basis | null;
+  result: CompactResult | null;
+  choices: Choice[];
+  report: ExpandedReport | null;
+  sent: string | null;
+  prior: Prior | null;
+};
+
+export type LongState = {
+  records: RuntimeRecord[];
+  history: HistoryEntry[];
+  progress: { current: SegmentIndex | null; completed: SegmentIndex[] };
+};
+
+/**
+ * `basis` is the session basis: null before the first live response, false when live responses carry no v3 basis.
+ */
+export type Context = {
+  draft: Draft;
+  basis: SessionBasis;
+};
+
+export type SegmentRequest = {
+  index: SegmentIndex;
+  body: Record<string, unknown>;
+  alignmentInput: string;
+  sentKey: string;
+  withResolutions?: boolean;
+};
+
+export type ExpandedFinding = {
+  id: string;
+  verdict: Verdict;
+  rule_id: string;
+  source_span: Span;
+  target_span: Span | null;
+  candidates: (Candidate & { sources: unknown[] })[];
+  candidates_truncated: boolean;
+  reason?: ReasonValue;
+};
+
+export type ExpandedReport = {
+  request_id: string | null;
+  source_revision: string;
+  target_revision: string;
+  rule_version: string;
+  matcher_revision?: string;
+  dictionary: Basis['dictionary'];
+  coverage: { evaluated: number; not_evaluated: number; rules: string[] };
+  findings: ExpandedFinding[];
+  truncated: boolean;
+};
+
+export type ExportFinding = {
+  verdict: Verdict;
+  source_span: Span;
+  target_span: Span | null;
+  candidates: { zh: string; en: string }[];
+  candidates_truncated: boolean;
+  reason?: ReasonValue;
+};
+
+export type ExportSegmentRow = {
+  index: SegmentIndex;
+  state: 'pending' | 'saved' | 'current' | 'stale';
+  stale: boolean;
+  truncated: boolean;
+  source_start: ScalarOffset;
+  source_end: ScalarOffset;
+  target_start: ScalarOffset;
+  target_end: ScalarOffset;
+  report: ExpandedReport | Report;
+  findings: ExportFinding[];
+};
 
 export const LONG_LIMIT = 2000;
 // v4 raised both caps from 32 (manuscript v3) to 128; a result or a record over 32 is written as v4 (lib/manuscript.js writeWorkfile).
@@ -47,69 +168,103 @@ const TERM_PAIR = 'review.term_pair';
 const HEX = /^[a-f0-9]{64}$/u;
 const EMPTY_KEY = '[]';
 
-const scalars = text => Array.from(text);
-const sliceOf = (chars, start, end) => chars.slice(start, end).join('');
-const hex = x => typeof x === 'string' && HEX.test(x);
-const longText = text => text.length > LONG_LIMIT && (text.length > 2 * LONG_LIMIT || scalars(text).length > LONG_LIMIT);
-const replaceAt = (list, i, value) => list.map((x, j) => (j === i ? value : x));
-const sameSpan = (a, b) => a.start === b.start && a.end === b.end;
+const scalars = (text: string): string[] => Array.from(text);
+const sliceOf = (chars: readonly string[], start: number, end: number): string => chars.slice(start, end).join('');
+const hex = (x: unknown): x is string => typeof x === 'string' && HEX.test(x);
+const longText = (text: string): boolean => text.length > LONG_LIMIT && (text.length > 2 * LONG_LIMIT || scalars(text).length > LONG_LIMIT);
+const replaceAt = <T>(list: readonly T[], i: number, value: T): T[] => list.map((x, j) => (j === i ? value : x));
+const sameSpan = (a: { start: number; end: number }, b: { start: number; end: number }): boolean => a.start === b.start && a.end === b.end;
 
 // ---- key order (SPEC "Segment record", "Segment choice history") ----
 
-const orderSpan = s => ({ start: s.start, end: s.end, text: s.text });
-const orderCandidate = c => (c === null ? null : { candidate_id: c.candidate_id, zh: c.zh, en: c.en, category: c.category });
-const orderBasis = b => ({
+const orderSpan = (s: Span): Span => ({ start: s.start, end: s.end, text: s.text });
+const orderCandidate = (c: Candidate | null): Candidate | null =>
+  (c === null ? null : { candidate_id: c.candidate_id, zh: c.zh, en: c.en, category: c.category });
+const orderCandidateStrict = (c: Candidate): Candidate => ({
+  candidate_id: c.candidate_id,
+  zh: c.zh,
+  en: c.en,
+  category: c.category,
+});
+const orderBasis = (b: Basis): Basis => ({
   rule_version: b.rule_version,
-  dictionary: { schema_version: b.dictionary.schema_version, source_commit: b.dictionary.source_commit, term_count: b.dictionary.term_count, revision: b.dictionary.revision },
+  dictionary: {
+    schema_version: b.dictionary.schema_version,
+    source_commit: b.dictionary.source_commit,
+    term_count: b.dictionary.term_count,
+    revision: b.dictionary.revision,
+  },
   matcher_revision: b.matcher_revision,
 });
-const orderChoice = c => ({ source_span: orderSpan(c.source_span), choice: c.choice, candidate: orderCandidate(c.candidate), offered: [...c.offered], confirmed: c.confirmed });
-const historyEntry = (c, sourceHash) => ({
-  source_hash: sourceHash, source_span: orderSpan(c.source_span), choice: c.choice, candidate: orderCandidate(c.candidate), offered: [...c.offered],
+const orderChoice = (c: Choice): Choice => ({
+  source_span: orderSpan(c.source_span),
+  choice: c.choice,
+  candidate: orderCandidate(c.candidate),
+  offered: [...c.offered],
+  confirmed: c.confirmed,
 });
-const orderFinding = f => ({
-  verdict: f.verdict, source: [...f.source], target: f.target === null ? null : [...f.target], candidates: f.candidates.map(orderCandidate),
+const historyEntry = (c: Pick<Choice, 'source_span' | 'choice' | 'candidate' | 'offered'>, sourceHash: string): HistoryEntry => ({
+  source_hash: sourceHash,
+  source_span: orderSpan(c.source_span),
+  choice: c.choice,
+  candidate: orderCandidate(c.candidate),
+  offered: [...c.offered],
+});
+const orderFinding = (f: CompactFinding): CompactFinding => ({
+  verdict: f.verdict,
+  source: [...f.source] as [ScalarOffset, ScalarOffset],
+  target: f.target === null ? null : ([...f.target] as [ScalarOffset, ScalarOffset]),
+  candidates: f.candidates.map(orderCandidateStrict),
   candidates_truncated: f.candidates_truncated,
-  ...(Object.hasOwn(f, 'reason') ? { reason: f.reason } : {}),
+  ...(Object.hasOwn(f, 'reason') && f.reason !== undefined ? { reason: f.reason } : {}),
 });
 // `reason` is valid only on not_evaluated and only with a known value (REASON_VALUES); a finding without one has none.
-const reasonHolds = f => !Object.hasOwn(f, 'reason') || (f.verdict === 'not_evaluated' && REASON_VALUES.includes(f.reason));
-const orderResult = r => ({ truncated: r.truncated, evaluated: r.evaluated, not_evaluated: r.not_evaluated, findings: r.findings.map(orderFinding) });
+const reasonHolds = (f: { verdict: string; reason?: unknown }): boolean =>
+  !Object.hasOwn(f, 'reason') || (f.verdict === 'not_evaluated' && typeof f.reason === 'string' && (REASON_VALUES as readonly string[]).includes(f.reason));
+const orderResult = (r: CompactResult): CompactResult => ({
+  truncated: r.truncated,
+  evaluated: r.evaluated,
+  not_evaluated: r.not_evaluated,
+  findings: r.findings.map(orderFinding),
+});
 
 // ---- pairing, hashes and request inputs ----
 
-/** Long mode: either side has more than 2,000 scalars. @param {Draft} draft */
-export function isLong(draft) {
+/** Long mode: either side has more than 2,000 scalars. */
+export function isLong(draft: Pick<Draft, 'source' | 'target'>): boolean {
   return longText(draft.source) || longText(draft.target);
 }
 
 /**
  * The one pairing of records, requests and the writer (the workbench's safePairs): blank texts and a pairing that throws give [];
- * guardPairForRequest only downgrades a ready pair that could not be sent. @param {Draft} draft
+ * guardPairForRequest only downgrades a ready pair that could not be sent.
  */
-export function corePairs({ source, target, alignments }) {
+export function corePairs({ source, target, alignments }: Pick<Draft, 'source' | 'target' | 'alignments'>): Pair[] {
   if (!source.trim() && !target.trim()) return [];
   try {
-    const explicit = /** @type {any} */ (alignments && alignments.length ? alignments : null);
+    const explicit = alignments && alignments.length ? alignments : null;
     return pairSegments(source, target, SEGMENT_LIMIT, explicit).map(p => guardPairForRequest(p));
   } catch { return []; }
 }
 
 const HASH_CACHE_LIMIT = 4096;
-const hashCache = new Map();
+const hashCache = new Map<string, string>();
 
-/** Content hash of a core (SPEC "Terms"), cached by text with a bounded least-recently-used cache. @param {string} core */
-export function contentHash(core) {
+/** Content hash of a core (SPEC "Terms"), cached by text with a bounded least-recently-used cache. */
+export function contentHash(core: string): string {
   let hash = hashCache.get(core);
   if (hash === undefined) {
-    hash = sha256Hex(core);
-    if (hashCache.size >= HASH_CACHE_LIMIT) hashCache.delete(hashCache.keys().next().value);
+    hash = sha256Hex(core) as string;
+    if (hashCache.size >= HASH_CACHE_LIMIT) {
+      const oldest = hashCache.keys().next().value;
+      if (oldest !== undefined) hashCache.delete(oldest);
+    }
   } else hashCache.delete(core);
   hashCache.set(core, hash);
   return hash;
 }
 
-const clip = (span, from, to) => {
+const clip = (span: Span, from: number, to: number): { start: number; end: number } | null => {
   const start = Math.max(span.start, from);
   const end = Math.min(span.end, to);
   return start < end ? { start, end } : null;
@@ -119,27 +274,36 @@ const clip = (span, from, to) => {
  * The `alignments` list a segment request sends (SPEC "Segment request"), or null when the manuscript's alignments is null. Each
  * alignment is clipped to the cores and rebased; its text is the core slice; one whose source or non-null target misses its core is
  * left out. Keys in the order source, target and start, end, text.
- * @param {Alignment[] | null} alignments
- * @param {string | string[]} source the whole source, as a string or scalar array
- * @param {string | string[]} target
- * @param {{source_start: number, source_end: number, target_start: number, target_end: number}} range the core range
  */
-export function alignmentList(alignments, source, target, range) {
+export function alignmentList(
+  alignments: readonly Alignment[] | null,
+  source: string | readonly string[],
+  target: string | readonly string[],
+  range: SegmentRange,
+): Alignment[] | null {
   if (alignments === null) return null;
   const s = typeof source === 'string' ? scalars(source) : source;
   const t = typeof target === 'string' ? scalars(target) : target;
-  const list = [];
+  const list: Alignment[] = [];
   for (const item of alignments) {
     const sourceRange = clip(item.source, range.source_start, range.source_end);
     if (sourceRange === null) continue;
-    let targetSide = null;
+    let targetSide: Span | null = null;
     if (item.target !== null) {
       const targetRange = clip(item.target, range.target_start, range.target_end);
       if (targetRange === null) continue;
-      targetSide = { start: targetRange.start - range.target_start, end: targetRange.end - range.target_start, text: sliceOf(t, targetRange.start, targetRange.end) };
+      targetSide = {
+        start: scalarOffset(targetRange.start - range.target_start),
+        end: scalarOffset(targetRange.end - range.target_start),
+        text: sliceOf(t, targetRange.start, targetRange.end),
+      };
     }
     list.push({
-      source: { start: sourceRange.start - range.source_start, end: sourceRange.end - range.source_start, text: sliceOf(s, sourceRange.start, sourceRange.end) },
+      source: {
+        start: scalarOffset(sourceRange.start - range.source_start),
+        end: scalarOffset(sourceRange.end - range.source_start),
+        text: sliceOf(s, sourceRange.start, sourceRange.end),
+      },
       target: targetSide,
     });
   }
@@ -147,32 +311,47 @@ export function alignmentList(alignments, source, target, range) {
 }
 
 /** `"automatic"` for null alignments, else the SHA-256 of the list's minified JSON (`[]` included). Same arguments as alignmentList. */
-export function alignmentInput(alignments, source, target, range) {
+export function alignmentInput(
+  alignments: readonly Alignment[] | null,
+  source: string | readonly string[],
+  target: string | readonly string[],
+  range: SegmentRange,
+): string {
   const list = alignmentList(alignments, source, target, range);
   return list === null ? 'automatic' : sha256Hex(JSON.stringify(list));
 }
 
-const inputCache = new WeakMap();
+const inputCache = new WeakMap<Draft, { long: boolean; items: SegmentInput[] }>();
 
 /**
  * Per-pair inputs of a draft, cached per draft object (drafts are treated as immutable): `long`, and for each pair of corePairs
  * `{pair, range, sourceCore, targetCore, sourceHash, targetHash, alignments, alignmentInput}`, where `alignments` is the list a
  * request sends now (null: omitted) and `range` the core range in record field names.
- * @param {Draft} draft
  */
-export function segmentInputs(draft) {
+export function segmentInputs(draft: Draft): { long: boolean; items: SegmentInput[] } {
   const cached = inputCache.get(draft);
   if (cached) return cached;
   const s = scalars(draft.source);
   const t = scalars(draft.target);
-  const items = corePairs(draft).map(pair => {
-    const range = { source_start: pair.source.core_start, source_end: pair.source.core_end, target_start: pair.target.core_start, target_end: pair.target.core_end };
+  const items: SegmentInput[] = corePairs(draft).map(pair => {
+    const range: SegmentRange = {
+      source_start: pair.source.core_start,
+      source_end: pair.source.core_end,
+      target_start: pair.target.core_start,
+      target_end: pair.target.core_end,
+    };
     const sourceCore = sliceOf(s, range.source_start, range.source_end);
     const targetCore = sliceOf(t, range.target_start, range.target_end);
     const alignments = alignmentList(draft.alignments, s, t, range);
     return {
-      pair, range, sourceCore, targetCore, sourceHash: contentHash(sourceCore), targetHash: contentHash(targetCore),
-      alignments, alignmentInput: alignments === null ? 'automatic' : contentHash(JSON.stringify(alignments)),
+      pair,
+      range,
+      sourceCore,
+      targetCore,
+      sourceHash: contentHash(sourceCore),
+      targetHash: contentHash(targetCore),
+      alignments,
+      alignmentInput: alignments === null ? 'automatic' : contentHash(JSON.stringify(alignments)),
     };
   });
   const value = { long: isLong(draft), items };
@@ -182,25 +361,38 @@ export function segmentInputs(draft) {
 
 // ---- basis and results ----
 
-const boundedText = (x, max) => typeof x === 'string' && x.length > 0 && scalars(x).length <= max;
-const isBasis = b => !!b && typeof b === 'object' && b.rule_version === 'review-v2' && !!b.dictionary
-  && boundedText(b.dictionary.schema_version, 4096) && boundedText(b.dictionary.source_commit, 4096)
-  && Number.isSafeInteger(b.dictionary.term_count) && b.dictionary.term_count >= 0 && hex(b.dictionary.revision) && hex(b.matcher_revision);
+const boundedText = (x: unknown, max: number): x is string => typeof x === 'string' && x.length > 0 && scalars(x).length <= max;
+const isBasis = (b: unknown): b is Basis => {
+  if (!b || typeof b !== 'object') return false;
+  const candidate = b as Partial<Basis>;
+  const d = candidate.dictionary;
+  return candidate.rule_version === 'review-v2'
+    && !!d
+    && typeof d === 'object'
+    && boundedText(d.schema_version, 4096)
+    && boundedText(d.source_commit, 4096)
+    && Number.isSafeInteger(d.term_count)
+    && (d.term_count as number) >= 0
+    && hex(d.revision)
+    && hex(candidate.matcher_revision);
+};
 
 /** The v3 basis of a review-v2 response, or null when any of the six values is missing, null or invalid (fails closed). */
-export function basisOfReport(report) {
-  if (!report || typeof report !== 'object' || !report.dictionary || typeof report.dictionary !== 'object') return null;
-  const d = report.dictionary;
+export function basisOfReport(report: unknown): Basis | null {
+  if (!report || typeof report !== 'object') return null;
+  const rep = report as Record<string, unknown>;
+  if (!rep.dictionary || typeof rep.dictionary !== 'object') return null;
+  const d = rep.dictionary as Record<string, unknown>;
   const basis = {
-    rule_version: report.rule_version,
+    rule_version: rep.rule_version,
     dictionary: { schema_version: d.schema_version, source_commit: d.source_commit, term_count: d.term_count, revision: d.revision },
-    matcher_revision: report.matcher_revision,
+    matcher_revision: rep.matcher_revision,
   };
   return isBasis(basis) ? basis : null;
 }
 
 /** Strict v3 basis equality: both valid and all six values equal (unlike lib/manuscript.js sameBasis). */
-export function sameV3Basis(a, b) {
+export function sameV3Basis(a: unknown, b: unknown): boolean {
   return isBasis(a) && isBasis(b) && a.rule_version === b.rule_version && a.matcher_revision === b.matcher_revision
     && a.dictionary.schema_version === b.dictionary.schema_version && a.dictionary.source_commit === b.dictionary.source_commit
     && a.dictionary.term_count === b.dictionary.term_count && a.dictionary.revision === b.dictionary.revision;
@@ -211,23 +403,26 @@ export function sameV3Basis(a, b) {
  * finding whose rule_id is not review.term_pair, coverage rules other than the review-v2 constant, more than 128 findings or 8
  * candidates, repeated candidate ids, two findings with one source span, or a `reason` on a finding that is not not_evaluated or is
  * not one of REASON_VALUES. A `reason` is kept, last.
- * @returns {CompactResult | null}
  */
-export function compactResult(report) {
+export function compactResult(report: Report | null | undefined): CompactResult | null {
   const coverage = report?.coverage;
   if (!report || typeof report.truncated !== 'boolean' || !Array.isArray(report.findings) || report.findings.length > MAX_SEGMENT_FINDINGS || !coverage
     || !Number.isSafeInteger(coverage.evaluated) || coverage.evaluated < 0 || !Number.isSafeInteger(coverage.not_evaluated) || coverage.not_evaluated < 0
     || JSON.stringify(coverage.rules) !== JSON.stringify(RULES)) return null;
-  const sources = new Set();
-  const findings = [];
+  const sources = new Set<string>();
+  const findings: CompactFinding[] = [];
   for (const f of report.findings) {
     const key = `${f.source_span.start}:${f.source_span.end}`;
     if (f.rule_id !== TERM_PAIR || f.candidates.length > 8 || sources.has(key) || !f.candidates.every(c => hex(c.candidate_id))
       || new Set(f.candidates.map(c => c.candidate_id)).size !== f.candidates.length || !reasonHolds(f)) return null;
     sources.add(key);
     findings.push(orderFinding({
-      verdict: f.verdict, source: [f.source_span.start, f.source_span.end], target: f.target_span ? [f.target_span.start, f.target_span.end] : null,
-      candidates: f.candidates, candidates_truncated: f.candidates_truncated, ...(Object.hasOwn(f, 'reason') ? { reason: f.reason } : {}),
+      verdict: f.verdict,
+      source: [f.source_span.start, f.source_span.end],
+      target: f.target_span ? [f.target_span.start, f.target_span.end] : null,
+      candidates: f.candidates,
+      candidates_truncated: f.candidates_truncated,
+      ...(Object.hasOwn(f, 'reason') && f.reason !== undefined ? { reason: f.reason } : {}),
     }));
   }
   return { truncated: report.truncated, evaluated: coverage.evaluated, not_evaluated: coverage.not_evaluated, findings };
@@ -237,26 +432,36 @@ export function compactResult(report) {
  * The review-v2 report rebuilt from a record with a result (SPEC "Compact term result"): request_id null, candidates with
  * `sources: []`, revisions from the hashes, basis fields, the review-v2 coverage rules, finding ids, rule_id and span texts derived
  * from the cores. Key order as the Web BFF returns a live response.
- * @param {RuntimeRecord} record
- * @param {string} sourceCore
- * @param {string} targetCore
  */
-export function expandResult(record, sourceCore, targetCore) {
+export function expandResult(record: RuntimeRecord, sourceCore: string, targetCore: string): ExpandedReport {
   const s = scalars(sourceCore);
   const t = scalars(targetCore);
-  const span = (chars, pair) => ({ start: pair[0], end: pair[1], text: sliceOf(chars, pair[0], pair[1]) });
-  const { basis, result } = /** @type {{basis: Basis, result: CompactResult}} */ (record);
+  const span = (chars: readonly string[], pair: [ScalarOffset, ScalarOffset]): Span => ({
+    start: pair[0],
+    end: pair[1],
+    text: sliceOf(chars, pair[0], pair[1]),
+  });
+  const basis = record.basis as Basis;
+  const result = record.result as CompactResult;
   return {
-    request_id: null, source_revision: record.source_hash, target_revision: record.target_hash, rule_version: basis.rule_version,
-    matcher_revision: basis.matcher_revision, dictionary: orderBasis(basis).dictionary,
+    request_id: null,
+    source_revision: record.source_hash,
+    target_revision: record.target_hash,
+    rule_version: basis.rule_version,
+    matcher_revision: basis.matcher_revision,
+    dictionary: orderBasis(basis).dictionary,
     coverage: { evaluated: result.evaluated, not_evaluated: result.not_evaluated, rules: [...RULES] },
     findings: result.findings.map(f => {
       const sourceSpan = span(s, f.source);
       return {
-        id: mentionId(sourceSpan), verdict: f.verdict, rule_id: TERM_PAIR, source_span: sourceSpan, target_span: f.target === null ? null : span(t, f.target),
+        id: mentionId(sourceSpan),
+        verdict: f.verdict,
+        rule_id: TERM_PAIR,
+        source_span: sourceSpan,
+        target_span: f.target === null ? null : span(t, f.target),
         candidates: f.candidates.map(c => ({ zh: c.zh, en: c.en, category: c.category, candidate_id: c.candidate_id, sources: [] })),
         candidates_truncated: f.candidates_truncated,
-        ...(Object.hasOwn(f, 'reason') ? { reason: f.reason } : {}),
+        ...(Object.hasOwn(f, 'reason') && f.reason !== undefined ? { reason: f.reason } : {}),
       };
     }),
     truncated: result.truncated,
@@ -265,13 +470,15 @@ export function expandResult(record, sourceCore, targetCore) {
 
 // ---- choices ----
 
-const sameCandidate = (a, b) => !!a && !!b && a.candidate_id === b.candidate_id && a.zh === b.zh && a.en === b.en && a.category === b.category;
-const findingAt = (result, span) => result?.findings.find(f => f.source[0] === span.start && f.source[1] === span.end) ?? null;
-const offeredOf = finding => finding.candidates.map(c => c.candidate_id).sort();
-const unconfirm = c => ({ ...c, confirmed: false });
+const sameCandidate = (a: Candidate | null | undefined, b: Candidate | null | undefined): boolean =>
+  !!a && !!b && a.candidate_id === b.candidate_id && a.zh === b.zh && a.en === b.en && a.category === b.category;
+const findingAt = (result: CompactResult | null, span: { start: number; end: number }): CompactFinding | null =>
+  result?.findings.find(f => f.source[0] === span.start && f.source[1] === span.end) ?? null;
+const offeredOf = (finding: CompactFinding): string[] => finding.candidates.map(c => c.candidate_id).sort();
+const unconfirm = (c: Choice): Choice => ({ ...c, confirmed: false });
 
 /** SPEC Runtime step 7: an official_pair needs the identical candidate at its span, a not_a_term the same candidate ids as a set. */
-function holds(choice, result) {
+function holds(choice: Choice, result: CompactResult | null): boolean {
   const finding = findingAt(result, choice.source_span);
   if (!finding) return false;
   if (choice.choice === 'official_pair') return finding.candidates.some(c => sameCandidate(c, choice.candidate));
@@ -280,33 +487,45 @@ function holds(choice, result) {
   return ids.length === offered.length && ids.every((id, i) => id === offered[i]);
 }
 
-const resolutionOf = c => (c.choice === 'official_pair'
+const resolutionOf = (c: Choice): Resolution => (c.choice === 'official_pair' && c.candidate !== null
   ? { mention_id: mentionId(c.source_span), choice: c.choice, candidate_id: c.candidate.candidate_id }
   : { mention_id: mentionId(c.source_span), choice: c.choice });
-const resolutionsOf = choices => choices.filter(c => c.confirmed)
+const resolutionsOf = (choices: readonly Choice[]): Resolution[] => choices.filter(c => c.confirmed)
   .sort((a, b) => a.source_span.start - b.source_span.start || a.source_span.end - b.source_span.end).map(resolutionOf);
-const choiceKey = choices => JSON.stringify(resolutionsOf(choices));
+const choiceKey = (choices: readonly Choice[]): string => JSON.stringify(resolutionsOf(choices));
 
 // ---- records ----
 
-const BLANK = { status: 'pending', direction: null, alignment_input: null, basis: null, result: null, report: null, sent: null };
+const BLANK = {
+  status: 'pending' as const,
+  direction: null,
+  alignment_input: null,
+  basis: null,
+  result: null,
+  report: null,
+  sent: null,
+};
 
-/** @returns {RuntimeRecord} */
-function pendingRecord(index, item, choices = []) {
+function pendingRecord(index: number, item: SegmentInput, choices: Choice[] = []): RuntimeRecord {
   return {
-    index, segmentation_version: SEGMENTATION_VERSION, ...item.range, source_hash: item.sourceHash, target_hash: item.targetHash,
-    ...BLANK, choices, prior: null,
+    index: segmentIndex(index),
+    segmentation_version: SEGMENTATION_VERSION,
+    ...item.range,
+    source_hash: item.sourceHash,
+    target_hash: item.targetHash,
+    ...BLANK,
+    choices,
+    prior: null,
   };
 }
 
 /** Done, both hashes and the direction current, the alignment input current and the confirmed choices those that were sent (step 3). */
-function reusable(record, item, draft) {
+function reusable(record: RuntimeRecord, item: SegmentInput, draft: Draft): boolean {
   return record.status === 'done' && !!record.result && record.source_hash === item.sourceHash && record.target_hash === item.targetHash
     && record.direction === draft.direction && record.alignment_input === item.alignmentInput && record.sent === choiceKey(record.choices);
 }
 
-/** @returns {'pending' | 'saved' | 'current' | 'stale'} */
-function stateOf(record, item, ctx) {
+function stateOf(record: RuntimeRecord, item: SegmentInput, ctx: Context): 'pending' | 'saved' | 'current' | 'stale' {
   if (!record.result) return 'pending';
   if (reusable(record, item, ctx.draft)) {
     if (ctx.basis === null) return 'saved';
@@ -315,21 +534,25 @@ function stateOf(record, item, ctx) {
   return 'stale';
 }
 
-const withRecord = (long, index, record) => ({ ...long, records: replaceAt(long.records, index, record) });
+const withRecord = (long: LongState, index: number, record: RuntimeRecord): LongState => ({
+  ...long,
+  records: replaceAt(long.records, index, record),
+});
 
-/** @returns {LongState} */
-export function emptyLong() {
+export function emptyLong(): LongState {
   return { records: [], history: [], progress: { current: null, completed: [] } };
 }
 
-const overlap = (a, b, c, d) => Math.max(0, Math.min(b, d) - Math.max(a, c));
+const overlap = (a: number, b: number, c: number, d: number): number => Math.max(0, Math.min(b, d) - Math.max(a, c));
+
+type Rank5 = [number, number, number, number, number];
 
 /**
  * Compare two `(recordRange, itemRange, j, k)` candidates by the 5-tuple
  * `(sourceOverlap, targetOverlap, -|r.source_start - item.source_start|, -j, -k)`.
  * Returns positive when `a` ranks strictly higher than `b`.
  */
-function compareMatchRank(a, b) {
+function compareMatchRank(a: Rank5, b: Rank5): number {
   for (let idx = 0; idx < 5; idx++) {
     if (a[idx] !== b[idx]) return a[idx] - b[idx];
   }
@@ -343,11 +566,14 @@ function compareMatchRank(a, b) {
  * 1. Exact source occurrence (`source_start`/`source_end` and `source_hash` equal).
  * 2. Both hashes equal, picking the globally highest-ranked `(k, j)` pair at each step.
  * 3. `source_hash` equal only, picking the globally highest-ranked `(k, j)` pair at each step.
- * @param {(r: RuntimeRecord, k: number) => {source_start: number, source_end: number, target_start: number, target_end: number}} [rangeOf]
  */
-function matchRecords(old, items, rangeOf = r => r) {
+function matchRecords(
+  old: readonly RuntimeRecord[],
+  items: readonly SegmentInput[],
+  rangeOf: (r: RuntimeRecord, k: number) => SegmentRange = r => r,
+): number[] {
   const owner = items.map(() => -1);
-  const used = new Set();
+  const used = new Set<number>();
   const ranges = old.map((r, k) => rangeOf(r, k));
   // Pass 1: an occurrence sitting at its exact source span keeps its record first.
   items.forEach((item, j) => {
@@ -356,7 +582,7 @@ function matchRecords(old, items, rangeOf = r => r) {
       && r.source_hash === item.sourceHash);
     if (k >= 0) { owner[j] = k; used.add(k); }
   });
-  const rank = (k, j) => {
+  const rank = (k: number, j: number): Rank5 => {
     const rr = ranges[k];
     const ir = items[j].range;
     return [
@@ -367,8 +593,8 @@ function matchRecords(old, items, rangeOf = r => r) {
       -k,
     ];
   };
-  const globalBestPass = predicate => {
-    const pairs = [];
+  const globalBestPass = (predicate: (r: RuntimeRecord, item: SegmentInput) => boolean): void => {
+    const pairs: { j: number; k: number; score: Rank5 }[] = [];
     for (let j = 0; j < items.length; j++) {
       if (owner[j] >= 0) continue;
       for (let k = 0; k < old.length; k++) {
@@ -390,18 +616,29 @@ function matchRecords(old, items, rangeOf = r => r) {
 
 /**
  * Progress through a mapping (`owner[j]` = old index): the current record moves with it; completed keeps records that hold a result.
- * @param {(k: number) => number | null} [fallback] the new current index when the current record was not matched
+ * `fallback` gives the new current index when the current record was not matched.
  */
-function followProgress(progress, owner, records, fallback = () => null) {
-  const moved = new Map(owner.map((k, j) => [k, j]).filter(([k]) => k >= 0));
-  const current = progress.current === null ? null : moved.get(progress.current) ?? fallback(progress.current);
-  const completed = progress.completed.filter(k => moved.has(k)).map(k => /** @type {number} */ (moved.get(k)))
-    .filter(j => records[j].result !== null).sort((a, b) => a - b);
+function followProgress(
+  progress: { current: number | null; completed: readonly number[] },
+  owner: readonly number[],
+  records: readonly RuntimeRecord[],
+  fallback: (k: number) => number | null = () => null,
+): LongState['progress'] {
+  const moved = new Map<number, number>(owner.map((k, j) => [k, j] as [number, number]).filter(([k]) => k >= 0));
+  const rawCurrent = progress.current === null ? null : moved.get(progress.current) ?? fallback(progress.current);
+  const current = rawCurrent === null ? null : segmentIndex(rawCurrent);
+  const completed = progress.completed
+    .filter(k => moved.has(k))
+    .map(k => segmentIndex(moved.get(k) as number))
+    .filter(j => records[j]?.result !== null)
+    .sort((a, b) => a - b);
   return { current, completed };
 }
 
-const readsIn = (core, span) => span.end <= core.length && sliceOf(core, span.start, span.end) === span.text;
-const fitsCores = (result, sourceLength, targetLength) => sourceLength >= 1 && sourceLength <= LONG_LIMIT && targetLength >= 1 && targetLength <= LONG_LIMIT
+const readsIn = (core: readonly string[], span: Span): boolean => span.end <= core.length && sliceOf(core, span.start, span.end) === span.text;
+const fitsCores = (result: CompactResult | null, sourceLength: number, targetLength: number): boolean =>
+  result !== null
+  && sourceLength >= 1 && sourceLength <= LONG_LIMIT && targetLength >= 1 && targetLength <= LONG_LIMIT
   && result.findings.every(f => f.source[1] <= sourceLength && (f.target === null || f.target[1] <= targetLength));
 
 /**
@@ -409,12 +646,18 @@ const fitsCores = (result, sourceLength, targetLength) => sourceLength >= 1 && s
  * the current pairing, else by hashes. A record keeps its result only when both hashes and the direction are current; any other
  * matched record is pending with its choices unconfirmed. A choice that does not read the same in its new core, and the choices of
  * unused records, move to the end of the history with their record's stored source hash. Never sends anything (step 1).
- * @param {{source: string, target: string, direction: Direction, alignments: Alignment[] | null, segments?: object[], segment_choice_history?: HistoryEntry[], progress?: {current: number | null, completed: number[]}}} parsed
- * @returns {LongState}
  */
-export function longFromWorkfile(parsed) {
-  const draft = { source: parsed.source, target: parsed.target, direction: parsed.direction, alignments: parsed.alignments };
-  const saved = /** @type {RuntimeRecord[]} */ (parsed.segments ?? []);
+export function longFromWorkfile(parsed: {
+  source: string;
+  target: string;
+  direction: Direction;
+  alignments: Alignment[] | null;
+  segments?: readonly RuntimeRecord[];
+  segment_choice_history?: readonly HistoryEntry[];
+  progress?: { current: number | null; completed: number[] };
+}): LongState {
+  const draft: Draft = { source: parsed.source, target: parsed.target, direction: parsed.direction, alignments: parsed.alignments };
+  const saved = (parsed.segments ?? []) as RuntimeRecord[];
   const history = (parsed.segment_choice_history ?? []).map(e => historyEntry(e, e.source_hash));
   const { long, items } = segmentInputs(draft);
   if (!long) {
@@ -424,33 +667,39 @@ export function longFromWorkfile(parsed) {
   const positional = saved.length === items.length && saved.every((r, i) => r.source_start === items[i].range.source_start
     && r.source_end === items[i].range.source_end && r.target_start === items[i].range.target_start && r.target_end === items[i].range.target_end);
   const owner = positional ? saved.map((_, i) => i) : matchRecords(saved, items);
-  const records = items.map((item, j) => {
-    const old = saved[owner[j]];
+  const records: RuntimeRecord[] = items.map((item, j) => {
+    const old = owner[j] >= 0 ? saved[owner[j]] : undefined;
     if (!old) return pendingRecord(j, item);
     const core = scalars(item.sourceCore);
-    const choices = [];
+    const choices: Choice[] = [];
     for (const c of old.choices) if (readsIn(core, c.source_span)) choices.push(orderChoice(c)); else history.push(historyEntry(c, old.source_hash));
     // A result on a pair that is not ready now is not kept: the record is pending (SPEC "Segment record").
     const keep = old.status !== 'pending' && item.pair.status === 'ready' && old.source_hash === item.sourceHash && old.target_hash === item.targetHash
-      && old.direction === draft.direction && fitsCores(old.result, core.length, scalars(item.targetCore).length);
+      && old.direction === draft.direction && old.basis !== null && old.result !== null && fitsCores(old.result, core.length, scalars(item.targetCore).length);
     if (!keep) return pendingRecord(j, item, choices.map(unconfirm));
     return {
-      ...pendingRecord(j, item, choices), status: old.status, direction: old.direction, alignment_input: old.alignment_input,
-      basis: orderBasis(old.basis), result: orderResult(old.result), sent: old.status === 'done' ? choiceKey(old.choices) : null,
+      ...pendingRecord(j, item, choices),
+      status: old.status,
+      direction: old.direction,
+      alignment_input: old.alignment_input,
+      basis: orderBasis(old.basis as Basis),
+      result: orderResult(old.result as CompactResult),
+      sent: old.status === 'done' ? choiceKey(old.choices) : null,
     };
   });
   const used = new Set(owner);
   saved.forEach((r, k) => { if (!used.has(k)) for (const c of r.choices) history.push(historyEntry(c, r.source_hash)); });
   // An unused current record (mapping not by position) moves to the pair whose region holds its start, as after an edit.
-  const near = k => {
-    if (!saved[k]) return null;
-    const j = items.findIndex(item => saved[k].source_start < item.pair.source.end);
+  const near = (k: number): number | null => {
+    const rec = saved[k];
+    if (!rec) return null;
+    const j = items.findIndex(item => rec.source_start < item.pair.source.end);
     return j >= 0 ? j : items.length - 1;
   };
   return { records, history, progress: followProgress(parsed.progress ?? { current: null, completed: [] }, owner, records, near) };
 }
 
-const sameAlignments = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+const sameAlignments = (a: Alignment[] | null, b: Alignment[] | null): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /**
  * Long state after an edit from `before` to `after` (drafts). Not long after it: every choice moves to history with its record's
@@ -460,12 +709,8 @@ const sameAlignments = (a, b) => a === b || JSON.stringify(a) === JSON.stringify
  * the result, keeps a `prior` and the confirmed choices (one re-check with resolutions); anything else is pending. Choices of
  * unmatched records follow the source edit into the pair whose core holds them, unconfirmed; one that cannot be placed moves to
  * history with the hash of its last core. A direction change makes every record pending with unconfirmed choices.
- * @param {LongState} long
- * @param {Draft} before
- * @param {Draft} after
- * @returns {LongState}
  */
-export function reconcileLong(long, before, after) {
+export function reconcileLong(long: LongState, before: Draft, after: Draft): LongState {
   if (before.source === after.source && before.target === after.target && before.direction === after.direction
     && sameAlignments(before.alignments, after.alignments)) return long;
   const history = [...long.history];
@@ -480,28 +725,37 @@ export function reconcileLong(long, before, after) {
   const mapped = old.map(r => mapRegion({ start: r.source_start, end: r.source_end }, splice));
   const mappedTargets = old.map(r => mapRegion({ start: r.target_start, end: r.target_end }, targetSplice));
   const owner = matchRecords(old, items, (_, k) => ({
-    source_start: mapped[k].start,
-    source_end: mapped[k].end,
-    target_start: mappedTargets[k].start,
-    target_end: mappedTargets[k].end,
+    source_start: scalarOffset(mapped[k].start),
+    source_end: scalarOffset(mapped[k].end),
+    target_start: scalarOffset(mappedTargets[k].start),
+    target_end: scalarOffset(mappedTargets[k].end),
   }));
-  let records = items.map((item, j) => {
-    const r = old[owner[j]];
+  let records: RuntimeRecord[] = items.map((item, j) => {
+    const r = owner[j] >= 0 ? old[owner[j]] : undefined;
     if (!r) return pendingRecord(j, item);
-    const moved = { ...r, index: j, ...item.range };
+    const moved: RuntimeRecord = { ...r, index: segmentIndex(j), ...item.range };
     if (r.target_hash === item.targetHash) return moved;
-    const prior = r.result ? { source_hash: r.source_hash, direction: /** @type {Direction} */ (r.direction), basis: /** @type {Basis} */ (r.basis) } : r.prior;
+    const prior: Prior | null = r.result
+      ? { source_hash: r.source_hash, direction: r.direction as Direction, basis: r.basis as Basis }
+      : r.prior;
     return { ...moved, ...BLANK, target_hash: item.targetHash, prior };
   });
   const used = new Set(owner);
   old.forEach((r, k) => {
     if (used.has(k)) return;
     for (const c of r.choices) {
-      const span = shiftSpan({ start: r.source_start + c.source_span.start, end: r.source_start + c.source_span.end, text: c.source_span.text }, splice);
+      const span = shiftSpan(
+        { start: r.source_start + c.source_span.start, end: r.source_start + c.source_span.end, text: c.source_span.text },
+        splice,
+      );
       const j = span ? items.findIndex(item => item.range.source_start <= span.start && span.end <= item.range.source_end) : -1;
-      const into = records[j];
-      const relative = span && into && { start: span.start - into.source_start, end: span.end - into.source_start, text: span.text };
-      if (!relative || !readsIn(scalars(items[j].sourceCore), relative) || into.choices.length >= MAX_SEGMENT_CHOICES
+      const into = j >= 0 ? records[j] : undefined;
+      const relative: Span | null = span && into ? {
+        start: scalarOffset(span.start - into.source_start),
+        end: scalarOffset(span.end - into.source_start),
+        text: span.text,
+      } : null;
+      if (!into || !relative || !readsIn(scalars(items[j].sourceCore), relative) || into.choices.length >= MAX_SEGMENT_CHOICES
         || into.choices.some(x => sameSpan(x.source_span, relative))) {
         history.push(historyEntry(c, r.source_hash));
         continue;
@@ -511,7 +765,7 @@ export function reconcileLong(long, before, after) {
   });
   if (before.direction !== after.direction) records = records.map(r => ({ ...r, ...BLANK, prior: null, choices: r.choices.map(unconfirm) }));
   // A current segment that changed follows its position: the new pair whose region holds its mapped start.
-  const near = k => {
+  const near = (k: number): number | null => {
     if (!mapped[k]) return null;
     const j = items.findIndex(item => mapped[k].start < item.pair.source.end);
     return j >= 0 ? j : items.length - 1;
@@ -526,19 +780,19 @@ export function reconcileLong(long, before, after) {
  * unknown), current (a reuse candidate under the session basis) or stale (any other result); `ready` (the pair can be sent);
  * `needsCheck`; `finished`; and the choices with `view`: applies (confirmed, record current), needs_reconfirmation (unconfirmed in a
  * record with a result) or waiting (for the next check). null when there is no such record.
- * @param {LongState} long
- * @param {number} index
- * @param {Context} ctx
  */
-export function recordView(long, index, ctx) {
+export function recordView(long: LongState, index: number, ctx: Context): RecordView | null {
   const record = long.records[index];
   const item = segmentInputs(ctx.draft).items[index];
   if (!record || !item) return null;
   const state = stateOf(record, item, ctx);
   const ready = item.pair.status === 'ready';
-  const view = c => (state === 'pending' ? 'waiting' : !c.confirmed ? 'needs_reconfirmation' : state === 'current' ? 'applies' : 'waiting');
+  const view = (c: Choice): ChoiceView => (state === 'pending' ? 'waiting' : !c.confirmed ? 'needs_reconfirmation' : state === 'current' ? 'applies' : 'waiting');
   return {
-    state, ready, needsCheck: ready && (state === 'pending' || state === 'stale'), finished: long.progress.completed.includes(index),
+    state,
+    ready,
+    needsCheck: ready && (state === 'pending' || state === 'stale'),
+    finished: long.progress.completed.includes(segmentIndex(index)),
     choices: record.choices.map(c => ({ ...c, view: view(c) })),
   };
 }
@@ -546,31 +800,35 @@ export function recordView(long, index, ctx) {
 /**
  * Target of the live-basis probe (SPEC Runtime step 4): progress.current if it needs a check, else the first segment that does,
  * else progress.current or index 0. When that last pair is not ready, the first ready pair; null when no pair is ready.
- * @param {LongState} long
- * @param {Context} ctx
  */
-export function probeIndex(long, ctx) {
-  const needs = i => recordView(long, i, ctx)?.needsCheck === true;
+export function probeIndex(long: LongState, ctx: Context): SegmentIndex | null {
+  const needs = (i: number): boolean => recordView(long, i, ctx)?.needsCheck === true;
   const { current } = long.progress;
   if (current !== null && needs(current)) return current;
   const first = long.records.findIndex((_, i) => needs(i));
-  if (first >= 0) return first;
+  if (first >= 0) return segmentIndex(first);
   const { items } = segmentInputs(ctx.draft);
   const fallback = current ?? 0;
-  if (items[fallback]?.pair.status === 'ready' && long.records[fallback]) return fallback;
+  if (items[fallback]?.pair.status === 'ready' && long.records[fallback]) return segmentIndex(fallback);
   const ready = items.findIndex((item, i) => item.pair.status === 'ready' && long.records[i]);
-  return ready >= 0 ? ready : null;
+  return ready >= 0 ? segmentIndex(ready) : null;
 }
 
 /** The segment identity used by both the term planner and the run scheduler. */
-export function termSegmentKey(index, item) {
+export function termSegmentKey(index: number, item: Pick<SegmentInput, 'sourceHash' | 'targetHash'>): string {
   return `t:${index}:${item.sourceHash}:${item.targetHash}`;
 }
 
 /** Plan the pending checks, including the first live-basis probe after opening a file. */
-export function termPlan(long, ctx) {
+export function termPlan(long: LongState, ctx: Context): {
+  due: number;
+  saved: number;
+  probe: SegmentIndex | null;
+  order: SegmentIndex[];
+  cost: number;
+} {
   const views = long.records.map((_, index) => recordView(long, index, ctx));
-  const due = views.flatMap((view, index) => (view?.needsCheck ? [index] : []));
+  const due: SegmentIndex[] = views.flatMap((view, index) => (view?.needsCheck ? [segmentIndex(index)] : []));
   const saved = views.filter(view => view?.state === 'saved' && view.ready).length;
   const probe = ctx.basis === null && (due.length > 0 || saved > 0) ? probeIndex(long, ctx) : null;
   const order = probe === null ? due : [probe, ...due.filter(index => index !== probe)];
@@ -580,9 +838,8 @@ export function termPlan(long, ctx) {
 /**
  * SPEC Runtime step 6: one request with resolutions when the source hash, direction and basis of the record's result (or of its
  * `prior` after a target-only edit) equal the current ones under a known session basis; otherwise first a request without.
- * @returns {'with_resolutions' | 'without_resolutions'}
  */
-export function recheckPlan(long, index, ctx) {
+export function recheckPlan(long: LongState, index: number, ctx: Context): 'with_resolutions' | 'without_resolutions' {
   const record = long.records[index];
   const item = segmentInputs(ctx.draft).items[index];
   const base = record?.result ? { source_hash: record.source_hash, direction: record.direction, basis: record.basis } : record?.prior;
@@ -595,29 +852,37 @@ export function recheckPlan(long, index, ctx) {
  * for null manuscript alignments; `[]` is sent as `[]`. Only with `withResolutions` and a known session basis, the confirmed
  * choices go out as resolutions with the four-key resolution_context; with none, both keys are omitted. Pass the returned object
  * to applyResult with the response. The caller adds the `X-WuwaTerm-Matcher-Basis: 1` header.
- * @param {LongState} long
- * @param {number} index
- * @param {Context} ctx
- * @param {{withResolutions?: boolean}} [options]
- * @returns {SegmentRequest | null}
  */
-export function segmentRequest(long, index, ctx, { withResolutions = false } = {}) {
+export function segmentRequest(
+  long: LongState,
+  index: number,
+  ctx: Context,
+  { withResolutions = false }: { withResolutions?: boolean } = {},
+): SegmentRequest | null {
   const record = long.records[index];
   const item = segmentInputs(ctx.draft).items[index];
   if (!record || !item || item.pair.status !== 'ready') return null;
-  /** @type {Record<string, unknown>} */
-  const body = { source: item.sourceCore, target: item.targetCore, direction: ctx.draft.direction, review_version: 'review-v2' };
+  const body: Record<string, unknown> = { source: item.sourceCore, target: item.targetCore, direction: ctx.draft.direction, review_version: 'review-v2' };
   if (item.alignments !== null) body.alignments = structuredClone(item.alignments);
   const basis = ctx.basis;
   const resolutions = withResolutions && isBasis(basis) ? resolutionsOf(record.choices) : [];
   if (resolutions.length && basis) {
     body.resolutions = resolutions;
     body.resolution_context = {
-      source_revision: item.sourceHash, rule_version: basis.rule_version, dictionary_revision: basis.dictionary.revision, matcher_revision: basis.matcher_revision,
+      source_revision: item.sourceHash,
+      rule_version: basis.rule_version,
+      dictionary_revision: basis.dictionary.revision,
+      matcher_revision: basis.matcher_revision,
     };
   }
   // `withResolutions` records the plan (step 6, first bullet), even when no choice is confirmed and nothing goes out.
-  return { index, body, alignmentInput: item.alignmentInput, sentKey: JSON.stringify(resolutions), withResolutions: withResolutions && isBasis(basis) };
+  return {
+    index: segmentIndex(index),
+    body,
+    alignmentInput: item.alignmentInput,
+    sentKey: JSON.stringify(resolutions),
+    withResolutions: withResolutions && isBasis(basis),
+  };
 }
 
 /**
@@ -632,35 +897,55 @@ export function segmentRequest(long, index, ctx, { withResolutions = false } = {
  * - `secondRequest`: the confirmed choices now differ from those sent, so one more request with resolutions is due (step 6).
  *   Build it with the returned basis (`{draft, basis: out.basis}`), not the context of the first request, and send at most one
  *   second request per run item.
- * @param {LongState} long
- * @param {Context} ctx
- * @param {SegmentRequest} request
- * @param {any} report
  */
-export function applyResult(long, ctx, request, report) {
+export function applyResult(
+  long: LongState,
+  ctx: Context,
+  request: SegmentRequest,
+  report: Report | Record<string, unknown> | null | undefined,
+): {
+  long: LongState;
+  basis: SessionBasis;
+  secondRequest: boolean;
+  error: 'response_invalid' | 'segment_changed' | 'no_basis' | 'not_storable' | null;
+} {
   const { index, body } = request;
   const sourceHash = contentHash(String(body.source));
   const targetHash = contentHash(String(body.target));
-  if (report?.source_revision !== sourceHash || report?.target_revision !== targetHash) {
+  const repObj = report as Report | null | undefined;
+  if (repObj?.source_revision !== sourceHash || repObj?.target_revision !== targetHash) {
     return { long, basis: ctx.basis, secondRequest: false, error: 'response_invalid' };
   }
   const basis = basisOfReport(report);
-  const out = (error, next = long, secondRequest = false) => ({ long: next, basis: basis ?? false, secondRequest, error });
+  const nextBasis: SessionBasis = basis ?? false;
+  const out = (
+    error: 'segment_changed' | 'no_basis' | 'not_storable' | null,
+    next: LongState = long,
+    secondRequest = false,
+  ) => ({ long: next, basis: nextBasis, secondRequest, error });
   const record = long.records[index];
   const item = segmentInputs(ctx.draft).items[index];
   if (!record || !item || body.direction !== ctx.draft.direction || item.sourceHash !== sourceHash || item.targetHash !== targetHash
     || record.source_hash !== sourceHash || record.target_hash !== targetHash) return out('segment_changed');
   if (!basis) return out('no_basis');
-  const result = compactResult(report);
+  const result = compactResult(repObj);
   if (!result) return out('not_storable');
   if (stateOf(record, item, { draft: ctx.draft, basis }) === 'current') return out(null);
   // Step 6, first bullet: a re-check planned with resolutions never confirms a choice that was not, even when none was confirmed.
   // Only the request without resolutions realigns by step 7.
   const withResolutions = request.withResolutions ?? request.sentKey !== EMPTY_KEY;
   const choices = record.choices.map(c => ({ ...c, confirmed: withResolutions ? c.confirmed && holds(c, result) : holds(c, result) }));
-  const next = {
-    ...record, status: /** @type {'done'} */ ('done'), direction: ctx.draft.direction, alignment_input: request.alignmentInput, basis, result, choices,
-    report, sent: request.sentKey, prior: null,
+  const next: RuntimeRecord = {
+    ...record,
+    status: 'done',
+    direction: ctx.draft.direction,
+    alignment_input: request.alignmentInput,
+    basis,
+    result,
+    choices,
+    report: repObj as ExpandedReport,
+    sent: request.sentKey,
+    prior: null,
   };
   return out(null, withRecord(long, index, next), choiceKey(choices) !== request.sentKey);
 }
@@ -671,23 +956,32 @@ export function applyResult(long, ctx, request, report) {
  * Adopt `candidate` for a finding of record `index`, or mark it not a term (`candidate` null): adds or replaces the choice at the
  * finding's span, confirmed, with `offered` the finding's candidate ids for not_a_term. The record then derives stale until checked
  * again. Errors: finding_missing, candidate_missing, too_many_choices (128 per record).
- * @param {LongState} long
- * @param {{index: number, finding: {source?: number[], source_span?: Span}, candidate: Candidate | null}} choice a compact finding, or one of an
- *   expanded or live report (core-relative `source_span`)
- * @param {Context} ctx
  */
-export function chooseTerm(long, { index, finding, candidate }, ctx) {
+export function chooseTerm(
+  long: LongState,
+  { index, finding, candidate }: {
+    index: number;
+    finding: { source?: readonly ScalarOffset[]; source_span?: Span };
+    candidate: Candidate | null;
+  },
+  ctx: Context,
+): { long: LongState; error: 'finding_missing' | 'candidate_missing' | 'too_many_choices' | null } {
   const record = long.records[index];
   const item = segmentInputs(ctx.draft).items[index];
-  const [start, end] = finding.source ?? [finding.source_span?.start, finding.source_span?.end];
-  const span = { start, end };
+  const start = finding.source ? finding.source[0] : finding.source_span?.start;
+  const end = finding.source ? finding.source[1] : finding.source_span?.end;
+  if (start === undefined || end === undefined) return { long, error: 'finding_missing' };
+  const span = { start: scalarOffset(start), end: scalarOffset(end) };
   const found = record && item ? findingAt(record.result, span) : null;
   if (!record || !item || !found) return { long, error: 'finding_missing' };
   const picked = candidate === null ? null : found.candidates.find(c => sameCandidate(c, candidate)) ?? null;
   if (candidate !== null && !picked) return { long, error: 'candidate_missing' };
-  const choice = {
-    source_span: { ...span, text: sliceOf(scalars(item.sourceCore), span.start, span.end) }, choice: picked ? 'official_pair' : 'not_a_term',
-    candidate: orderCandidate(picked), offered: picked ? [] : offeredOf(found), confirmed: true,
+  const choice: Choice = {
+    source_span: { ...span, text: sliceOf(scalars(item.sourceCore), span.start, span.end) },
+    choice: picked ? 'official_pair' : 'not_a_term',
+    candidate: orderCandidate(picked),
+    offered: picked ? [] : offeredOf(found),
+    confirmed: true,
   };
   const at = record.choices.findIndex(c => sameSpan(c.source_span, span));
   if (at < 0 && record.choices.length >= MAX_SEGMENT_CHOICES) return { long, error: 'too_many_choices' };
@@ -695,99 +989,120 @@ export function chooseTerm(long, { index, finding, candidate }, ctx) {
   return { long: withRecord(long, index, { ...record, choices }), error: null };
 }
 
-const choiceIndex = (record, { start, end }) => record?.choices.findIndex(c => sameSpan(c.source_span, { start, end })) ?? -1;
+const choiceIndex = (record: RuntimeRecord | undefined, { start, end }: { start: number; end: number }): number =>
+  record?.choices.findIndex(c => sameSpan(c.source_span, { start, end })) ?? -1;
 
 /**
  * Confirm again a choice that needs reconfirmation (SPEC step 7): a not_a_term takes `offered` from the current finding; an
  * official_pair only while the finding still has its candidate. Errors: finding_missing, candidate_missing.
- * @param {LongState} long
- * @param {{index: number, start: number, end: number}} at
  */
-export function reconfirmChoice(long, { index, start, end }) {
+export function reconfirmChoice(
+  long: LongState,
+  { index, start, end }: { index: number; start: number; end: number },
+): { long: LongState; error: 'finding_missing' | 'candidate_missing' | null } {
   const record = long.records[index];
   const at = choiceIndex(record, { start, end });
-  const found = at >= 0 ? findingAt(record.result, record.choices[at].source_span) : null;
-  if (!found) return { long, error: 'finding_missing' };
+  const found = record && at >= 0 ? findingAt(record.result, record.choices[at].source_span) : null;
+  if (!record || !found) return { long, error: 'finding_missing' };
   const old = record.choices[at];
   if (old.choice === 'official_pair' && !found.candidates.some(c => sameCandidate(c, old.candidate))) return { long, error: 'candidate_missing' };
-  const choice = { ...old, offered: old.choice === 'not_a_term' ? offeredOf(found) : [], confirmed: true };
+  const choice: Choice = { ...old, offered: old.choice === 'not_a_term' ? offeredOf(found) : [], confirmed: true };
   return { long: withRecord(long, index, { ...record, choices: replaceAt(record.choices, at, choice) }), error: null };
 }
 
-/** Remove the choice at that span of record `index`. @param {LongState} long @param {{index: number, start: number, end: number}} at */
-export function removeChoice(long, { index, start, end }) {
+/** Remove the choice at that span of record `index`. */
+export function removeChoice(long: LongState, { index, start, end }: { index: number; start: number; end: number }): LongState {
   const record = long.records[index];
   const at = choiceIndex(record, { start, end });
-  return at < 0 ? long : withRecord(long, index, { ...record, choices: record.choices.filter((_, i) => i !== at) });
+  return !record || at < 0 ? long : withRecord(long, index, { ...record, choices: record.choices.filter((_, i) => i !== at) });
 }
 
-/** Remove history entry `position` (the user frees room before a save). @param {LongState} long @param {number} position */
-export function removeHistoryEntry(long, position) {
+/** Remove history entry `position` (the user frees room before a save). */
+export function removeHistoryEntry(long: LongState, position: number): LongState {
   return { ...long, history: long.history.filter((_, i) => i !== position) };
 }
 
 /** Records that history entry `position` could go back into: same source hash, the span reads the same, room and no choice there. */
-function restoreTargets(long, position, ctx) {
+function restoreTargets(long: LongState, position: number, ctx: Context): SegmentIndex[] {
   const entry = long.history[position];
   const { items } = segmentInputs(ctx.draft);
   if (!entry) return [];
   return long.records.flatMap((r, i) => (items[i] && r.source_hash === entry.source_hash && items[i].sourceHash === entry.source_hash
     && readsIn(scalars(items[i].sourceCore), entry.source_span) && r.choices.length < MAX_SEGMENT_CHOICES
-    && choiceIndex(r, entry.source_span) < 0 ? [i] : []));
+    && choiceIndex(r, entry.source_span) < 0 ? [segmentIndex(i)] : []));
 }
 
-/** For each history entry, the record index it can be restored into (SPEC step 8), or null. @param {LongState} long @param {Context} ctx */
-export function restorableHistory(long, ctx) {
+/** For each history entry, the record index it can be restored into (SPEC step 8), or null. */
+export function restorableHistory(long: LongState, ctx: Context): (SegmentIndex | null)[] {
   return long.history.map((_, position) => restoreTargets(long, position, ctx)[0] ?? null);
 }
 
 /**
  * Restore history entry `position` into record `index` as an unconfirmed choice (SPEC step 8) and remove it from the history.
  * Error not_restorable when restorableHistory would not offer that record.
- * @param {LongState} long
- * @param {number} position
- * @param {number} index
- * @param {Context} ctx
  */
-export function restoreHistoryEntry(long, position, index, ctx) {
-  if (!restoreTargets(long, position, ctx).includes(index)) return { long, error: 'not_restorable' };
+export function restoreHistoryEntry(
+  long: LongState,
+  position: number,
+  index: number,
+  ctx: Context,
+): { long: LongState; error: 'not_restorable' | null } {
+  if (!restoreTargets(long, position, ctx).includes(segmentIndex(index))) return { long, error: 'not_restorable' };
   const entry = long.history[position];
   const record = long.records[index];
-  const choice = { source_span: orderSpan(entry.source_span), choice: entry.choice, candidate: orderCandidate(entry.candidate), offered: [...entry.offered], confirmed: false };
+  const choice: Choice = {
+    source_span: orderSpan(entry.source_span),
+    choice: entry.choice,
+    candidate: orderCandidate(entry.candidate),
+    offered: [...entry.offered],
+    confirmed: false,
+  };
   const next = withRecord(long, index, { ...record, choices: [...record.choices, choice] });
   return { long: removeHistoryEntry(next, position), error: null };
 }
 
-/** The user's segment, or null. @param {LongState} long @param {number | null} index */
-export function setCurrent(long, index) {
+/** The user's segment, or null. */
+export function setCurrent(long: LongState, index: number | null): LongState {
   if (index !== null && !long.records[index]) return long;
-  return { ...long, progress: { ...long.progress, current: index } };
+  return { ...long, progress: { ...long.progress, current: index === null ? null : segmentIndex(index) } };
 }
 
-/** Mark or unmark record `index` finished; only a record with a result can be marked. @param {LongState} long */
-export function setFinished(long, index, finished) {
-  const rest = long.progress.completed.filter(i => i !== index);
+/** Mark or unmark record `index` finished; only a record with a result can be marked. */
+export function setFinished(long: LongState, index: number, finished: boolean): LongState {
+  const seg = segmentIndex(index);
+  const rest = long.progress.completed.filter(i => i !== seg);
   if (finished && !long.records[index]?.result) return long;
-  const completed = finished ? [...rest, index].sort((a, b) => a - b) : rest;
+  const completed = finished ? [...rest, seg].sort((a, b) => a - b) : rest;
   return { ...long, progress: { ...long.progress, completed } };
 }
 
 // ---- writing and export ----
 
-function writeRecord(record, item, index, ctx) {
+function writeRecord(record: RuntimeRecord | null, item: SegmentInput, index: number, ctx: Context) {
   const head = {
-    index, segmentation_version: SEGMENTATION_VERSION, ...item.range, source_hash: item.sourceHash, target_hash: item.targetHash,
+    index: segmentIndex(index),
+    segmentation_version: SEGMENTATION_VERSION,
+    ...item.range,
+    source_hash: item.sourceHash,
+    target_hash: item.targetHash,
   };
   const choices = record?.choices ?? [];
   const live = record?.result && item.pair.status === 'ready' && record.source_hash === item.sourceHash && record.target_hash === item.targetHash
-    && record.direction === ctx.draft.direction;
-  if (!live) return { ...head, status: 'pending', direction: null, alignment_input: null, basis: null, result: null, choices: choices.map(c => orderChoice(unconfirm(c))) };
+    && record.direction === ctx.draft.direction && record.basis !== null;
+  if (!live || !record || !record.result || !record.basis) {
+    return { ...head, status: 'pending' as const, direction: null, alignment_input: null, basis: null, result: null, choices: choices.map(c => orderChoice(unconfirm(c))) };
+  }
   // Basis null: no live response yet, the stored status stands. A live response without a v3 basis (false) fails closed: stale.
   const done = record.status === 'done' && record.alignment_input === item.alignmentInput && record.sent === choiceKey(choices)
     && (ctx.basis === null || (isBasis(ctx.basis) && sameV3Basis(record.basis, ctx.basis)));
   return {
-    ...head, status: done ? 'done' : 'stale', direction: record.direction, alignment_input: record.alignment_input, basis: orderBasis(record.basis),
-    result: orderResult(record.result), choices: choices.map(orderChoice),
+    ...head,
+    status: (done ? 'done' : 'stale') as 'done' | 'stale',
+    direction: record.direction,
+    alignment_input: record.alignment_input,
+    basis: orderBasis(record.basis),
+    result: orderResult(record.result),
+    choices: choices.map(orderChoice),
   };
 }
 
@@ -797,11 +1112,8 @@ function writeRecord(record, item, index, ctx) {
  * the current cores, choices unconfirmed); a done record is written stale when its alignment input, its sent resolutions or (with a
  * known session basis) its basis differ; completed keeps done and stale records only. Throws long_state_out_of_sync when records
  * holding choices do not line up with the pairs, rather than dropping them.
- * @param {LongState} long
- * @param {Draft} draft
- * @param {{basis: Basis | null | false}} ctx
  */
-export function workfileParts(long, draft, ctx) {
+export function workfileParts(long: LongState, draft: Draft, ctx: { basis: SessionBasis }) {
   const history = long.history.map(e => historyEntry(e, e.source_hash));
   const { long: isLongMode, items } = segmentInputs(draft);
   if (!isLongMode) return { segments: [], segment_choice_history: history, progress: { current: null, completed: [] } };
@@ -817,24 +1129,36 @@ export function workfileParts(long, draft, ctx) {
 /**
  * Rows for the current-result JSON `segment_term_reports` and the Markdown export: every record with a result, in order, with its
  * derived `state`, `stale` (not current), core ranges, the report (the live one, else expandResult) and the findings in whole-text
- * positions. @param {LongState} long @param {Context} ctx
+ * positions.
  */
-export function exportSegments(long, ctx) {
+export function exportSegments(long: LongState, ctx: Context): ExportSegmentRow[] {
   const { items } = segmentInputs(ctx.draft);
-  const shift = (span, offset) => (span === null ? null : { start: span.start + offset, end: span.end + offset, text: span.text });
-  return long.records.flatMap((record, i) => {
+  const shiftNonNull = (span: Span, offset: number): Span => ({
+    start: scalarOffset(span.start + offset),
+    end: scalarOffset(span.end + offset),
+    text: span.text,
+  });
+  return long.records.flatMap((record, i): ExportSegmentRow[] => {
     const item = items[i];
     if (!record.result || !item) return [];
     const state = stateOf(record, item, ctx);
-    const report = /** @type {any} */ (record.report ?? expandResult(record, item.sourceCore, item.targetCore));
+    const report = record.report ?? expandResult(record, item.sourceCore, item.targetCore);
     // `truncated` and each finding's `candidates_truncated` go with the rows, so an export never reads complete when findings or
     // candidates were left out.
     return [{
-      index: i, state, stale: state !== 'current', truncated: report.truncated === true, ...item.range, report,
+      index: segmentIndex(i),
+      state,
+      stale: state !== 'current',
+      truncated: report.truncated === true,
+      ...item.range,
+      report,
       findings: report.findings.map(f => ({
-        verdict: f.verdict, source_span: shift(f.source_span, record.source_start), target_span: shift(f.target_span, record.target_start),
-        candidates: f.candidates.map(c => ({ zh: c.zh, en: c.en })), candidates_truncated: f.candidates_truncated === true,
-        ...(Object.hasOwn(f, 'reason') ? { reason: f.reason } : {}),
+        verdict: f.verdict,
+        source_span: shiftNonNull(f.source_span, record.source_start),
+        target_span: f.target_span === null ? null : shiftNonNull(f.target_span, record.target_start),
+        candidates: f.candidates.map(c => ({ zh: c.zh, en: c.en })),
+        candidates_truncated: f.candidates_truncated === true,
+        ...(Object.hasOwn(f, 'reason') && f.reason !== undefined ? { reason: f.reason } : {}),
       })),
     }];
   });
@@ -842,55 +1166,123 @@ export function exportSegments(long, ctx) {
 
 // ---- the term view: every segment's findings grouped by term, one occurrence at a time ----
 
+export type TermFindingItem = {
+  id?: string;
+  verdict: Verdict;
+  source_span: Span;
+  target_span: Span | null;
+  candidates: Candidate[];
+  candidates_truncated: boolean;
+  reason?: ReasonValue;
+};
+
 /**
- * @typedef {{index: number, state: 'saved' | 'current' | 'stale', source_start: number, source_end: number, target_start: number, target_end: number,
- *   report: {findings: Array<{id?: string, verdict: string, source_span: Span, target_span: Span | null, candidates: Candidate[], candidates_truncated: boolean, reason?: string}>},
- *   choices: Array<Choice & {view?: 'applies' | 'needs_reconfirmation' | 'waiting'}>}} TermSegment
- *   A segment with a result, as termSegments builds it; the finding spans are core-relative, the segment ranges are whole-text.
- * @typedef {{
- *   key: string, segmentIndex: number, segmentNumber: number, finding: TermSegment['report']['findings'][number],
- *   docSource: Span, docTarget: Span | null, coreSource: Span, coreTarget: Span | null,
- *   sourceContext: Snippet | null, targetContext: Snippet | null, targetExcerpt: Excerpt | null,
- *   translation: string | null, verdict: string, reason: string | null, candidates: Candidate[],
- *   freshness: 'current' | 'saved' | 'stale', choice: (Choice & {view?: string}) | null, attention: 'settled' | 'conflict' | 'pending' | 'not_evaluated' | 'ok',
- * }} Occurrence
- * @typedef {{before: string, hit: string, after: string, clippedBefore: boolean, clippedAfter: boolean}} Snippet
- * @typedef {{text: string, clipped: boolean, approximate: boolean}} Excerpt
- * @typedef {{text: string | null, count: number, kind: 'hit' | 'none' | 'not_evaluated'}} Rendering
- * @typedef {{
- *   key: string, surface: string, surfaces: string[], candidates: Candidate[], occurrenceCount: number, segments: number[],
- *   renderings: Rendering[], status: 'inconsistent' | 'pending' | 'not_evaluated' | 'confirmed',
- *   inconsistent: boolean, pendingCount: number, notEvaluatedCount: number, confirmedCount: number, savedCount: number, unverifiedSegments: number[],
- *   notEvaluated: number, occurrences: Occurrence[],
- * }} TermGroup
- *   `status` is the one most urgent trait; `inconsistent`, `pendingCount`, `notEvaluatedCount` and `confirmedCount` are all of them: every
- *   place is in exactly one of the three counts (`attention` conflict/pending, not_evaluated, settled/ok). `savedCount` says how many of
- *   its places come from a saved result that this session has not checked against the live basis yet: they are pending, never settled.
- * @typedef {{index: number, sourceCore: string}} UncheckedSegment
- *   A ready segment with no term result (never checked, or edited since), whose source core may hold a term of a group.
+ * A segment with a result, as termSegments builds it; the finding spans are core-relative, the segment ranges are whole-text.
  */
+export type TermSegment = {
+  index: SegmentIndex;
+  state: 'saved' | 'current' | 'stale';
+  source_start: ScalarOffset;
+  source_end: ScalarOffset;
+  target_start: ScalarOffset;
+  target_end: ScalarOffset;
+  report: { findings: TermFindingItem[] };
+  choices: Array<Choice & { view?: ChoiceView }>;
+};
+
+export type Snippet = {
+  before: string;
+  hit: string;
+  after: string;
+  clippedBefore: boolean;
+  clippedAfter: boolean;
+};
+
+export type Excerpt = {
+  text: string;
+  clipped: boolean;
+  approximate: boolean;
+};
+
+export type Rendering = {
+  text: string | null;
+  count: number;
+  kind: 'hit' | 'none' | 'not_evaluated';
+};
+
+export type Occurrence = {
+  key: string;
+  segmentIndex: SegmentIndex;
+  segmentNumber: number;
+  finding: TermFindingItem;
+  docSource: Span;
+  docTarget: Span | null;
+  coreSource: Span;
+  coreTarget: Span | null;
+  sourceContext: Snippet | null;
+  targetContext: Snippet | null;
+  targetExcerpt: Excerpt | null;
+  translation: string | null;
+  verdict: Verdict;
+  reason: ReasonValue | null;
+  candidates: Candidate[];
+  freshness: 'saved' | 'current' | 'stale';
+  choice: (Choice & { view?: ChoiceView | string }) | null;
+  attention: 'settled' | 'conflict' | 'pending' | 'not_evaluated' | 'ok';
+};
+
+/**
+ * `status` is the one most urgent trait; `inconsistent`, `pendingCount`, `notEvaluatedCount` and `confirmedCount` are all of them: every
+ * place is in exactly one of the three counts (`attention` conflict/pending, not_evaluated, settled/ok). `savedCount` says how many of
+ * its places come from a saved result that this session has not checked against the live basis yet: they are pending, never settled.
+ */
+export type TermGroup = {
+  key: string;
+  surface: string;
+  surfaces: string[];
+  candidates: Candidate[];
+  occurrenceCount: number;
+  segments: number[];
+  renderings: Rendering[];
+  status: 'inconsistent' | 'pending' | 'not_evaluated' | 'confirmed';
+  inconsistent: boolean;
+  pendingCount: number;
+  notEvaluatedCount: number;
+  confirmedCount: number;
+  savedCount: number;
+  unverifiedSegments: number[];
+  notEvaluated: number;
+  occurrences: Occurrence[];
+};
+
+/** A ready segment with no term result (never checked, or edited since), whose source core may hold a term of a group. */
+export type UncheckedSegment = {
+  index: SegmentIndex;
+  sourceCore: string;
+};
 
 /** Scalars of context on each side of a hit in a group occurrence. */
 export const GROUP_CONTEXT_RADIUS = 36;
 const EXCERPT_SCALARS = 96;
-const URGENCY = ['inconsistent', 'pending', 'not_evaluated', 'confirmed'];
+const URGENCY: TermGroup['status'][] = ['inconsistent', 'pending', 'not_evaluated', 'confirmed'];
 
 /**
  * The segments that hold a term result, in the shape groupTermOccurrences takes: every record with a result (pending ones have none),
  * with its derived freshness (`saved` while the session basis is unknown, `current`, or `stale`), its core ranges, the report (the live
- * one, else the one rebuilt from the record) and its choices with their `view`. @param {LongState} long @param {Context} ctx
- * @returns {TermSegment[]}
+ * one, else the one rebuilt from the record) and its choices with their `view`.
  */
-export function termSegments(long, ctx) {
+export function termSegments(long: LongState, ctx: Context): TermSegment[] {
   const { items } = segmentInputs(ctx.draft);
-  return long.records.flatMap((record, index) => {
+  return long.records.flatMap((record, index): TermSegment[] => {
     const item = items[index];
     if (!record.result || !item) return [];
     const state = stateOf(record, item, ctx);
     const view = recordView(long, index, ctx);
     return [{
-      index, state: /** @type {'saved' | 'current' | 'stale'} */ (state === 'pending' ? 'stale' : state), ...item.range,
-      report: /** @type {any} */ (record.report ?? expandResult(record, item.sourceCore, item.targetCore)),
+      index: segmentIndex(index),
+      state: state === 'pending' ? 'stale' : state,
+      ...item.range,
+      report: record.report ?? expandResult(record, item.sourceCore, item.targetCore),
       choices: view ? view.choices : record.choices,
     }];
   });
@@ -898,35 +1290,34 @@ export function termSegments(long, ctx) {
 
 /**
  * The ready segments with no term result, in the shape groupTermOccurrences takes as `unchecked`: never checked, or edited since (an edit
- * drops the result), so none of their terms is in a group. @param {LongState} long @param {Context} ctx
- * @returns {UncheckedSegment[]}
+ * drops the result), so none of their terms is in a group.
  */
-export function uncheckedTermSegments(long, ctx) {
+export function uncheckedTermSegments(long: LongState, ctx: Context): UncheckedSegment[] {
   const { items } = segmentInputs(ctx.draft);
-  return long.records.flatMap((record, index) => {
+  return long.records.flatMap((record, index): UncheckedSegment[] => {
     const item = items[index];
-    return item && item.pair.status === 'ready' && !record.result ? [{ index, sourceCore: item.sourceCore }] : [];
+    return item && item.pair.status === 'ready' && !record.result ? [{ index: segmentIndex(index), sourceCore: item.sourceCore }] : [];
   });
 }
 
-const NFKC = text => text.normalize('NFKC');
+const NFKC = (text: string): string => text.normalize('NFKC');
 // Direction names the language of the translation: `zh` translates into Chinese, so its source is English.
-const english = direction => direction === 'zh';
+const english = (direction: Direction): boolean => direction === 'zh';
 // Surface identity inside a group: Unicode-compatible, and for an English source also case-insensitive.
-const surfaceKey = (surface, direction) => (english(direction) ? NFKC(surface).toLowerCase() : NFKC(surface));
+const surfaceKey = (surface: string, direction: Direction): string => (english(direction) ? NFKC(surface).toLowerCase() : NFKC(surface));
 // English plural folding, only to merge surfaces that already share a candidate set: Echoes/Echo, Tuners/Tuner, Entries/Entry.
-function foldPlural(word) {
+function foldPlural(word: string): string {
   if (/(ss|us|is)$/u.test(word)) return word;
   if (word.length > 3 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
   if (word.length > 3 && /(ches|shes|xes|sses|zes)$/u.test(word)) return word.slice(0, -2);
   if (word.length > 2 && word.endsWith('s')) return word.slice(0, -1);
   return word;
 }
-const candidateKey = candidates => [...new Set(candidates.map(c => c.candidate_id))].sort().join(',');
+const candidateKey = (candidates: readonly Candidate[]): string => [...new Set(candidates.map(c => c.candidate_id))].sort().join(',');
 
 /** One displayed pair per spelling, retaining every category represented by its candidates. */
-export function summarizeTermCandidates(candidates) {
-  const pairs = new Map();
+export function summarizeTermCandidates(candidates: readonly Candidate[]): { zh: string; en: string; categories: string[] }[] {
+  const pairs = new Map<string, { zh: string; en: string; categories: string[] }>();
   for (const candidate of candidates) {
     const key = JSON.stringify([candidate.zh, candidate.en]);
     let pair = pairs.get(key);
@@ -939,12 +1330,12 @@ export function summarizeTermCandidates(candidates) {
   return [...pairs.values()];
 }
 
-const needsAction = o => o.attention === 'pending' || o.attention === 'conflict';
-const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+const needsAction = (o: Occurrence): boolean => o.attention === 'pending' || o.attention === 'conflict';
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 // The 1-based numbers of the unchecked segments whose source core holds any of the spellings. A Chinese source is a substring match (a
 // longer word that contains the term matches too: the segment is only said to need its check). An English source is a whole word,
 // case-insensitive, with a plural ending allowed, as the plural merge of the groups does.
-function uncheckedHolding(spellings, unchecked, direction) {
+function uncheckedHolding(spellings: readonly string[], unchecked: readonly UncheckedSegment[], direction: Direction): number[] {
   const forms = spellings.map(name => NFKC(name)).filter(Boolean);
   if (forms.length === 0 || unchecked.length === 0) return [];
   const word = english(direction)
@@ -955,7 +1346,7 @@ function uncheckedHolding(spellings, unchecked, direction) {
 
 // The text around a span, read from the scalar array (a long text is not rescanned per occurrence); null when the span does not read
 // `expected` there.
-function contextOf(chars, start, end, expected) {
+function contextOf(chars: readonly string[], start: number, end: number, expected: string): Snippet | null {
   if (end > chars.length || sliceOf(chars, start, end) !== expected) return null;
   const from = Math.max(0, start - GROUP_CONTEXT_RADIUS);
   const to = Math.min(chars.length, end + GROUP_CONTEXT_RADIUS);
@@ -963,10 +1354,10 @@ function contextOf(chars, start, end, expected) {
 }
 // The sentence of a core that sits where the hit sits in its own core, by relative position: an estimate, said so by `approximate`.
 // Shown when the finding has no target span, so a place with no hit still shows the translation around it.
-function sentenceExcerpt(targetCore, ratio) {
+function sentenceExcerpt(targetCore: string, ratio: number): Excerpt | null {
   const chars = scalars(targetCore);
   if (chars.length === 0) return null;
-  const sentences = [];
+  const sentences: [number, number][] = [];
   let from = 0;
   chars.forEach((ch, i) => {
     if (/[。．.！？!?\n]/u.test(ch) || i === chars.length - 1) {
@@ -1007,30 +1398,31 @@ function sentenceExcerpt(targetCore, ratio) {
  *   source and the target (when the target has no hit, `targetExcerpt`, a sentence of that segment's translation at the same relative
  *   position, so the target side is never blank), the translation used, the verdict and `reason`, the freshness of its segment and the
  *   user's choice at that place. `finding` is the segment's finding itself, for chooseTerm.
- *
- * @param {TermSegment[]} segments
- * @param {string} source the whole source text
- * @param {string} target the whole target text
- * @param {Direction} direction
- * @param {UncheckedSegment[]} [unchecked]
- * @returns {TermGroup[]}
  */
-export function groupTermOccurrences(segments, source, target, direction, unchecked = []) {
+export function groupTermOccurrences(
+  segments: readonly TermSegment[],
+  source: string,
+  target: string,
+  direction: Direction,
+  unchecked: readonly UncheckedSegment[] = [],
+): TermGroup[] {
   const s = scalars(source);
   const t = scalars(target);
-  /** @type {Map<string, {surface: string, items: Occurrence[]}>} */
-  const exact = new Map();
+  const exact = new Map<string, { surface: string; items: Occurrence[] }>();
   for (const seg of segments) {
     const targetCore = sliceOf(t, seg.target_start, seg.target_end);
     const sourceLength = seg.source_end - seg.source_start;
     for (const finding of seg.report.findings) {
-      const doc = (span, offset) => (span === null ? null : { start: span.start + offset, end: span.end + offset, text: span.text });
-      const docSource = /** @type {Span} */ (doc(finding.source_span, seg.source_start));
-      const docTarget = doc(finding.target_span, seg.target_start);
+      const shift = (span: Span, offset: number): Span => ({
+        start: scalarOffset(span.start + offset),
+        end: scalarOffset(span.end + offset),
+        text: span.text,
+      });
+      const docSource = shift(finding.source_span, seg.source_start);
+      const docTarget = finding.target_span === null ? null : shift(finding.target_span, seg.target_start);
       const choice = seg.choices.find(c => c.source_span.start === finding.source_span.start && c.source_span.end === finding.source_span.end) ?? null;
       const verdict = finding.verdict;
-      /** @type {Occurrence['attention']} */
-      let attention = 'ok';
+      let attention: Occurrence['attention'] = 'ok';
       // A saved result was computed under another session's basis and this one has not checked it against the current dictionary and
       // matcher yet, so it waits: it never reads as settled or as nothing to do. A confirmed conflict is still the more urgent trait.
       if (seg.state === 'saved') attention = verdict === 'confirmed_conflict' ? 'conflict' : 'pending';
@@ -1040,15 +1432,25 @@ export function groupTermOccurrences(segments, source, target, direction, unchec
       else if (verdict === 'confirmed_conflict') attention = 'conflict';
       else if (verdict === 'needs_review') attention = 'pending';
       else if (verdict === 'not_evaluated') attention = 'not_evaluated';
-      const occurrence = {
-        key: `${seg.index}:${finding.source_span.start}:${finding.source_span.end}`, segmentIndex: seg.index, segmentNumber: seg.index + 1, finding,
-        docSource, docTarget, coreSource: finding.source_span, coreTarget: finding.target_span,
+      const occurrence: Occurrence = {
+        key: `${seg.index}:${finding.source_span.start}:${finding.source_span.end}`,
+        segmentIndex: seg.index,
+        segmentNumber: seg.index + 1,
+        finding,
+        docSource,
+        docTarget,
+        coreSource: finding.source_span,
+        coreTarget: finding.target_span,
         sourceContext: contextOf(s, docSource.start, docSource.end, docSource.text),
         targetContext: docTarget ? contextOf(t, docTarget.start, docTarget.end, docTarget.text) : null,
         targetExcerpt: docTarget ? null : sentenceExcerpt(targetCore, sourceLength > 0 ? finding.source_span.start / sourceLength : 0),
-        translation: finding.target_span ? finding.target_span.text : null, verdict,
+        translation: finding.target_span ? finding.target_span.text : null,
+        verdict,
         reason: verdict === 'not_evaluated' && typeof finding.reason === 'string' ? finding.reason : null,
-        candidates: finding.candidates, freshness: seg.state, choice, attention,
+        candidates: finding.candidates,
+        freshness: seg.state,
+        choice,
+        attention,
       };
       const key = surfaceKey(finding.source_span.text, direction);
       const group = exact.get(key);
@@ -1056,23 +1458,21 @@ export function groupTermOccurrences(segments, source, target, direction, unchec
     }
   }
   // Plural merge: only between surfaces of an English source that share one candidate set.
-  /** @type {Map<string, {surfaces: Map<string, Occurrence[]>}>} */
-  const merged = new Map();
+  const merged = new Map<string, { surfaces: Map<string, Occurrence[]> }>();
   for (const [key, { items }] of exact) {
     const set = candidateKey(items.flatMap(o => o.candidates));
     const into = english(direction) && set ? `${foldPlural(key)}|${set}` : key;
-    const holder = merged.get(into) ?? { surfaces: new Map() };
+    const holder = merged.get(into) ?? { surfaces: new Map<string, Occurrence[]>() };
     holder.surfaces.set(key, items);
     merged.set(into, holder);
   }
-  const groups = [...merged.entries()].map(([key, { surfaces }]) => {
+  const groups: TermGroup[] = [...merged.entries()].map(([key, { surfaces }]) => {
     const all = [...surfaces.values()].flat().sort((a, b) => a.docSource.start - b.docSource.start || a.docSource.end - b.docSource.end);
-    const counts = new Map();
+    const counts = new Map<string, number>();
     for (const o of all) counts.set(o.coreSource.text, (counts.get(o.coreSource.text) ?? 0) + 1);
     const names = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     const evaluated = all.filter(o => o.verdict !== 'not_evaluated');
-    /** @type {Rendering[]} */
-    const renderings = [];
+    const renderings: Rendering[] = [];
     for (const o of evaluated) {
       const at = renderings.findIndex(r => r.text === o.translation);
       if (at >= 0) renderings[at].count += 1; else renderings.push({ text: o.translation, count: 1, kind: o.translation === null ? 'none' : 'hit' });
@@ -1088,29 +1488,41 @@ export function groupTermOccurrences(segments, source, target, direction, unchec
     const notEvaluatedCount = all.filter(o => o.attention === 'not_evaluated').length;
     const savedCount = all.filter(o => o.freshness === 'saved').length;
     const unverifiedSegments = uncheckedHolding([...names.map(([name]) => name)], unchecked, direction);
-    const status = inconsistent ? 'inconsistent'
+    const status: TermGroup['status'] = inconsistent ? 'inconsistent'
       : pendingCount > 0 || unverifiedSegments.length > 0 ? 'pending'
         : notEvaluatedCount > 0 ? 'not_evaluated' : 'confirmed';
-    const candidates = [];
+    const candidates: Candidate[] = [];
     for (const o of all) for (const c of o.candidates) if (!candidates.some(x => x.candidate_id === c.candidate_id)) candidates.push(c);
     return {
-      key, surface: names[0][0], surfaces: names.map(([name]) => name), candidates, occurrenceCount: all.length,
-      segments: [...new Set(all.map(o => o.segmentNumber))].sort((a, b) => a - b), renderings, status,
-      inconsistent, pendingCount, notEvaluatedCount, confirmedCount: all.length - pendingCount - notEvaluatedCount, savedCount, unverifiedSegments,
-      notEvaluated, occurrences: all,
+      key,
+      surface: names[0][0],
+      surfaces: names.map(([name]) => name),
+      candidates,
+      occurrenceCount: all.length,
+      segments: [...new Set(all.map(o => o.segmentNumber))].sort((a, b) => a - b),
+      renderings,
+      status,
+      inconsistent,
+      pendingCount,
+      notEvaluatedCount,
+      confirmedCount: all.length - pendingCount - notEvaluatedCount,
+      savedCount,
+      unverifiedSegments,
+      notEvaluated,
+      occurrences: all,
     };
   });
   return groups.sort((a, b) => URGENCY.indexOf(a.status) - URGENCY.indexOf(b.status)
     || a.occurrences[0].docSource.start - b.occurrences[0].docSource.start);
 }
 
-export const TERM_GROUP_FILTERS = /** @type {const} */ (['all', 'inconsistent', 'pending', 'not_evaluated', 'confirmed']);
-/** @typedef {(typeof TERM_GROUP_FILTERS)[number]} TermGroupFilter */
+export const TERM_GROUP_FILTERS = ['all', 'inconsistent', 'pending', 'not_evaluated', 'confirmed'] as const;
+export type TermGroupFilter = (typeof TERM_GROUP_FILTERS)[number];
 
 // What a status filter shows of one group: `scoped` are its places in the selected segment (all of them without one) and `focus` the
 // ones the filter is about; null when the group does not belong under that filter. One rule for the counts and for the list, so a
 // count is what appears when it is clicked.
-function groupMatch(group, filter, segment) {
+function groupMatch(group: TermGroup, filter: TermGroupFilter, segment: number | null): { scoped: Occurrence[]; focus: Occurrence[] } | null {
   const scoped = segment === null ? group.occurrences : group.occurrences.filter(o => o.segmentIndex === segment);
   if (scoped.length === 0) return null;
   const action = scoped.filter(needsAction);
@@ -1129,24 +1541,21 @@ function groupMatch(group, filter, segment) {
 /**
  * How many groups each status filter shows (the number on its button), for the selected segment (null: all). A group counts under every
  * filter it belongs to: a group with one place to check and four settled ones is under `pending` and under `inconsistent` alike.
- * @param {TermGroup[]} groups
- * @param {number | null} [segment]
- * @returns {Record<TermGroupFilter, number>}
  */
-export function termGroupCounts(groups, segment = null) {
-  return /** @type {Record<TermGroupFilter, number>} */ (Object.fromEntries(TERM_GROUP_FILTERS.map(f => [f, groups.filter(g => groupMatch(g, f, segment)).length])));
+export function termGroupCounts(groups: readonly TermGroup[], segment: number | null = null): Record<TermGroupFilter, number> {
+  return Object.fromEntries(TERM_GROUP_FILTERS.map(f => [f, groups.filter(g => groupMatch(g, f, segment)).length])) as Record<TermGroupFilter, number>;
 }
 
 /**
  * The groups under a status filter, in the groups' order, each with the places to show: the ones the filter is about, or all of its
  * places in the selected segment when the group's key is in `expanded`. `hidden` is how many of the group's places the filter leaves out
  * (the ones a person can open with "show the rest"); `focus` how many it is about.
- * @param {TermGroup[]} groups
- * @param {TermGroupFilter} filter
- * @param {{segment?: number | null, expanded?: ReadonlySet<string>}} [options]
- * @returns {Array<TermGroup & {focus: number, hidden: number}>}
  */
-export function filterTermGroups(groups, filter, { segment = null, expanded = new Set() } = {}) {
+export function filterTermGroups(
+  groups: readonly TermGroup[],
+  filter: TermGroupFilter,
+  { segment = null, expanded = new Set<string>() }: { segment?: number | null; expanded?: ReadonlySet<string> } = {},
+): Array<TermGroup & { focus: number; hidden: number }> {
   return groups.flatMap(g => {
     const match = groupMatch(g, filter, segment);
     if (!match) return [];
@@ -1159,10 +1568,13 @@ export function filterTermGroups(groups, filter, { segment = null, expanded = ne
  * Replace exactly one whole-text target span of `target` with `replacement`: the one occurrence the user picked, never every place the
  * same word stands. Returns the new target and the span the replacement now covers, or an error: `span_mismatch` (the target no longer
  * reads `span.text` there), `replacement_invalid` (blank, or not text) or `noop` (it already reads so). The long text has no length
- * cap here; the segment check limits what is sent. @param {string} target @param {Span} span @param {string} replacement
- * @returns {{target: string, span: Span, error?: undefined} | {error: 'span_mismatch' | 'replacement_invalid' | 'noop', target?: undefined, span?: undefined}}
+ * cap here; the segment check limits what is sent.
  */
-export function spliceTargetSpan(target, span, replacement) {
+export function spliceTargetSpan(
+  target: string,
+  span: Span,
+  replacement: string,
+): { target: string; span: Span; error?: undefined } | { error: 'span_mismatch' | 'replacement_invalid' | 'noop'; target?: undefined; span?: undefined } {
   if (typeof replacement !== 'string' || !replacement.trim() || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(replacement)) {
     return { error: 'replacement_invalid' };
   }
@@ -1170,16 +1582,23 @@ export function spliceTargetSpan(target, span, replacement) {
   const end = scalarToUtf16(target, span.end);
   if (start === null || end === null || start > end || target.slice(start, end) !== span.text) return { error: 'span_mismatch' };
   if (span.text === replacement) return { error: 'noop' };
-  return { target: target.slice(0, start) + replacement + target.slice(end), span: { start: span.start, end: span.start + scalars(replacement).length, text: replacement } };
+  return {
+    target: target.slice(0, start) + replacement + target.slice(end),
+    span: { start: span.start, end: scalarOffset(span.start + scalars(replacement).length), text: replacement },
+  };
 }
 
 /**
  * Revise one segment's translation: the target core `[start, end)` becomes `text`; the layout around it stays. Errors:
  * `core_mismatch` (the target no longer reads `expected` there), `text_blank`, `text_too_long` (more than 2,000 scalars, the size of a
- * checked core) or `noop`. @param {string} target @param {{start: number, end: number}} range @param {string} expected @param {string} text
- * @returns {{target: string, error?: undefined} | {error: 'core_mismatch' | 'text_blank' | 'text_too_long' | 'noop', target?: undefined}}
+ * checked core) or `noop`.
  */
-export function reviseSegmentTarget(target, { start, end }, expected, text) {
+export function reviseSegmentTarget(
+  target: string,
+  { start, end }: { start: number; end: number },
+  expected: string,
+  text: string,
+): { target: string; error?: undefined } | { error: 'core_mismatch' | 'text_blank' | 'text_too_long' | 'noop'; target?: undefined } {
   if (typeof text !== 'string' || !text.trim()) return { error: 'text_blank' };
   if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(text)) return { error: 'text_blank' };
   if (scalars(text).length > LONG_LIMIT) return { error: 'text_too_long' };

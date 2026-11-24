@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
-import * as L from '../../lib/long-review.js';
+import * as L from '../../lib/long-review.ts';
 import { FRESH_MATCHER_REVISION, dictionary, fixture, freshApiReport, hash } from '../fixtures/manuscript.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
 
@@ -456,7 +456,7 @@ const SCENARIO = (() => {
   };
 })();
 
-/** The same steps as build_v3 in the bridge, through the Web runtime (lib/long-review.js). */
+/** The same steps as build_v3 in the bridge, through the Web runtime (lib/long-review.ts). */
 function webBuiltV3({ source, target, candidate, extra, basis: responseBasis, target_edit: [old, replacement] }) {
   let draft = { source, target, direction: 'en', alignments: null };
   let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });

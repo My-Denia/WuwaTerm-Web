@@ -4,7 +4,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { canonicalOf, createWorkbenchController, isRunActive } from '../lib/workbench-controller.ts';
-import { recordView } from '../lib/long-review.js';
+import { recordView } from '../lib/long-review.ts';
 import { issueStatus } from '../lib/semantic-state.js';
 import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from './fixtures/manuscript.mjs';
 import { defaultSemanticResponse, semanticResponse } from './helpers/semantic-fixture.mjs';

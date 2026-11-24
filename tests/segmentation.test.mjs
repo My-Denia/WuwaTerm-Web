@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { guardPairForRequest, pairSegments, segmentText } from '../lib/segmentation.js';
+import { guardPairForRequest, pairSegments, segmentText } from '../lib/segmentation.ts';
 
 const sliceBy = (text, spans) => {
   const chars = Array.from(text);
