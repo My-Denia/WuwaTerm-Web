@@ -148,13 +148,15 @@ function toPyType(node) {
 }
 
 function collapsePyBranches(branches) {
-  const keys = Object.keys(branches[0].properties);
+  const keys = [...new Set(branches.flatMap(b => Object.keys(b.properties)))];
   const lines = [];
   for (const k of keys) {
     const allReq = branches.every(b => (b.required ?? []).includes(k));
     const someOpt = branches.some(b => !Object.hasOwn(b.properties, k));
-    const types = [...new Set(branches.flatMap(b => (Object.hasOwn(b.properties, k) ? [toPyType(b.properties[k])] : [])))];
-    const joined = types.join(' | ');
+    const arms = branches.flatMap(b => (
+      Object.hasOwn(b.properties, k) ? toPyType(b.properties[k]).split(' | ') : []
+    ));
+    const joined = [...new Set(arms)].join(' | ');
     lines.push(`    ${k}: ${allReq && !someOpt ? joined : `NotRequired[${joined}]`}`);
   }
   return lines;

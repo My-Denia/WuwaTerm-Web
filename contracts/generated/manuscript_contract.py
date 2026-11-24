@@ -127,6 +127,7 @@ class ContractFindingV4(TypedDict):
     target_span: None | ContractSpan
     candidates: list[ContractCandidateV2]
     candidates_truncated: bool
+    reason: NotRequired[ReasonValue]
 
 class ContractReportV1(TypedDict):
     request_id: str
@@ -178,6 +179,7 @@ class ContractDocumentChoice(TypedDict):
 class ContractResolution(TypedDict):
     mention_id: str
     choice: Literal['not_a_term'] | Literal['official_pair']
+    candidate_id: NotRequired[str]
 
 class ContractHistorySnapshotV1toV3(TypedDict):
     source: str
@@ -241,7 +243,7 @@ class ContractSemanticIssue(TypedDict):
     target_excerpt: str | None
     rationale: str
     suggestion: None | ContractSemanticSuggestion
-    suggestion_withheld: None | SuggestionWithheldReason | None
+    suggestion_withheld: None | SuggestionWithheldReason
     alternatives: list[ContractSemanticAlternative]
 
 class ContractSemanticReport(TypedDict):
@@ -291,6 +293,7 @@ class ContractCompactFindingV4(TypedDict):
     target: None | tuple[int, int]
     candidates: list[ContractCompactCandidate]
     candidates_truncated: bool
+    reason: NotRequired[ReasonValue]
 
 class ContractCompactResultV3(TypedDict):
     truncated: bool

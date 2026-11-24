@@ -34,7 +34,23 @@ const schema = JSON.parse(readFileSync(join(ROOT, 'contracts', 'schemas', 'manus
 
 test('generated TypeScript and Python contract artifacts match manuscript.schema.json cleanly', () => {
   execFileSync(process.execPath, ['scripts/generate-contract-types.mjs', '--check'], { cwd: ROOT, stdio: 'pipe' });
-  const pyCheck = execFileSync('python3', ['-B', '-m', 'py_compile', 'contracts/generated/manuscript_contract.py'], { cwd: ROOT, stdio: 'pipe' });
+  const pyCheck = execFileSync('python3', [
+    '-B',
+    '-c',
+    [
+      'import importlib.util, sys, typing',
+      'spec = importlib.util.spec_from_file_location("mc", "contracts/generated/manuscript_contract.py")',
+      'mc = importlib.util.module_from_spec(spec)',
+      'sys.modules["mc"] = mc',
+      'spec.loader.exec_module(mc)',
+      'assert typing.get_origin(typing.get_type_hints(mc.ContractFindingV4, include_extras=True)["reason"]) is typing.NotRequired',
+      'assert typing.get_origin(typing.get_type_hints(mc.ContractCompactFindingV4, include_extras=True)["reason"]) is typing.NotRequired',
+      'assert typing.get_origin(typing.get_type_hints(mc.ContractResolution, include_extras=True)["candidate_id"]) is typing.NotRequired',
+      'assert "None | SuggestionWithheldReason | None" not in repr(mc.ContractSemanticIssue.__annotations__["suggestion_withheld"])',
+      'assert typing.get_type_hints(mc.ContractSemanticIssue, include_extras=True)',
+      'assert typing.get_type_hints(mc.ContractManuscriptV4, include_extras=True)',
+    ].join('; '),
+  ], { cwd: ROOT, stdio: 'pipe' });
   assert.equal(pyCheck.byteLength, 0);
 });
 
