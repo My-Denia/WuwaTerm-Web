@@ -21,7 +21,7 @@ export type MarkdownReport = {
 };
 export type MarkdownSnapshot = { source: string; target: string; direction: 'en' | 'zh'; report: MarkdownReport; resolutions: { mention_id: string; choice: string; candidate_id?: string }[] | null };
 export type MarkdownChoice = { source: string; direction: string; source_span: MarkdownSpan; choice: string; candidate: { candidate_id: string; zh: string; en: string; category: string } | null; basis: { rule_version: string; dictionary: { revision: string; source_commit: string | null } } };
-export type MarkdownReconciled = { status: string; reason: string; code?: string; span?: MarkdownSpan };
+export type MarkdownReconciled = { status: string; reason: string; code?: string; span?: MarkdownSpan | null };
 export type MarkdownComparisonItem = { label: string; reason: string; code?: string; mention: { text: string; start: number; historical: boolean } };
 export type MarkdownComparison = { new: MarkdownComparisonItem[]; resolved: MarkdownComparisonItem[]; pending: MarkdownComparisonItem[]; incomparable: MarkdownComparisonItem[] };
 export type MarkdownSemanticItem = {

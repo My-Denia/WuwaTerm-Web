@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import * as L from '../lib/long-review.js';
+import * as L from '../lib/long-review.ts';
 import { parseWorkfile } from '../lib/manuscript.js';
 import { alignmentInput as generatorInput, alignmentList as generatorList, canonicalV3 } from '../scripts/build-manuscript-v3-fixtures.mjs';
 

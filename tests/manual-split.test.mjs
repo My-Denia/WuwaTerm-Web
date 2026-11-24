@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { insertParagraphBreak, mergeParagraphs, pairShape, splitLayout } from '../lib/manual-split.js';
-import { pairSegments } from '../lib/segmentation.js';
+import { insertParagraphBreak, mergeParagraphs, pairShape, splitLayout } from '../lib/manual-split.ts';
+import { pairSegments } from '../lib/segmentation.ts';
 
 const LIMIT = 100;
 const statuses = pairs => pairs.map(p => p.status);
@@ -108,8 +108,8 @@ test('pairShape counts paragraphs, sentences and core lengths for a pair', () =>
 });
 
 test('linesToParagraphs turns single breaks into blank lines and keeps words and line endings', async () => {
-  const { linesToParagraphs, singleBreaks } = await import('../lib/manual-split.js');
-  const { pairSegments } = await import('../lib/segmentation.js');
+  const { linesToParagraphs, singleBreaks } = await import('../lib/manual-split.ts');
+  const { pairSegments } = await import('../lib/segmentation.ts');
   assert.equal(linesToParagraphs('one\n\ntwo'), null);
   const lf = linesToParagraphs('one\ntwo  \n three\n\nfour');
   assert.deepEqual(lf, { text: 'one\n\ntwo  \n\n three\n\nfour', count: 2 });

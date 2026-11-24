@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   addSegmentResult, emptySemantic, freshSemantic, issueStatus, longHoldsWork, mapSemanticEdit, occurrenceKey, placedOccurrence, reconcileState, upsertDecision,
 } from '../lib/semantic-state.js';
-import { longFromWorkfile } from '../lib/long-review.js';
+import { longFromWorkfile } from '../lib/long-review.ts';
 import { makeSemanticDecision } from '../lib/semantic-decisions.js';
 import { MAX_SEMANTIC_DECISIONS, parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
 import { revisionOf } from '../lib/review-report.js';

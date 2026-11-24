@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import * as L from '../lib/long-review.js';
+import * as L from '../lib/long-review.ts';
 import { REASON_VALUES, parseWorkfile, serializeWorkfile } from '../lib/manuscript.js';
 import { hash } from './fixtures/manuscript.mjs';
 import { camellyaManuscript } from './helpers/term-group-fixture.mjs';
 
-// Term groups and the single-place edits of the long-manuscript term view (lib/long-review.js). Public game terms and synthetic text.
+// Term groups and the single-place edits of the long-manuscript term view (lib/long-review.ts). Public game terms and synthetic text.
 
 const scalars = text => Array.from(text);
 const camellya = { candidate_id: hash('camellya'), zh: '椿', en: 'Camellya', category: 'character' };

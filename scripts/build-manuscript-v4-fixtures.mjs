@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The frozen Web 0.3.1 reader and writer: the generator stays independent of lib/manuscript.js, which writes v4 now.
 import { makeChoice, parseWorkfile as parseWeb031 } from '../tests/legacy/web-0.3.1/manuscript.js';
-import { pairSegments } from '../lib/segmentation.js';
+import { pairSegments } from '../lib/segmentation.ts';
 import { buildFixtures as buildV3Fixtures, canonicalV3, padContent } from './build-manuscript-v3-fixtures.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'contracts', 'manuscript-v4');

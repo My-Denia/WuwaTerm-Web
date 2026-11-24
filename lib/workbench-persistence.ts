@@ -1,22 +1,19 @@
 import { historySnapshot, placeSegmentIssues, segmentKey, semanticExportItems, semanticIssuesResolved, semanticTextsWithinBudget } from './semantic-run.js';
-import { exportSegments, segmentInputs } from './long-review.js';
+import { exportSegments, segmentInputs } from './long-review.ts';
 import { SEMANTIC_REVIEW_VERSION } from './semantic-review.js';
 import { addSegmentResult, emptySemantic, issueStatus, placedOccurrence } from './semantic-state.js';
 import { revisionOf } from './review-report.js';
-import type { Decision, Draft, Issue, LongCtx, LongState, Pair, Placed, RecordState, SegResult, SegmentInput, SemanticReport, SemanticState, SessionBasis, Span } from './workbench-model';
+import type { Decision, Direction, Draft, Issue, LongCtx, LongState, Pair, Placed, ScalarOffset, SegResult, SegmentIndex, SemanticReport, SemanticState, SessionBasis } from './workbench-model';
 
 const uid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const chars = (text: string) => Array.from(text);
 const slice = (list: string[], start: number, end: number) => list.slice(start, end).join('');
-type TermFinding = { verdict: string; source_span: Span; target_span: Span | null; candidates: { zh: string; en: string }[]; candidates_truncated: boolean; reason?: string };
-type ExportRow = { index: number; state: RecordState; stale: boolean; truncated: boolean; source_start: number; source_end: number; target_start: number; target_end: number; report: { findings: TermFinding[]; truncated: boolean } & Record<string, unknown>; findings: TermFinding[] };
-const inputsOf = (draft: Draft) => segmentInputs(draft) as { long: boolean; items: SegmentInput[] };
-export const longExportRows = (long: LongState, ctx: LongCtx) => exportSegments(long, ctx) as ExportRow[];
+export const longExportRows = (long: LongState, ctx: LongCtx) => exportSegments(long, ctx);
 
 // ---- manuscript and export helpers (used by the review workbench) ----
 
-type HistorySnap = { source: string; target: string; direction: 'en' | 'zh'; segments: { segment_index: number; source_start: number; source_end: number; target_start: number; target_end: number; report: SemanticReport }[] };
-type WorkfileV2 = { source: string; target: string; direction: 'en' | 'zh'; semantic_decisions: Decision[]; semantic_texts: { revision: string; text: string }[]; semantic_history: HistorySnap[] };
+type HistorySnap = { source: string; target: string; direction: Direction; segments: { segment_index: SegmentIndex; source_start: ScalarOffset; source_end: ScalarOffset; target_start: ScalarOffset; target_end: ScalarOffset; report: SemanticReport }[] };
+type WorkfileV2 = { source: string; target: string; direction: Direction; semantic_decisions?: Decision[]; semantic_texts?: { revision: string; text: string }[]; semantic_history?: HistorySnap[] };
 
 /**
  * Semantic state from an imported v2 manuscript. Decisions and verified old
@@ -29,11 +26,12 @@ export async function semanticFromWorkfile(parsed: WorkfileV2): Promise<Semantic
   const [savedSource, savedTarget] = await Promise.all([revisionOf(parsed.source), revisionOf(parsed.target)]);
   const texts: { revision: string; text: string }[] = [{ revision: savedSource, text: parsed.source }];
   if (savedTarget !== savedSource) texts.push({ revision: savedTarget, text: parsed.target });
-  for (const entry of parsed.semantic_texts) {
+  for (const entry of parsed.semantic_texts ?? []) {
     if (!texts.some(t => t.revision === entry.revision) && await revisionOf(entry.text) === entry.revision) texts.push({ revision: entry.revision, text: entry.text });
   }
-  let state: SemanticState = { ...(emptySemantic() as SemanticState), decisions: [...parsed.semantic_decisions], texts, history: [...parsed.semantic_history] };
-  const last = parsed.semantic_history.at(-1);
+  const semanticHistory = parsed.semantic_history ?? [];
+  let state: SemanticState = { ...(emptySemantic() as SemanticState), decisions: [...(parsed.semantic_decisions ?? [])], texts, history: [...semanticHistory] };
+  const last = semanticHistory.at(-1);
   if (!last || last.source !== parsed.source || last.target !== parsed.target || last.direction !== parsed.direction) return state;
   const [sourceRevision, targetRevision] = await Promise.all([revisionOf(last.source), revisionOf(last.target)]);
   const sc = chars(last.source); const tc = chars(last.target);
@@ -75,7 +73,7 @@ export function semanticWorkfileParts<T extends { source: string; target: string
  * session, else the report rebuilt from the saved record (SPEC "Compact term result": request_id null, no sources).
  */
 export function semanticExport(draft: Draft, semantic: SemanticState, basis: SessionBasis) {
-  const segments = inputsOf(draft).long ? longExportRows(semantic.long, { draft, basis }) : [];
+  const segments = segmentInputs(draft).long ? longExportRows(semantic.long, { draft, basis }) : [];
   const terms = segments.length ? {
     segment_term_reports: segments.map(({ index, stale, source_start, source_end, target_start, target_end, report }) => ({ segment: index + 1, stale, source_start, source_end, target_start, target_end, report })),
   } : {};
@@ -90,7 +88,7 @@ export function semanticExport(draft: Draft, semantic: SemanticState, basis: Ses
     return semanticExportItems({ issues: [{ ...p.issue, stale: p.stale }], statuses: new Map([[p.issue.id, status]]) })[0];
   });
   const resolved = semanticIssuesResolved(statuses) as number;
-  const readyPairs = inputsOf(draft).items.map(item => item.pair).filter(p => p.status === 'ready');
+  const readyPairs = segmentInputs(draft).items.map(item => item.pair).filter(p => p.status === 'ready');
   const reviewed = readyPairs.filter(p => semantic.results.some(r => r.region.source.start === p.source.core_start && r.region.target.start === p.target.core_start
     && r.region.source.end === p.source.core_end && r.region.target.end === p.target.core_end)).length;
   return {
