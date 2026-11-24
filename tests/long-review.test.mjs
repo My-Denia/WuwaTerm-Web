@@ -670,3 +670,36 @@ test('Runtime step 2: shared duplicate-attribution contract cases preserve each 
     assert.deepEqual(L.workfileParts(reopened, draft, { basis: suite.basis }), L.workfileParts(long, draft, { basis: suite.basis }), `${c.id}: idempotent`);
   }
 });
+
+test('Explicit edit splices disambiguate deleting the first of two identical paragraphs', () => {
+  const dup = `甲术${'文'.repeat(1098)}`;
+  const tdup = 'Alpha filler paragraph.';
+  const tail = `乙器${'记'.repeat(1098)}`;
+  const ttail = 'Beta tail paragraph.';
+  const K = { candidate_id: sha('candidate:甲术'), zh: '甲术', en: 'Alpha', category: 'character' };
+  const result = {
+    truncated: false,
+    evaluated: 1,
+    not_evaluated: 0,
+    findings: [{ verdict: 'verified_constraint', source: [0, 2], target: [0, 5], candidates: [K], candidates_truncated: false }],
+  };
+  const draft = { source: `${dup}\n\n${dup}\n\n${tail}`, target: `${tdup}\n\n${tdup}\n\n${ttail}`, direction: 'en', alignments: null };
+  let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
+  ({ long } = check(long, 0, ctx(draft, B), result));
+  ({ long } = check(long, 1, ctx(draft, B), result));
+  long = L.chooseTerm(long, { index: 0, finding: { source: [0, 2] }, candidate: K }, ctx(draft, B)).long;
+  long = L.chooseTerm(long, { index: 1, finding: { source: [0, 2] }, candidate: null }, ctx(draft, B)).long;
+  ({ long } = check(long, 0, ctx(draft, B), result));
+  ({ long } = check(long, 1, ctx(draft, B), result));
+
+  const after = { ...draft, source: `${dup}\n\n${tail}`, target: `${tdup}\n\n${ttail}` };
+  const sEnd = Array.from(dup).length + 2;
+  const tEnd = Array.from(tdup).length + 2;
+  const reconciled = L.reconcileLong(long, draft, after, {
+    source: { start: 0, oldEnd: sEnd, newEnd: 0 },
+    target: { start: 0, oldEnd: tEnd, newEnd: 0 },
+  });
+  assert.deepEqual(reconciled.records.map(r => r.choices.map(c => [c.choice, c.confirmed])), [[['not_a_term', true]], []]);
+  assert.equal(reconciled.records[0].status, 'done');
+  assert.deepEqual(reconciled.history.map(h => h.choice), ['official_pair']);
+});

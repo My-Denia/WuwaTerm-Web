@@ -53,6 +53,8 @@ export type IssueStatusKind =
   | 'pending';
 
 export type Span = { start: ScalarOffset; end: ScalarOffset; text: string };
+export type Splice = { start: ScalarOffset; oldEnd: ScalarOffset; newEnd: ScalarOffset };
+export type DraftEditSplices = { readonly source?: Splice | null; readonly target?: Splice | null };
 export type Alignment = { source: Span; target: Span | null };
 export type Region = { start: ScalarOffset; end: ScalarOffset };
 export type PairRegion = { start: ScalarOffset; end: ScalarOffset; core_start: ScalarOffset; core_end: ScalarOffset };
@@ -118,7 +120,13 @@ export type SemanticState = {
   outcomes: Outcome[]; history: unknown[]; long: LongState;
 };
 export type ChoiceLike = { source: string; source_span: Span; choice: string; candidate: { zh: string; en: string } | null };
-export type Commit = (next: { draft?: Draft; semantic?: (state: SemanticState) => SemanticState; notice?: string | null; remember?: boolean }) => number | null;
+export type Commit = (next: {
+  draft?: Draft;
+  splices?: DraftEditSplices;
+  semantic?: (state: SemanticState) => SemanticState;
+  notice?: string | null;
+  remember?: boolean;
+}) => number | null;
 export type PairView = {
   pair: Pair; sCore: string; tCore: string; key: string; itemKey: string; termKey: string;
   result: SegResult | null; edited: boolean; record: RecordView | null;

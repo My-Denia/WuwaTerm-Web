@@ -36,8 +36,9 @@ import { workbenchPath } from './ui-runtime.ts';
 import { semanticExport, semanticFromWorkfile, semanticWorkfileParts } from './workbench-persistence.ts';
 import { postWorkbench, REVIEW_REQUEST_LIMIT, runFailure } from './workbench-transport.ts';
 import type { UiLanguage } from './ui-language.ts';
+import { scalarOffset } from './workbench-model.ts';
 import type {
-  Candidate, Choice, Decision, DocumentPhase, Draft, ErrorState, ExportArtifact,
+  Candidate, Choice, Decision, DocumentPhase, Draft, DraftEditSplices, ErrorState, ExportArtifact,
   Finding, ImportFileLike, ImportOutcome, LongCtx, LongState, NoticeState, Pair, PairView,
   ParagraphCut, Region, Report, Resolution, RunItem, RunKind, RunState,
   SegmentInput, SemanticActionRecord, SemanticDecisionCommand, SemanticDecisionResult,
@@ -569,12 +570,14 @@ export class WorkbenchController {
 
   private commit({
     draft: next,
+    splices,
     semantic: update,
     notice: code,
     remember: push = true,
     extraPatch,
   }: {
     draft?: Draft;
+    splices?: DraftEditSplices;
     semantic?: (state: SemanticState) => SemanticState;
     notice?: string | null;
     remember?: boolean;
@@ -608,7 +611,7 @@ export class WorkbenchController {
         generation = this.docGeneration;
         inFlight = false;
       }
-      nextSemantic = mapSemanticEdit(nextSemantic, before.draft, next) as SemanticState;
+      nextSemantic = mapSemanticEdit(nextSemantic, before.draft, next, splices) as SemanticState;
       nextDraft = next;
       sourceDirtyForTranslation = false;
     }
@@ -797,6 +800,13 @@ export class WorkbenchController {
         if (out.target === undefined) return false;
         this.commit({
           draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] },
+          splices: {
+            target: {
+              start: action.docTarget.start,
+              oldEnd: action.docTarget.end,
+              newEnd: out.span.end,
+            },
+          },
           notice: 'sem:longTargetReplaced',
         });
         return true;
@@ -837,6 +847,13 @@ export class WorkbenchController {
     }
     this.commit({
       draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] },
+      splices: {
+        target: {
+          start: item.range.target_start,
+          oldEnd: item.range.target_end,
+          newEnd: scalarOffset(item.range.target_start + chars(nextText).length),
+        },
+      },
       notice: 'sem:longSegmentRevised',
     });
     return { applied: true };
@@ -874,12 +891,18 @@ export class WorkbenchController {
     if (cuts.length === 0) return false;
     const d = this.state.draft;
     let next: Draft = { ...d };
+    let firstSplice = null;
     for (const cut of cuts) {
       const updated = insertParagraphBreak(next[cut.side], cut.offset);
       if (!updated) return false;
+      if (cuts.length === 1) firstSplice = updated.splice;
       next = { ...next, [cut.side]: updated.text };
     }
-    this.commit({ draft: { ...next, alignments: d.alignments === null ? null : [] }, notice: 'sem:split' });
+    this.commit({
+      draft: { ...next, alignments: d.alignments === null ? null : [] },
+      ...(cuts.length === 1 && firstSplice ? { splices: { [cuts[0].side]: firstSplice } } : {}),
+      notice: 'sem:split',
+    });
     return true;
   }
 
@@ -887,7 +910,11 @@ export class WorkbenchController {
     const d = this.state.draft;
     const merged = mergeParagraphs(d[side], gapStart, gapEnd);
     if (!merged) return false;
-    this.commit({ draft: { ...d, [side]: merged.text, alignments: d.alignments === null ? null : [] }, notice: 'sem:merged' });
+    this.commit({
+      draft: { ...d, [side]: merged.text, alignments: d.alignments === null ? null : [] },
+      ...(merged.splice ? { splices: { [side]: merged.splice } } : {}),
+      notice: 'sem:merged',
+    });
     return true;
   }
 

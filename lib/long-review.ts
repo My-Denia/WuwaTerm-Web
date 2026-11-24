@@ -10,13 +10,13 @@ import { diffSplice, mapRegion, shiftSpan } from './semantic-run.js';
 import { SEGMENT_LIMIT, SEGMENTATION_VERSION, guardPairForRequest, pairSegments } from './segmentation.ts';
 import { sha256Hex } from './sha256.js';
 import type {
-  Alignment, Basis, ChoiceKind, ChoiceView, Direction, Draft, Pair, ReasonValue, RecordStatus,
-  RecordView, Report, Resolution, ScalarOffset, SegmentIndex, SegmentInput, SegmentRange,
-  SessionBasis, Span, Verdict,
+  Alignment, Basis, ChoiceKind, ChoiceView, Direction, Draft, DraftEditSplices, Pair,
+  ReasonValue, RecordStatus, RecordView, Report, Resolution, ScalarOffset, SegmentIndex,
+  SegmentInput, SegmentRange, SessionBasis, Span, Verdict,
 } from './workbench-model.ts';
 import { scalarOffset, segmentIndex } from './workbench-model.ts';
 
-export type { Basis, Direction } from './workbench-model.ts';
+export type { Basis, Direction, DraftEditSplices } from './workbench-model.ts';
 
 export type Candidate = {
   candidate_id: string;
@@ -710,7 +710,12 @@ const sameAlignments = (a: Alignment[] | null, b: Alignment[] | null): boolean =
  * unmatched records follow the source edit into the pair whose core holds them, unconfirmed; one that cannot be placed moves to
  * history with the hash of its last core. A direction change makes every record pending with unconfirmed choices.
  */
-export function reconcileLong(long: LongState, before: Draft, after: Draft): LongState {
+export function reconcileLong(
+  long: LongState,
+  before: Draft,
+  after: Draft,
+  splices?: DraftEditSplices,
+): LongState {
   if (before.source === after.source && before.target === after.target && before.direction === after.direction
     && sameAlignments(before.alignments, after.alignments)) return long;
   const history = [...long.history];
@@ -720,8 +725,8 @@ export function reconcileLong(long: LongState, before: Draft, after: Draft): Lon
     return { records: [], history, progress: { current: null, completed: [] } };
   }
   const old = long.records;
-  const splice = diffSplice(before.source, after.source);
-  const targetSplice = diffSplice(before.target, after.target);
+  const splice = splices && 'source' in splices ? (splices.source ?? null) : diffSplice(before.source, after.source);
+  const targetSplice = splices && 'target' in splices ? (splices.target ?? null) : diffSplice(before.target, after.target);
   const mapped = old.map(r => mapRegion({ start: r.source_start, end: r.source_end }, splice));
   const mappedTargets = old.map(r => mapRegion({ start: r.target_start, end: r.target_end }, targetSplice));
   const owner = matchRecords(old, items, (_, k) => ({

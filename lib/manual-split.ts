@@ -1,10 +1,10 @@
 // Manual paragraph repair for pairs that need a manual split. Pure and
 // browser-safe; all coordinates are Unicode scalar indices (Array.from).
 import { WHITESPACE, paragraphRanges, sentenceRangesV2 } from './segmentation.ts';
-import { diffSplice } from './semantic-run.js';
-import type { Pair, Region, ScalarOffset } from './workbench-model.ts';
+import type { Pair, Region, ScalarOffset, Splice } from './workbench-model.ts';
 import { scalarOffset } from './workbench-model.ts';
 
+export type { Splice };
 export type SplitSentence = { start: ScalarOffset; end: ScalarOffset };
 export type SplitParagraph = {
   start: ScalarOffset;
@@ -14,7 +14,6 @@ export type SplitParagraph = {
   length: number;
   sentences: SplitSentence[];
 };
-export type Splice = { start: ScalarOffset; oldEnd: ScalarOffset; newEnd: ScalarOffset };
 export type ManualEdit = { text: string; splice: Splice | null };
 export type PairShape = {
   sourceParagraphs: number;
@@ -78,8 +77,12 @@ export function insertParagraphBreak(text: string, offset: ScalarOffset): Manual
   while (left > 0 && (chars[left - 1] === ' ' || chars[left - 1] === '\t')) left--;
   while (right < chars.length && (chars[right] === ' ' || chars[right] === '\t')) right++;
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const next = chars.slice(0, left).join('') + eol.repeat(2 - newlines) + chars.slice(right).join('');
-  return { text: next, splice: diffSplice(text, next) as Splice | null };
+  const inserted = eol.repeat(2 - newlines);
+  const next = chars.slice(0, left).join('') + inserted + chars.slice(right).join('');
+  return {
+    text: next,
+    splice: { start: scalarOffset(left), oldEnd: scalarOffset(right), newEnd: scalarOffset(left + inserted.length) },
+  };
 }
 
 /**
@@ -93,7 +96,10 @@ export function mergeParagraphs(text: string, gapStart: ScalarOffset, gapEnd: Sc
   if (!gap.every(c => WS.has(c)) || gap.filter(c => c === '\n').length < 2) return null;
   const joiner = CJK.test(chars[gapStart - 1]) || CJK.test(chars[gapEnd]) ? '' : ' ';
   const next = chars.slice(0, gapStart).join('') + joiner + chars.slice(gapEnd).join('');
-  return { text: next, splice: diffSplice(text, next) as Splice | null };
+  return {
+    text: next,
+    splice: { start: scalarOffset(gapStart), oldEnd: scalarOffset(gapEnd), newEnd: scalarOffset(gapStart + joiner.length) },
+  };
 }
 
 /** Counts for the manual-split hint of one pair. */

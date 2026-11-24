@@ -227,6 +227,20 @@ def run_operation_trace(module, trace, bases, candidates):
         pairs = segmentation.pair_segments(payload_now['source'], payload_now['target'], alignments=payload_now['alignments'])
         return records.with_parts(payload_now, records.normalize(payload_now, pairs, basis_now))
 
+    def delete_paragraph_splice(text, index):
+        parts = text.split('\n\n')
+        lengths = [len(p) for p in parts]
+        start = sum(lengths[i] + 2 for i in range(index))
+        if len(parts) == 1:
+            start, old_end = 0, len(text)
+        elif index < len(parts) - 1:
+            old_end = start + lengths[index] + 2
+        else:
+            start -= 2
+            old_end = len(text)
+        del parts[index]
+        return '\n\n'.join(parts), start, old_end
+
     payload = build_initial(trace['initial'])
     pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
     payload = records.with_parts(payload, records.normalize(payload, pairs))
@@ -264,6 +278,8 @@ def run_operation_trace(module, trace, bases, candidates):
                 if applied.outcome != 'discarded':
                     raise RuntimeError('expected discarded, got ' + applied.outcome)
             else:
+                if applied.outcome != 'stored':
+                    raise RuntimeError('expected stored, got ' + applied.outcome)
                 payload, basis = records.with_parts(payload, applied.parts), applied.basis
         elif op == 'choose':
             rec = records.parts_of(payload).segments[step['segment']]
@@ -272,14 +288,13 @@ def run_operation_trace(module, trace, bases, candidates):
             cand_id = candidates[step['candidate']]['candidate_id'] if step['choice'] == 'official_pair' else None
             payload = records.with_parts(payload, records.choose(payload, step['segment'], start, start + len(step['find']), step['choice'], cand_id))
         elif op == 'delete_paragraph':
-            s_parts = payload['source'].split('\n\n')
-            t_parts = payload['target'].split('\n\n')
             s_before, t_before = payload['source'], payload['target']
-            del s_parts[step['paragraph']]
-            del t_parts[step['paragraph']]
-            payload = apply_edit_only('source', s_before, '\n\n'.join(s_parts), payload)
-            payload = apply_edit_only('target', t_before, '\n\n'.join(t_parts), payload)
-            payload = normalize_payload(payload, basis)
+            s_after, s_start, s_end = delete_paragraph_splice(s_before, step['paragraph'])
+            t_after, t_start, t_end = delete_paragraph_splice(t_before, step['paragraph'])
+            parts = records.apply_edit(records.parts_of(payload), s_before, 'source', s_start, s_end, 0)
+            parts = records.apply_edit(parts, t_before, 'target', t_start, t_end, 0)
+            edited = records.with_parts({**payload, 'source': s_after, 'target': t_after}, parts)
+            payload = normalize_payload(edited, basis)
         elif op == 'replace_text':
             side = step['side']
             before = payload[side]
@@ -309,6 +324,25 @@ def run_operation_trace(module, trace, bases, candidates):
             states = [records.record_view(r, payload, basis).state for r in parts.segments]
             choices = [[[c['choice'], c['source_span']['start'], c['confirmed']] for c in r['choices']] for r in parts.segments]
             plan = records.term_plan(payload, pairs, basis)
+            if 'recheck_plan' in step:
+                for seg_k, expected_kind in step['recheck_plan'].items():
+                    idx_k = int(seg_k)
+                    rec_k = parts.segments[idx_k]
+                    if rec_k['status'] == 'pending':
+                        prior = rec_k.get(records.PRIOR)
+                        s_core_k = payload['source'][rec_k['source_start']:rec_k['source_end']]
+                        has_prior = (
+                            prior is not None and basis is not None
+                            and prior.source_hash == records.content_hash(s_core_k)
+                            and prior.direction == payload['direction']
+                            and records.same_basis(prior.basis, basis)
+                        )
+                        got_kind = 'with_resolutions' if has_prior else 'without_resolutions'
+                    else:
+                        req_plan = records.plan_request(payload, idx_k, basis)
+                        got_kind = 'without_resolutions' if req_plan.realign else 'with_resolutions'
+                    if got_kind != expected_kind:
+                        raise RuntimeError(f'recheck_plan mismatch at {seg_k}: {got_kind} != {expected_kind}')
             restorable_map = [None] * len(parts.history)
             for pos, seg_idx in records.restorable(payload):
                 if restorable_map[pos] is None:

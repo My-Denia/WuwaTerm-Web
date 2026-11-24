@@ -47,11 +47,28 @@ function buildReport(spec, record, sourceCore, targetCore) {
   };
 }
 
-function deleteParagraph(text, index) {
+function deleteParagraphWithSplice(text, index) {
   const parts = text.split('\n\n');
   assert.ok(index >= 0 && index < parts.length);
+  const lengths = parts.map(p => Array.from(p).length);
+  const totalScalars = Array.from(text).length;
+  let start = 0;
+  for (let i = 0; i < index; i += 1) start += lengths[i] + 2;
+  let oldEnd;
+  if (parts.length === 1) {
+    start = 0;
+    oldEnd = totalScalars;
+  } else if (index < parts.length - 1) {
+    oldEnd = start + lengths[index] + 2;
+  } else {
+    start -= 2;
+    oldEnd = totalScalars;
+  }
   parts.splice(index, 1);
-  return parts.join('\n\n');
+  return {
+    text: parts.join('\n\n'),
+    splice: { start, oldEnd, newEnd: start },
+  };
 }
 
 function replaceText(text, find, replace) {
@@ -115,12 +132,14 @@ export function runWebTrace(trace) {
       assert.equal(out.error, null);
       long = out.long;
     } else if (step.op === 'delete_paragraph') {
+      const srcDel = deleteParagraphWithSplice(draft.source, step.paragraph);
+      const tgtDel = deleteParagraphWithSplice(draft.target, step.paragraph);
       const next = {
         ...draft,
-        source: deleteParagraph(draft.source, step.paragraph),
-        target: deleteParagraph(draft.target, step.paragraph),
+        source: srcDel.text,
+        target: tgtDel.text,
       };
-      long = L.reconcileLong(long, draft, next);
+      long = L.reconcileLong(long, draft, next, { source: srcDel.splice, target: tgtDel.splice });
       draft = next;
     } else if (step.op === 'replace_text') {
       const next = { ...draft, [step.side]: replaceText(draft[step.side], step.find, step.replace) };
