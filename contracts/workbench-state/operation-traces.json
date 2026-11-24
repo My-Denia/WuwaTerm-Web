@@ -1,0 +1,395 @@
+{
+  "schema": "wuwaterm-operation-traces-v1",
+  "bases": {
+    "B1": {
+      "rule_version": "review-v2",
+      "dictionary": {
+        "schema_version": "2",
+        "source_commit": "synthetic-trace-b1",
+        "term_count": 4,
+        "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "matcher_revision": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "B2": {
+      "rule_version": "review-v2",
+      "dictionary": {
+        "schema_version": "2",
+        "source_commit": "synthetic-trace-b2",
+        "term_count": 4,
+        "revision": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "matcher_revision": "3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  },
+  "candidates": {
+    "cand_alpha": {
+      "candidate_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "zh": "甲术",
+      "en": "Alpha",
+      "category": "character"
+    },
+    "cand_alpha_alt": {
+      "candidate_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "zh": "甲术",
+      "en": "Alpha Technique",
+      "category": "character"
+    },
+    "cand_beta": {
+      "candidate_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "zh": "乙器",
+      "en": "Beta",
+      "category": "item"
+    }
+  },
+  "traces": [
+    {
+      "id": "duplicate-diverge-delete-target-edit-stale-reopen-direction",
+      "initial": {
+        "paragraphs": [
+          { "source_prefix": "甲术。乙器。", "source_fill_char": "文", "source_fill_count": 1094, "target": "Alpha. Beta. Filler paragraph one." },
+          { "source_prefix": "甲术。乙器。", "source_fill_char": "文", "source_fill_count": 1094, "target": "Alpha. Beta. Filler paragraph one." },
+          { "source_prefix": "乙器结尾。", "source_fill_char": "记", "source_fill_count": 1095, "target": "Beta ending. Filler paragraph three." }
+        ],
+        "direction": "en",
+        "alignments": null
+      },
+      "steps": [
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] },
+            { "find": "乙器", "target_find": "Beta", "verdict": "verified_constraint", "candidates": ["cand_beta"] }
+          ]
+        },
+        {
+          "op": "check",
+          "segment": 1,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "choose",
+          "segment": 0,
+          "find": "甲术",
+          "choice": "official_pair",
+          "candidate": "cand_alpha"
+        },
+        {
+          "op": "choose",
+          "segment": 1,
+          "find": "甲术",
+          "choice": "not_a_term"
+        },
+        {
+          "op": "assert",
+          "states": ["stale", "stale", "pending"],
+          "choices": [
+            [["official_pair", 0, true]],
+            [["not_a_term", 0, true]],
+            []
+          ]
+        },
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] },
+            { "find": "乙器", "target_find": "Beta", "verdict": "verified_constraint", "candidates": ["cand_beta"] }
+          ]
+        },
+        {
+          "op": "check",
+          "segment": 1,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "capture_request",
+          "ref": "inflight_seg1",
+          "segment": 1,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "delete_paragraph",
+          "paragraph": 0
+        },
+        {
+          "op": "assert",
+          "states": ["current", "pending"],
+          "choices": [
+            [["official_pair", 0, true]],
+            []
+          ],
+          "history_count": 1
+        },
+        {
+          "op": "replace_text",
+          "side": "target",
+          "find": "Filler paragraph one.",
+          "replace": "Edited filler paragraph one."
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "pending"],
+          "choices": [
+            [["official_pair", 0, true]],
+            []
+          ],
+          "recheck_plan": { "0": "with_resolutions" }
+        },
+        {
+          "op": "deliver_captured",
+          "ref": "inflight_seg1",
+          "expect_rejected": true
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "pending"],
+          "choices": [
+            [["official_pair", 0, true]],
+            []
+          ]
+        },
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "set_progress",
+          "current": 1,
+          "finished": [0]
+        },
+        {
+          "op": "assert",
+          "states": ["current", "pending"],
+          "progress": { "current": 1, "completed": [0] }
+        },
+        {
+          "op": "save_and_reopen"
+        },
+        {
+          "op": "assert",
+          "states": ["saved", "pending"],
+          "probe": 1,
+          "choices": [
+            [["official_pair", 0, true]],
+            []
+          ],
+          "history_count": 1,
+          "progress": { "current": 1, "completed": [0] }
+        },
+        {
+          "op": "capture_request",
+          "ref": "stale_en_seg0",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "set_direction",
+          "direction": "zh"
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "pending"],
+          "choices": [
+            [["official_pair", 0, false]],
+            []
+          ],
+          "progress": { "current": 1, "completed": [] }
+        },
+        {
+          "op": "deliver_captured",
+          "ref": "stale_en_seg0",
+          "expect_rejected": true
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "pending"],
+          "choices": [
+            [["official_pair", 0, false]],
+            []
+          ]
+        }
+      ]
+    },
+    {
+      "id": "source-invalidate-revert-and-history-restore",
+      "initial": {
+        "paragraphs": [
+          { "source_prefix": "甲术。", "source_fill_char": "字", "source_fill_count": 1097, "target": "Alpha story sentence one." },
+          { "source_prefix": "乙器。", "source_fill_char": "词", "source_fill_count": 1097, "target": "Beta story sentence two." }
+        ],
+        "direction": "en",
+        "alignments": null
+      },
+      "steps": [
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha"] }
+          ]
+        },
+        {
+          "op": "check",
+          "segment": 1,
+          "basis": "B1",
+          "findings": [
+            { "find": "乙器", "target_find": "Beta", "verdict": "verified_constraint", "candidates": ["cand_beta"] }
+          ]
+        },
+        {
+          "op": "choose",
+          "segment": 0,
+          "find": "甲术",
+          "choice": "official_pair",
+          "candidate": "cand_alpha"
+        },
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha"] }
+          ]
+        },
+        {
+          "op": "set_progress",
+          "current": 0,
+          "finished": [0, 1]
+        },
+        {
+          "op": "replace_text",
+          "side": "source",
+          "find": "甲术。",
+          "replace": "甲物。"
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "current"],
+          "choices": [[], []],
+          "history_count": 1,
+          "progress": { "current": 0, "completed": [1] }
+        },
+        {
+          "op": "replace_text",
+          "side": "source",
+          "find": "甲物。",
+          "replace": "甲术。"
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "current"],
+          "restorable": [0],
+          "history_count": 1
+        },
+        {
+          "op": "restore_history",
+          "position": 0,
+          "segment": 0
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "current"],
+          "choices": [[["official_pair", 0, false]], []],
+          "history_count": 0
+        },
+        {
+          "op": "save_and_reopen"
+        },
+        {
+          "op": "assert",
+          "states": ["pending", "saved"],
+          "choices": [[["official_pair", 0, false]], []],
+          "probe": 0
+        }
+      ]
+    },
+    {
+      "id": "reopen-changed-basis-realigns-and-invalidates-saved",
+      "initial": {
+        "paragraphs": [
+          { "source_prefix": "甲术。", "source_fill_char": "篇", "source_fill_count": 1097, "target": "Alpha segment one." },
+          { "source_prefix": "乙器。", "source_fill_char": "章", "source_fill_count": 1097, "target": "Beta segment two." }
+        ],
+        "direction": "en",
+        "alignments": null
+      },
+      "steps": [
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "check",
+          "segment": 1,
+          "basis": "B1",
+          "findings": [
+            { "find": "乙器", "target_find": "Beta", "verdict": "verified_constraint", "candidates": ["cand_beta"] }
+          ]
+        },
+        {
+          "op": "choose",
+          "segment": 0,
+          "find": "甲术",
+          "choice": "official_pair",
+          "candidate": "cand_alpha"
+        },
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B1",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "save_and_reopen"
+        },
+        {
+          "op": "assert",
+          "states": ["saved", "saved"],
+          "probe": 0,
+          "recheck_plan": { "0": "without_resolutions" }
+        },
+        {
+          "op": "check",
+          "segment": 0,
+          "basis": "B2",
+          "findings": [
+            { "find": "甲术", "target_find": "Alpha", "verdict": "verified_constraint", "candidates": ["cand_alpha", "cand_alpha_alt"] }
+          ]
+        },
+        {
+          "op": "assert",
+          "states": ["current", "stale"],
+          "choices": [[["official_pair", 0, true]], []],
+          "recheck_plan": { "1": "without_resolutions" }
+        }
+      ]
+    }
+  ]
+}

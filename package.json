@@ -21,7 +21,9 @@
     "test:browser": "playwright test",
     "test:built": "node scripts/check-built-artifact.mjs && node --test tests/built/*.test.mjs",
     "verify:no-client-secret": "node scripts/verify-no-client-secret.mjs",
-    "test:contract": "node --test tests/contracts/*.test.mjs"
+    "test:contract": "node --test tests/contracts/*.test.mjs",
+    "generate:contracts": "node scripts/generate-contract-types.mjs --write",
+    "check:contracts": "node scripts/generate-contract-types.mjs --check"
   },
   "dependencies": {
     "next": "16.4.5",

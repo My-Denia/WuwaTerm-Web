@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
 import * as L from '../../lib/long-review.ts';
+import { runWebTrace } from '../helpers/operation-trace-runner.mjs';
 import { FRESH_MATCHER_REVISION, dictionary, fixture, freshApiReport, hash } from '../fixtures/manuscript.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
 
@@ -171,6 +172,159 @@ def duplicate_case(module, case, basis):
     return module.serialize_workfile(records.with_parts(payload, normalized))
 
 
+def run_operation_trace(module, trace, bases, candidates):
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+
+    def build_initial(initial):
+        return {
+            'source': '\n\n'.join(p['source_prefix'] + p['source_fill_char'] * p['source_fill_count'] for p in initial['paragraphs']),
+            'target': '\n\n'.join(p['target'] for p in initial['paragraphs']),
+            'direction': initial['direction'],
+            'alignments': initial['alignments'],
+            'choices': [],
+            'history': [],
+            'semantic_decisions': [],
+            'semantic_texts': [],
+            'semantic_history': [],
+        }
+
+    def build_report(step, record, source_core, target_core):
+        basis = bases[step['basis']]
+        findings = []
+        for f in step['findings']:
+            s_start = source_core.index(f['find'])
+            t_start = target_core.index(f['target_find']) if f.get('target_find') else None
+            findings.append({
+                'verdict': f['verdict'],
+                'source': [s_start, s_start + len(f['find'])],
+                'target': None if t_start is None else [t_start, t_start + len(f['target_find'])],
+                'candidates': [candidates[cid] for cid in f['candidates']],
+                'candidates_truncated': bool(f.get('candidates_truncated', False)),
+            })
+        evaluated = sum(1 for item in findings if item['verdict'] != 'not_evaluated')
+        not_evaluated = len(findings) - evaluated
+        value = records.expand_result(
+            {**record, 'basis': basis, 'result': {'truncated': False, 'evaluated': evaluated, 'not_evaluated': not_evaluated, 'findings': findings}},
+            payload['source'], payload['target'],
+        )
+        return {**value, 'request_id': 'trace-windows'}
+
+    def apply_edit_only(side, before, after, payload_now):
+        pref = 0
+        limit = min(len(before), len(after))
+        while pref < limit and before[pref] == after[pref]:
+            pref += 1
+        suff = 0
+        while suff < limit - pref and before[len(before) - 1 - suff] == after[len(after) - 1 - suff]:
+            suff += 1
+        old_end = len(before) - suff
+        new_len = len(after) - suff - pref
+        parts = records.apply_edit(records.parts_of(payload_now), before, side, pref, old_end, new_len)
+        return records.with_parts({**payload_now, side: after}, parts)
+
+    def normalize_payload(payload_now, basis_now):
+        pairs = segmentation.pair_segments(payload_now['source'], payload_now['target'], alignments=payload_now['alignments'])
+        return records.with_parts(payload_now, records.normalize(payload_now, pairs, basis_now))
+
+    payload = build_initial(trace['initial'])
+    pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
+    payload = records.with_parts(payload, records.normalize(payload, pairs))
+    basis = None
+    captured = {}
+    checkpoints = []
+
+    for step in trace['steps']:
+        op = step['op']
+        if op == 'check':
+            for _ in range(2):
+                req = records.plan_request(payload, step['segment'], basis)
+                rec = records.parts_of(payload).segments[step['segment']]
+                s_core = payload['source'][rec['source_start']:rec['source_end']]
+                t_core = payload['target'][rec['target_start']:rec['target_end']]
+                rep = build_report(step, rec, s_core, t_core)
+                applied = records.apply_response(payload, req, rep, basis)
+                if applied.outcome != 'stored':
+                    raise RuntimeError('unexpected outcome ' + applied.outcome)
+                payload, basis = records.with_parts(payload, applied.parts), applied.basis
+                if not applied.again:
+                    break
+            else:
+                raise RuntimeError('check did not settle')
+        elif op == 'capture_request':
+            req = records.plan_request(payload, step['segment'], basis)
+            rec = records.parts_of(payload).segments[step['segment']]
+            s_core = payload['source'][rec['source_start']:rec['source_end']]
+            t_core = payload['target'][rec['target_start']:rec['target_end']]
+            captured[step['ref']] = (req, build_report(step, rec, s_core, t_core))
+        elif op == 'deliver_captured':
+            req, rep = captured[step['ref']]
+            applied = records.apply_response(payload, req, rep, basis)
+            if step.get('expect_rejected'):
+                if applied.outcome != 'discarded':
+                    raise RuntimeError('expected discarded, got ' + applied.outcome)
+            else:
+                payload, basis = records.with_parts(payload, applied.parts), applied.basis
+        elif op == 'choose':
+            rec = records.parts_of(payload).segments[step['segment']]
+            s_core = payload['source'][rec['source_start']:rec['source_end']]
+            start = s_core.index(step['find'])
+            cand_id = candidates[step['candidate']]['candidate_id'] if step['choice'] == 'official_pair' else None
+            payload = records.with_parts(payload, records.choose(payload, step['segment'], start, start + len(step['find']), step['choice'], cand_id))
+        elif op == 'delete_paragraph':
+            s_parts = payload['source'].split('\n\n')
+            t_parts = payload['target'].split('\n\n')
+            s_before, t_before = payload['source'], payload['target']
+            del s_parts[step['paragraph']]
+            del t_parts[step['paragraph']]
+            payload = apply_edit_only('source', s_before, '\n\n'.join(s_parts), payload)
+            payload = apply_edit_only('target', t_before, '\n\n'.join(t_parts), payload)
+            payload = normalize_payload(payload, basis)
+        elif op == 'replace_text':
+            side = step['side']
+            before = payload[side]
+            after = before.replace(step['find'], step['replace'], 1)
+            payload = normalize_payload(apply_edit_only(side, before, after, payload), basis)
+        elif op == 'set_direction':
+            edited = {**payload, 'direction': step['direction']}
+            pairs = segmentation.pair_segments(edited['source'], edited['target'], alignments=edited['alignments'])
+            payload = records.with_parts(edited, records.normalize(edited, pairs, basis))
+        elif op == 'set_progress':
+            parts = records.parts_of(payload)
+            if 'current' in step:
+                parts = records.set_current(parts, step['current'])
+            if 'finished' in step:
+                for i in range(len(parts.segments)):
+                    parts = records.set_finished(parts, i, i in step['finished'])
+            payload = records.with_parts(payload, parts)
+        elif op == 'save_and_reopen':
+            raw = module.serialize_workfile(payload)
+            payload = module.parse_workfile(raw)
+            basis = None
+        elif op == 'restore_history':
+            payload = records.with_parts(payload, records.restore(payload, step['position'], step['segment']))
+        elif op == 'assert':
+            parts = records.parts_of(payload)
+            pairs = segmentation.pair_segments(payload['source'], payload['target'], alignments=payload['alignments'])
+            states = [records.record_view(r, payload, basis).state for r in parts.segments]
+            choices = [[[c['choice'], c['source_span']['start'], c['confirmed']] for c in r['choices']] for r in parts.segments]
+            plan = records.term_plan(payload, pairs, basis)
+            restorable_map = [None] * len(parts.history)
+            for pos, seg_idx in records.restorable(payload):
+                if restorable_map[pos] is None:
+                    restorable_map[pos] = seg_idx
+            checkpoints.append({
+                'states': states,
+                'choices': choices,
+                'history_count': len(parts.history),
+                'progress': parts.progress,
+                'probe': plan.probe,
+                'restorable': restorable_map,
+                'bytes': module.serialize_workfile(payload),
+            })
+    return checkpoints
+
+
 try:
     if request['operation'] == 'parse':
         result = module.parse_workfile(request['content'])
@@ -184,6 +338,8 @@ try:
         result = v3_runtime(request['operation'], request['payload'])
     elif request['operation'] == 'duplicate_case':
         result = duplicate_case(module, request['case'], request['basis'])
+    elif request['operation'] == 'operation_trace':
+        result = run_operation_trace(module, request['trace'], request['bases'], request['candidates'])
     elif request['operation'] == 'groups':
         result = module.choice_conflict_groups(request['payload'])
     else:
@@ -599,4 +755,24 @@ test('every invalid v4 fixture: Web and Windows give its code', () => {
     if (web !== c.error || fromWindows !== c.error) differing.push(`${c.file}: expected ${c.error}, Web ${web}, Windows ${fromWindows}`);
   }
   assert.deepEqual(differing, []);
+});
+
+const operationTracesPath = fileURLToPath(new URL('../../contracts/workbench-state/operation-traces.json', import.meta.url));
+const operationTraces = JSON.parse(readFileSync(operationTracesPath, 'utf8'));
+
+test('shared operation traces produce identical checkpoints and canonical v3/v4 bytes across Web and Windows', () => {
+  assert.equal(operationTraces.schema, 'wuwaterm-operation-traces-v1');
+  for (const trace of operationTraces.traces) {
+    const webCheckpoints = runWebTrace(trace);
+    const winCheckpoints = windows({
+      operation: 'operation_trace',
+      trace,
+      bases: operationTraces.bases,
+      candidates: operationTraces.candidates,
+    }).result;
+    assert.equal(winCheckpoints.length, webCheckpoints.length, `${trace.id}: checkpoint count mismatch`);
+    for (let i = 0; i < webCheckpoints.length; i += 1) {
+      assert.deepEqual(winCheckpoints[i], webCheckpoints[i], `${trace.id} checkpoint #${i} diverged between Web and Windows`);
+    }
+  }
 });
