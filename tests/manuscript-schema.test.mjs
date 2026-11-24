@@ -27,7 +27,7 @@ import {
   WORKFILE_FORMAT_VALUES,
   SUGGESTION_WITHHELD_REASON_VALUES,
 } from '../lib/generated/manuscript-contract.ts';
-import { validateJsonSchema } from '../scripts/validate-json-schema.mjs';
+import { assertSupportedSchema, validateJsonSchema } from '../scripts/validate-json-schema.mjs';
 
 const ROOT = process.cwd();
 const schema = JSON.parse(readFileSync(join(ROOT, 'contracts', 'schemas', 'manuscript.schema.json'), 'utf8'));
@@ -154,4 +154,27 @@ test('manuscript JSON Schema rejects structural invalid fixtures across v2, v3, 
   const v4Labeled = JSON.parse(readFileSync(join(ROOT, 'contracts', 'manuscript-v3', 'invalid-v3-format-v4.json'), 'utf8'));
   const v3OnlySchema = { $defs: schema.$defs, ...schema.$defs.ManuscriptV3 };
   assert.equal(validateJsonSchema(v3OnlySchema, v4Labeled).valid, false);
+});
+
+test('schema validator rejects unsupported Draft 2020-12 keywords and enforces codepoint lengths + structural uniqueness', () => {
+  assert.doesNotThrow(() => assertSupportedSchema(schema));
+  for (const [label, badSchema] of [
+    ['root minProperties', { type: 'object', minProperties: 1 }],
+    ['nested patternProperties', { type: 'object', properties: { x: { type: 'object', patternProperties: { '^a': { type: 'string' } } } } }],
+    ['$defs dependentRequired', { $defs: { A: { type: 'object', dependentRequired: { a: ['b'] } } }, $ref: '#/$defs/A' }],
+    ['oneOf if', { oneOf: [{ type: 'string', if: { const: 'x' } }] }],
+    ['unevaluatedProperties', { type: 'object', unevaluatedProperties: false }],
+    ['format', { type: 'string', format: 'uuid' }],
+    ['exclusiveMinimum', { type: 'number', exclusiveMinimum: 0 }],
+    ['missing $ref', { $ref: '#/$defs/DoesNotExist' }],
+  ]) {
+    assert.throws(() => validateJsonSchema(badSchema, {}), /Unsupported|Missing \$def/, `expected fail-closed throw for ${label}`);
+  }
+
+  // uniqueItems uses deep structural equality (not JSON.stringify key order) and lengths count Unicode scalars.
+  const uniqSchema = { type: 'array', uniqueItems: true, items: { type: 'object', properties: { a: { type: 'integer' }, b: { type: 'integer' } }, additionalProperties: false } };
+  assert.equal(validateJsonSchema(uniqSchema, [{ a: 1, b: 2 }, { b: 2, a: 1 }]).valid, false);
+  const strSchema = { type: 'string', minLength: 1, maxLength: 1 };
+  assert.equal(validateJsonSchema(strSchema, '🌊').valid, true);
+  assert.equal(validateJsonSchema(strSchema, '🌊a').valid, false);
 });

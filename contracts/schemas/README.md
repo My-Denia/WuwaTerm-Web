@@ -20,6 +20,15 @@
 - JSON nesting depth / field count / prototype-pollution key guards (`__proto__`, `constructor`, `prototype`)
 - Runtime reuse eligibility (`source_hash`/`target_hash`, `alignment_input`, live session basis)
 
+## Schema Validator Keyword Allowlist
+
+[`scripts/validate-json-schema.mjs`](../../scripts/validate-json-schema.mjs) is a zero-dependency Draft 2020-12 subset engine gated by `assertSupportedSchema` (failing closed if any schema introduces an unsupported keyword, unknown `type`, or missing `$ref`):
+- Metadata/definitions: `$schema`, `$id`, `title`, `description`, `$defs`, `$ref`
+- Types & scalars: `type` (`null`, `boolean`, `string`, `number`, `integer`, `array`, `object`), `const`, `enum`, `minLength`, `maxLength` (Unicode code points), `pattern` (`/u`), `minimum`, `maximum`
+- Arrays: `minItems`, `maxItems`, `uniqueItems` (structural deep equality), `prefixItems`, `items`
+- Objects: `required`, `properties`, `additionalProperties`, prototype-pollution key blocks
+- Combinators: `allOf`, `anyOf`, `oneOf`, `not`
+
 ## Regenerating and Checking DTOs
 
 ```bash
