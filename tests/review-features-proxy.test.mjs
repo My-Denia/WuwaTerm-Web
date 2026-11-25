@@ -118,20 +118,23 @@ test('dense-128 allows 128 resolutions in a request, and no more; the parser rea
   const dense = n => ({ ...input, resolutions: resolutions(n), resolution_context: context });
   const ok = await parseReviewRequest(post(dense(128), { 'X-WuwaTerm-Review-Features': 'dense-128,reason-v1' }));
   assert.equal(ok.ok, true);
-  assert.deepEqual(ok.features, { dense: true, reason: true });
+  assert.deepEqual(ok.features, { dense: true, reason: true, ambiguous: false });
   assert.deepEqual(ok.input, dense(128), 'the features never enter the forwarded body');
   assert.equal((await parseReviewRequest(post(dense(129), { 'X-WuwaTerm-Review-Features': 'dense-128' }))).ok, false);
   assert.equal((await parseReviewRequest(post(dense(33)))).ok, false, 'no header: 32 at most');
   assert.equal((await parseReviewRequest(post(dense(33), { 'X-WuwaTerm-Review-Features': 'reason-v1' }))).ok, false, 'reason-v1 alone does not raise the resolutions');
   assert.equal((await parseReviewRequest(post(dense(32)))).ok, true);
   const none = await parseReviewRequest(post(input));
-  assert.deepEqual(none.features, { dense: false, reason: false });
+  assert.deepEqual(none.features, { dense: false, reason: false, ambiguous: false });
   const blank = await parseReviewRequest(post(input, { 'X-WuwaTerm-Review-Features': '  ' }));
   assert.equal(blank.ok, true);
-  assert.deepEqual(blank.features, { dense: false, reason: false });
-  assert.deepEqual((await parseReviewRequest(post(input, { 'X-WuwaTerm-Review-Features': ' reason-v1 ' }))).features, { dense: false, reason: true });
+  assert.deepEqual(blank.features, { dense: false, reason: false, ambiguous: false });
+  assert.deepEqual((await parseReviewRequest(post(input, { 'X-WuwaTerm-Review-Features': ' reason-v1 ' }))).features, { dense: false, reason: true, ambiguous: false });
+  assert.deepEqual((await parseReviewRequest(post(input, { 'X-WuwaTerm-Review-Features': 'dense-128,reason-v1,ambiguous-mention-v1' }))).features,
+    { dense: true, reason: true, ambiguous: true });
   // An unknown, repeated or empty token, and any token on review-v1, is site_invalid_request.
-  for (const header of ['dense-256', 'dense-128,dense-128', 'dense-128,', ',', 'DENSE-128', 'dense-128 reason-v1']) {
+  // ambiguous-mention-v1 needs reason-v1 on the same request, as Core refuses it alone.
+  for (const header of ['dense-256', 'dense-128,dense-128', 'dense-128,', ',', 'DENSE-128', 'dense-128 reason-v1', 'ambiguous-mention-v1', 'dense-128,ambiguous-mention-v1']) {
     const refused = await parseReviewRequest(post(input, { 'X-WuwaTerm-Review-Features': header }));
     assert.equal(refused.ok, false, header);
     assert.equal(refused.response.status, 400);

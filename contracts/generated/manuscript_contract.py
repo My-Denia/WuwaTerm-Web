@@ -14,6 +14,15 @@ Verdict = Literal["verified_constraint", "confirmed_conflict", "needs_review", "
 REASON_VALUES: tuple[str, ...] = ("not_a_term", "ordinary_word", "no_target_region", "found_outside_region", "ambiguous_repeat",)
 ReasonValue = Literal["not_a_term", "ordinary_word", "no_target_region", "found_outside_region", "ambiguous_repeat"]
 
+REASON_VALUES_V5: tuple[str, ...] = ("not_a_term", "ordinary_word", "no_target_region", "found_outside_region", "ambiguous_repeat", "ambiguous_mention",)
+ReasonValueV5 = Literal["not_a_term", "ordinary_word", "no_target_region", "found_outside_region", "ambiguous_repeat", "ambiguous_mention"]
+
+REVIEW_FEATURE_VALUES: tuple[str, ...] = ("ambiguous-mention-v1",)
+ReviewFeature = Literal["ambiguous-mention-v1"]
+
+SEGMENTATION_VERSION_V5_VALUES: tuple[str, ...] = ("segmentation-v1", "segmentation-v1-gaps",)
+SegmentationVersionV5 = Literal["segmentation-v1", "segmentation-v1-gaps"]
+
 CHOICE_KIND_VALUES: tuple[str, ...] = ("official_pair", "not_a_term",)
 ChoiceKind = Literal["official_pair", "not_a_term"]
 
@@ -44,8 +53,8 @@ SemanticResponseStatus = Literal["complete", "not_reviewed"]
 SEMANTIC_DECISION_KIND_VALUES: tuple[str, ...] = ("accepted", "adjusted", "ignored",)
 SemanticDecisionKind = Literal["accepted", "adjusted", "ignored"]
 
-WORKFILE_FORMAT_VALUES: tuple[str, ...] = ("wuwaterm-manuscript-v1", "wuwaterm-manuscript-v2", "wuwaterm-manuscript-v3", "wuwaterm-manuscript-v4",)
-WorkfileFormat = Literal["wuwaterm-manuscript-v1", "wuwaterm-manuscript-v2", "wuwaterm-manuscript-v3", "wuwaterm-manuscript-v4"]
+WORKFILE_FORMAT_VALUES: tuple[str, ...] = ("wuwaterm-manuscript-v1", "wuwaterm-manuscript-v2", "wuwaterm-manuscript-v3", "wuwaterm-manuscript-v4", "wuwaterm-manuscript-v5",)
+WorkfileFormat = Literal["wuwaterm-manuscript-v1", "wuwaterm-manuscript-v2", "wuwaterm-manuscript-v3", "wuwaterm-manuscript-v4", "wuwaterm-manuscript-v5"]
 
 class ContractSpan(TypedDict):
     start: int
@@ -129,6 +138,16 @@ class ContractFindingV4(TypedDict):
     candidates_truncated: bool
     reason: NotRequired[ReasonValue]
 
+class ContractFindingV5(TypedDict):
+    id: str
+    rule_id: str
+    verdict: Verdict | Literal['not_evaluated']
+    source_span: ContractSpan
+    target_span: None | ContractSpan
+    candidates: list[ContractCandidateV2]
+    candidates_truncated: bool
+    reason: NotRequired[ReasonValueV5]
+
 class ContractReportV1(TypedDict):
     request_id: str
     source_revision: str
@@ -160,6 +179,17 @@ class ContractReportV4(TypedDict):
     dictionary: ContractDictionaryV2
     coverage: ContractReviewCoverage
     findings: list[ContractFindingV4]
+    truncated: bool
+
+class ContractReportV5(TypedDict):
+    request_id: str
+    source_revision: str
+    target_revision: str
+    rule_version: Literal['review-v2']
+    matcher_revision: NotRequired[str]
+    dictionary: ContractDictionaryV2
+    coverage: ContractReviewCoverage
+    findings: list[ContractFindingV5]
     truncated: bool
 
 class ContractChoiceBasis(TypedDict):
@@ -195,6 +225,14 @@ class ContractHistorySnapshotV4(TypedDict):
     direction: Direction
     alignments: None | list[ContractAlignment]
     report: ContractReportV1 | ContractReportV4
+    resolutions: NotRequired[list[ContractResolution]]
+
+class ContractHistorySnapshotV5(TypedDict):
+    source: str
+    target: str
+    direction: Direction
+    alignments: None | list[ContractAlignment]
+    report: ContractReportV1 | ContractReportV5
     resolutions: NotRequired[list[ContractResolution]]
 
 class ContractSemanticTermBasis(TypedDict):
@@ -295,6 +333,14 @@ class ContractCompactFindingV4(TypedDict):
     candidates_truncated: bool
     reason: NotRequired[ReasonValue]
 
+class ContractCompactFindingV5(TypedDict):
+    verdict: Verdict | Literal['not_evaluated']
+    source: tuple[int, int]
+    target: None | tuple[int, int]
+    candidates: list[ContractCompactCandidate]
+    candidates_truncated: bool
+    reason: NotRequired[ReasonValueV5]
+
 class ContractCompactResultV3(TypedDict):
     truncated: bool
     evaluated: int
@@ -306,6 +352,12 @@ class ContractCompactResultV4(TypedDict):
     evaluated: int
     not_evaluated: int
     findings: list[ContractCompactFindingV4]
+
+class ContractCompactResultV5(TypedDict):
+    truncated: bool
+    evaluated: int
+    not_evaluated: int
+    findings: list[ContractCompactFindingV5]
 
 class ContractSegmentChoice(TypedDict):
     source_span: ContractSpan
@@ -358,6 +410,22 @@ class ContractSegmentRecordV4(TypedDict):
     alignment_input: None | Literal['automatic'] | str
     basis: None | ContractV3Basis
     result: None | ContractCompactResultV4
+    choices: list[ContractPendingSegmentChoice] | list[ContractSegmentChoice]
+
+class ContractSegmentRecordV5(TypedDict):
+    index: int
+    segmentation_version: SegmentationVersionV5
+    source_start: int
+    source_end: int
+    target_start: int
+    target_end: int
+    source_hash: str
+    target_hash: str
+    status: Literal['pending'] | Literal['done', 'stale']
+    direction: None | Direction
+    alignment_input: None | Literal['automatic'] | str
+    basis: None | ContractV3Basis
+    result: None | ContractCompactResultV5
     choices: list[ContractPendingSegmentChoice] | list[ContractSegmentChoice]
 
 class ContractProgress(TypedDict):
@@ -415,9 +483,26 @@ class ContractManuscriptV4(TypedDict):
     segment_choice_history: list[ContractSegmentHistoryEntry]
     progress: ContractProgress
 
+class ContractManuscriptV5(TypedDict):
+    format: Literal['wuwaterm-manuscript-v5']
+    source: str
+    target: str
+    direction: Direction
+    alignments: None | list[ContractAlignment]
+    choices: list[ContractDocumentChoice]
+    history: list[ContractHistorySnapshotV5]
+    semantic_decisions: list[ContractSemanticDecision]
+    semantic_texts: list[ContractSemanticText]
+    semantic_history: list[ContractSemanticHistorySnapshot]
+    segments: list[ContractSegmentRecordV5]
+    segment_choice_history: list[ContractSegmentHistoryEntry]
+    progress: ContractProgress
+    review_features: list[ReviewFeature]
+
 ContractManuscript = (
     ContractManuscriptV1
     | ContractManuscriptV2
     | ContractManuscriptV3
     | ContractManuscriptV4
+    | ContractManuscriptV5
 )

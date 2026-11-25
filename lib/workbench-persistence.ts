@@ -72,8 +72,8 @@ export function semanticWorkfileParts<T extends { source: string; target: string
  * never a sentence-meaning certification. A segment term report is the live response when it was obtained in this
  * session, else the report rebuilt from the saved record (SPEC "Compact term result": request_id null, no sources).
  */
-export function semanticExport(draft: Draft, semantic: SemanticState, basis: SessionBasis) {
-  const segments = segmentInputs(draft).long ? longExportRows(semantic.long, { draft, basis }) : [];
+export function semanticExport(draft: Draft, semantic: SemanticState, basis: SessionBasis, features: readonly string[] | null = []) {
+  const segments = segmentInputs(draft).long ? longExportRows(semantic.long, { draft, basis, features }) : [];
   const terms = segments.length ? {
     segment_term_reports: segments.map(({ index, stale, source_start, source_end, target_start, target_end, report }) => ({ segment: index + 1, stale, source_start, source_end, target_start, target_end, report })),
   } : {};

@@ -297,19 +297,21 @@ test('long mode R4: deleting one paragraph\'s translation keeps its source ancho
   assert.deepEqual(states(after, out.draft), ['current+finished', 'current+finished', 'pending', 'current+finished']);
 });
 
-// Pinned limitation, not a goal: segmentation-v1 (Core contracts/segmentation-v1.json) pairs explicit alignments only when they
-// cover every non-whitespace scalar, and manuscript-v3 SPEC "Records" stores one record per segment of that pairing. Once an
-// edit invalidates an entry of a covering list, the kept list leaves an uncovered gap and the whole manuscript becomes one
-// needs_manual_split pair, so every record turns pending. The alignments themselves stay local (the user re-aligns one range,
-// or uses automatic alignment), and undo restores the records exactly (next test).
-test('long mode R3 with covering alignments: the kept list leaves a gap and the pairing becomes one manual segment', () => {
+// segmentation-v1 (Core contracts/segmentation-v1.json) pairs explicit alignments only when they cover every non-whitespace
+// scalar; otherwise the whole manuscript is one needs_manual_split pair. Once an edit invalidates an entry of a covering list,
+// the kept list leaves an uncovered gap, so the records pair with gap regions instead (manuscript-v5 SPEC "Gap-tolerant segment
+// records"): the two kept alignments keep their segments, results and finished marks, and only the gap needs a manual split.
+// Undo restores the records exactly (next test).
+test('long mode R3 with covering alignments: the kept list leaves a gap, and only the gap becomes a manual segment', () => {
   const before = checkedLong(LONG_DRAFT);
   const out = applyEditTransaction(LONG_DRAFT, { kind: 'splice', side: 'source', start: 1303 + 1290, end: 2 * 1303 + 10, replacement: '' });
   assert.deepEqual(out.invalidated.map(x => [x.originalIndex, x.reason]), [[1, 'crossed_boundary'], [2, 'crossed_boundary']]);
   assert.equal(out.draft.alignments.length, 2);
-  assert.deepEqual(L.segmentInputs(out.draft).items.map(x => x.pair.status), ['needs_manual_split']);
+  const inputs = L.segmentInputs(out.draft);
+  assert.equal(inputs.version, 'segmentation-v1-gaps');
+  assert.deepEqual(inputs.items.map(x => x.pair.status), ['ready', 'needs_manual_split', 'ready']);
   const after = L.reconcileLong(before, LONG_DRAFT, out.draft);
-  assert.deepEqual(states(after, out.draft), ['pending']);
+  assert.deepEqual(states(after, out.draft), ['current+finished', 'pending', 'current+finished']);
 });
 
 test('long mode: undo after an invalidating edit restores the segment records, results and finished marks exactly', async () => {
@@ -327,7 +329,7 @@ test('long mode: undo after an invalidating edit restores the segment records, r
   const edited = doc.getSnapshot();
   assert.equal(edited.notice, 'editedAlignmentsPartial');
   assert.equal(edited.draft.alignments.length, 2);
-  assert.equal(edited.semantic.long.records.length, 1);
+  assert.equal(edited.semantic.long.records.length, 3);
   doc.undo();
   const undone = doc.getSnapshot();
   assert.deepEqual(undone.draft, opened.draft);
