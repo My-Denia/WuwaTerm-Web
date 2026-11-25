@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { makeChoice, serializeWorkfile } from '../../lib/manuscript.js';
 import { candidate, fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
@@ -37,6 +38,7 @@ async function open(page, reviews) {
     throw new Error(`Unexpected API request: ${path}`);
   });
   await page.goto(BASE + '/');
+  await openManuscript(page);
   await expect(page.locator('.review-quota')).toContainText('60', { timeout: 30_000 });
 }
 
@@ -128,6 +130,7 @@ test('import match follows the choice and returns after undo', async ({ page }) 
     page.getByRole('link', { name: '使用与限额', exact: true }).click(),
   ]);
   await page.goto(BASE + '/');
+  await openManuscript(page);
   await expect(page.locator('.review-quota')).toContainText('60');
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'manuscript.json', mimeType: 'application/json', buffer: manuscriptFile(),
@@ -189,10 +192,12 @@ for (const direction of ['Back', 'Forward']) {
     });
     await page.getByRole('link', { name: '隐私说明' }).first().click();
     await page.getByRole('link', { name: /返回 WuwaTerm/ }).click();
+    await openManuscript(page);
     await expect(page.locator('.review-quota')).toContainText('60', { timeout: 30_000 });
     if (direction === 'Forward') {
       await page.getByRole('link', { name: '使用与限额', exact: true }).click();
       await page.goBack();
+      await openManuscript(page);
       await expect(page.locator('.review-quota')).toContainText('60', { timeout: 30_000 });
     }
     await page.locator('#review-source').fill('今汐。');

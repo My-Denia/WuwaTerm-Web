@@ -50,8 +50,8 @@ without charging anything. The public Site's Core does not list
 `semantic-review-v1` (the feature is experimental and off by default), so on the
 public Site this path is idle.
 
-Optional `/api/meta` is not requested when the page loads. Opening 「词典版本」
-asks once for the dictionary the running service reports: database schema
+Optional `/api/meta` is not requested when the page loads. In 「运行详情」,
+「查看词典版本」 asks once for the dictionary the running service reports: database schema
 version, source commit, game version, resource version, changelist, term count,
 and the request id. Closing and reopening that panel reuses the read.
 「重新读取」asks again. Each ask spends one shared meta admission (60 per UTC
@@ -62,6 +62,27 @@ repository pin, a candidate database, or a deployment claim. The browser
 response does not include the device token, backend URL, `llm_configured`, or
 service configuration. The Telegram bot, Windows client and API contract are
 separate surfaces and are unchanged by public Site access.
+
+## One document workspace
+
+The home page holds one document: a source, its translation, the target language
+and one undo and redo history (50 steps each). Quick translation and manuscript
+review are two layouts of that document, not two tools. Quick mode shows the term
+lookup beside the two editors and translates the whole source in one request of
+up to 2,000 characters, with the direction detected automatically unless the
+user picks one. When either side passes 2,000 characters, a manuscript file is
+imported, or the user opens manuscript review, the page switches to manuscript
+review in place: the texts, the history, the caret and an IME composition stay,
+and nothing asks to hand the text over. It never switches back on its own, and
+quick mode is unavailable while the document is past the limit.
+
+One status line shows the pool snapshot, the dictionary the latest report or a
+requested provenance names, the features the service lists and whether the
+manuscript is saved. The 「运行详情」 drawer holds the shared-pool explanation,
+every allowance, the dictionary provenance and the product notes. A page load
+reads `/api/pool` and `/api/capabilities` once each; the pool is read again only
+after a request that spends it or an explicit refresh. Nothing is written to
+browser storage.
 
 ## Resumable bilingual manuscripts
 

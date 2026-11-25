@@ -39,9 +39,11 @@ test('without translation-context-v1 no context is sent, and a folded translatio
 });
 
 for (const [label, capabilities, extra] of [['negotiated', FULL, { context: {} }], ['not negotiated', [], {}]]) {
-  test(`the translation workbench sends context {} on a whole-text translation only when negotiated (${label})`, async ({ page }) => {
+  test(`quick translation sends context {} on a whole-text translation only when negotiated (${label})`, async ({ page }) => {
     const rec = await openWorkbench(page, { capabilities });
-    await page.locator('#translation-source').fill('今汐。\n\n声骸。');
+    await page.locator('.mode-switch button').first().click();
+    await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'quick');
+    await page.locator('#review-source').fill('今汐。\n\n声骸。');
     await page.getByRole('button', { name: M.translation.submitIdle, exact: true }).click();
     await expect.poll(() => rec.translations.length).toBe(1);
     expect(rec.translations[0]).toEqual({ text: '今汐。\n\n声骸。', ...extra });

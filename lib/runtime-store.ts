@@ -1,0 +1,158 @@
+// The page's one source of runtime data: the pool snapshot, the negotiated capabilities and the dictionary provenance.
+// Every view and the document controller read it here, so a page load asks for each at most once. React-free, so the
+// request accounting is testable without a browser; lib/runtime-provider.tsx binds it to the page.
+import { isPool, type Pool } from './pool-snapshot.ts';
+import { workbenchPath } from './ui-runtime.ts';
+
+export type PoolView = { kind: 'off' } | { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
+
+export type Provenance = {
+  schema_version: string | null;
+  source_commit: string | null;
+  game_version: string | null;
+  resource_version: string | null;
+  changelist: string | null;
+  term_count: number;
+  request_id: string;
+};
+export type MetaView = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; data: Provenance } | { kind: 'error' };
+
+export type RuntimeSnapshot = {
+  pool: PoolView;
+  /** null until the first read finishes; [] when it failed. */
+  capabilities: string[] | null;
+  meta: MetaView;
+};
+
+export type RuntimeFetch = (path: string, init: RequestInit) => Promise<Response>;
+
+const PROVENANCE_KEYS = [
+  'changelist', 'game_version', 'request_id', 'resource_version',
+  'schema_version', 'source_commit', 'term_count',
+];
+
+function nullable(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && value.length > 0 && value.length <= 256);
+}
+
+export function isProvenance(value: unknown): value is Provenance {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).sort().join('\u0000') !== [...PROVENANCE_KEYS].sort().join('\u0000')) return false;
+  return nullable(record.schema_version)
+    && nullable(record.source_commit)
+    && nullable(record.game_version)
+    && nullable(record.resource_version)
+    && nullable(record.changelist)
+    && Number.isInteger(record.term_count)
+    && (record.term_count as number) >= 0
+    && typeof record.request_id === 'string'
+    && record.request_id.length > 0;
+}
+
+async function json(response: Response): Promise<unknown> {
+  try { return await response.json(); } catch { return null; }
+}
+
+export type RuntimeStoreOptions = {
+  fetch?: RuntimeFetch;
+  /** Whether this page reads the pool at all (the public limits page shows the published ceilings instead). */
+  pool?: boolean;
+};
+
+export class RuntimeStore {
+  private readonly fetcher: RuntimeFetch;
+  private readonly poolEnabled: boolean;
+  private state: RuntimeSnapshot;
+  private readonly listeners = new Set<() => void>();
+  private started = false;
+  private poolAbort: AbortController | null = null;
+  private capabilitiesPromise: Promise<string[]> | null = null;
+  private metaPromise: Promise<void> | null = null;
+
+  constructor(options: RuntimeStoreOptions = {}) {
+    this.fetcher = options.fetch ?? ((path, init) => fetch(workbenchPath(path), init));
+    this.poolEnabled = options.pool ?? true;
+    this.state = { pool: this.poolEnabled ? { kind: 'loading' } : { kind: 'off' }, capabilities: null, meta: { kind: 'idle' } };
+  }
+
+  readonly getSnapshot = (): RuntimeSnapshot => this.state;
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+
+  private set(patch: Partial<RuntimeSnapshot>): void {
+    this.state = { ...this.state, ...patch };
+    for (const listener of this.listeners) listener();
+  }
+
+  /** Idempotent: the first call reads the pool; a second mount of the same page (React StrictMode) asks for nothing. */
+  start(): void {
+    if (this.started) return;
+    this.started = true;
+    this.refreshPool();
+  }
+
+  /** Read the pool again; a newer read replaces one still in flight. The last good snapshot stays visible meanwhile. */
+  refreshPool(): void {
+    if (!this.poolEnabled) return;
+    this.poolAbort?.abort();
+    const abort = new AbortController();
+    this.poolAbort = abort;
+    void (async () => {
+      try {
+        const response = await this.fetcher('/api/pool', { cache: 'no-store', signal: abort.signal });
+        const value = await json(response);
+        if (abort.signal.aborted) return;
+        this.set({ pool: response.ok && isPool(value) ? { kind: 'success', data: value } : { kind: 'error' } });
+      } catch {
+        if (!abort.signal.aborted) this.set({ pool: { kind: 'error' } });
+      } finally {
+        if (this.poolAbort === abort) this.poolAbort = null;
+      }
+    })();
+  }
+
+  /** The negotiated capabilities, read once per page and shared by every caller; a failed read counts as none. */
+  capabilities(): Promise<string[]> {
+    if (this.capabilitiesPromise) return this.capabilitiesPromise;
+    this.capabilitiesPromise = (async () => {
+      let list: string[] = [];
+      try {
+        const response = await this.fetcher('/api/capabilities', { cache: 'no-store' });
+        const value = await json(response) as { capabilities?: unknown } | null;
+        list = response.ok && Array.isArray(value?.capabilities)
+          ? value.capabilities.filter((x): x is string => typeof x === 'string')
+          : [];
+      } catch { list = []; }
+      this.set({ capabilities: list });
+      return list;
+    })();
+    return this.capabilitiesPromise;
+  }
+
+  /**
+   * The dictionary provenance. Each read counts against the dictionary-info quota, so it is read only on request: the
+   * first call reads it, later calls reuse it until `force`, and a call while one is in flight joins it.
+   */
+  loadMeta(force = false): Promise<void> {
+    if (this.metaPromise) return this.metaPromise;
+    if (!force && (this.state.meta.kind === 'success' || this.state.meta.kind === 'error')) return Promise.resolve();
+    this.set({ meta: { kind: 'loading' } });
+    const promise = (async () => {
+      try {
+        const response = await this.fetcher('/api/meta', { cache: 'no-store' });
+        const value = await json(response);
+        this.set({ meta: response.ok && isProvenance(value) ? { kind: 'success', data: value } : { kind: 'error' } });
+      } catch {
+        this.set({ meta: { kind: 'error' } });
+      } finally {
+        this.metaPromise = null;
+      }
+    })();
+    this.metaPromise = promise;
+    return promise;
+  }
+}

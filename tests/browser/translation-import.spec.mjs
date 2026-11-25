@@ -1,13 +1,14 @@
 import { test, expect } from '@playwright/test';
 
-// TranslationWorkbench source-file import: a read that resolves after the user
-// has moved on must lose to the newer edit, term insert, query move or
-// translation. File.arrayBuffer is delayed/rejected at the browser boundary;
-// the component state and generation guard are the code under test, not mocked.
+// Source-file import in quick mode: the one import of the document workspace. A read that resolves after the user has
+// moved on must lose to the newer edit, term insert, query move or translation, and say so instead of overwriting.
+// File.arrayBuffer is delayed/rejected at the browser boundary; the controller's generation and attempt guards are the
+// code under test, not mocked.
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const NEW = { source: '今汐。', target: 'Jinhsi.' };
 const NEXT = { source: '声骸。', target: 'Echo.' };
 const STALE = '迟到文件原文。';
+const CHANGED = '读取文件期间稿件发生变化，未覆盖当前内容，请重新导入。';
 
 const POOL = {
   status: 'available',
@@ -84,47 +85,48 @@ const pendingReads = page => page.evaluate(() => window.__pendingReads());
 test('a late file read loses to a newer edit, term insert or query move', async ({ page }) => {
   await delayedReads(page);
   await open(page);
-  const source = page.locator('#translation-source');
-  const fileInput = page.getByLabel('选择原稿文本文件');
-  const fileStatus = page.locator('.translation-file-status');
+  const source = page.locator('#review-source');
+  const fileInput = page.getByLabel('选择稿件文件');
+  const changed = page.locator('.notice-state', { hasText: CHANGED });
 
   await fileInput.setInputFiles({ name: 'stale-edit.md', mimeType: 'text/markdown', buffer: Buffer.from(STALE) });
   await expect.poll(() => pendingReads(page)).toContain('stale-edit.md');
   await source.fill('新编辑。');
   await page.evaluate(() => window.__resolveRead('stale-edit.md'));
+  await expect(changed).toHaveCount(1);
   await expect(source).toHaveValue('新编辑。');
-  await expect(fileStatus).toHaveCount(0);
 
   await page.locator('#term-query').fill('今汐');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   await expect(page.locator('.terms-results .term-result')).toHaveCount(1);
   await fileInput.setInputFiles({ name: 'stale-insert.md', mimeType: 'text/markdown', buffer: Buffer.from(STALE) });
   await expect.poll(() => pendingReads(page)).toContain('stale-insert.md');
   await page.locator('.terms-results').getByRole('button', { name: '填入翻译', exact: true }).click();
   await expect(source).toHaveValue('新编辑。 今汐');
   await page.evaluate(() => window.__resolveRead('stale-insert.md'));
+  await expect(changed).toHaveCount(1);
   await expect(source).toHaveValue('新编辑。 今汐');
-  await expect(fileStatus).toHaveCount(0);
 
-  await page.locator('#translation-source').fill('');
+  await source.fill('');
   await page.locator('#term-query').fill('未见词');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   await expect(page.getByRole('button', { name: '转到整句翻译', exact: true })).toBeVisible();
   await fileInput.setInputFiles({ name: 'stale-move.md', mimeType: 'text/markdown', buffer: Buffer.from(STALE) });
   await expect.poll(() => pendingReads(page)).toContain('stale-move.md');
   await page.getByRole('button', { name: '转到整句翻译', exact: true }).click();
   await expect(source).toHaveValue('未见词');
   await page.evaluate(() => window.__resolveRead('stale-move.md'));
+  await expect(changed).toHaveCount(1);
   await expect(source).toHaveValue('未见词');
-  await expect(fileStatus).toHaveCount(0);
 });
 
 test('a late file read neither cancels a newer translation nor paints its stale error', async ({ page }) => {
   await delayedReads(page);
   const { translations, held } = await open(page);
-  const source = page.locator('#translation-source');
-  const fileInput = page.getByLabel('选择原稿文本文件');
-  const fileStatus = page.locator('.translation-file-status');
+  const source = page.locator('#review-source');
+  const target = page.locator('#review-target');
+  const fileInput = page.getByLabel('选择稿件文件');
+  const waiting = page.locator('.notice-state', { hasText: '正在翻译，请稍候' });
 
   // Translation still pending while the older read resolves.
   await source.fill(NEW.source);
@@ -132,12 +134,12 @@ test('a late file read neither cancels a newer translation nor paints its stale 
   await expect.poll(() => pendingReads(page)).toContain('stale-pending.md');
   const release = hold(held);
   await page.getByRole('button', { name: '翻译整句', exact: true }).click();
-  await expect(page.locator('.notice-state')).toContainText('正在翻译，请稍候');
+  await expect(waiting).toHaveCount(1);
   await page.evaluate(() => window.__resolveRead('stale-pending.md'));
   await expect(source).toHaveValue(NEW.source);
-  await expect(page.locator('.notice-state')).toContainText('正在翻译，请稍候');
+  await expect(waiting).toHaveCount(1);
   release();
-  await expect(page.locator('.translated-text')).toHaveText(NEW.target);
+  await expect(target).toHaveValue(NEW.target);
   expect(translations.at(-1)).toEqual({ text: NEW.source });
 
   // Translation already finished while the older read was still pending.
@@ -145,11 +147,11 @@ test('a late file read neither cancels a newer translation nor paints its stale 
   await expect.poll(() => pendingReads(page)).toContain('stale-finished.md');
   await source.fill(NEXT.source);
   await page.getByRole('button', { name: '翻译整句', exact: true }).click();
-  await expect(page.locator('.translated-text')).toHaveText(NEXT.target);
+  await expect(target).toHaveValue(NEXT.target);
   await page.evaluate(() => window.__resolveRead('stale-finished.md'));
+  await expect(page.locator('.notice-state', { hasText: CHANGED })).toHaveCount(1);
   await expect(source).toHaveValue(NEXT.source);
-  await expect(page.locator('.translated-text')).toHaveText(NEXT.target);
-  await expect(fileStatus).toHaveCount(0);
+  await expect(target).toHaveValue(NEXT.target);
 
   // A failed old read must not put its error on the newer text either.
   await fileInput.setInputFiles({ name: 'stale-reject.md', mimeType: 'text/markdown', buffer: Buffer.from(STALE) });
@@ -157,42 +159,39 @@ test('a late file read neither cancels a newer translation nor paints its stale 
   await source.fill('失败后保留。');
   await page.evaluate(() => window.__rejectRead('stale-reject.md', 'File read error'));
   await expect(source).toHaveValue('失败后保留。');
-  await expect(fileStatus).toHaveCount(0);
   await expect(page.locator('.error-panel')).toHaveCount(0);
 });
 
 test('normal import, strict UTF-8 and the real 1 MiB file limit still hold', async ({ page }) => {
   await open(page);
-  const source = page.locator('#translation-source');
-  const fileInput = page.getByLabel('选择原稿文本文件');
-  const fileStatus = page.locator('.translation-file-status');
+  const source = page.locator('#review-source');
+  const fileInput = page.getByLabel('选择稿件文件');
 
-  // Normal .md import still applies, including a 2,005-character file: that is
-  // the whole-sentence translation limit, not the 1 MiB file limit.
+  // A 2,005-character file imports: that is the one-request translation limit, not the 1 MiB file limit. The document is
+  // then past the limit, so it opens in manuscript review, where whole-text translation is disabled for it.
   const longText = '今'.repeat(2005);
   await fileInput.setInputFiles({ name: 'source.md', mimeType: 'text/markdown', buffer: Buffer.from(longText) });
   await expect(source).toHaveValue(longText);
-  await expect(fileStatus.first()).toContainText('单次整句翻译限 2,000 字符');
-  await expect(page.getByRole('button', { name: '翻译整句', exact: true })).toBeDisabled();
-  await expect(page.locator('.translation-file-status[role="status"]', { hasText: '已从文件载入待翻译原文。' })).toHaveCount(1);
+  await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'manuscript');
+  await expect(page.locator('.notice-state')).toHaveText('已导入原稿文本；可生成译文或填入已有译文后核对术语。');
+  await expect(page.getByRole('button', { name: '生成译文', exact: true })).toBeDisabled();
 
   // A real file over 1 MiB is rejected before any read starts.
   await fileInput.setInputFiles({ name: 'huge.md', mimeType: 'text/markdown', buffer: Buffer.alloc(1_048_577, 0x61) });
-  await expect(page.locator('.translation-file-status[role="alert"]')).toContainText('原稿文件不能超过 1 MiB。');
+  await expect(page.locator('.error-panel')).toContainText('稿件文件超过大小上限');
   await expect(source).toHaveValue(longText);
 
   // Strict UTF-8 stays fatal.
   await fileInput.setInputFiles({ name: 'gbk.md', mimeType: 'text/markdown', buffer: Buffer.from([0xc4, 0xe3]) });
-  await expect(page.locator('.translation-file-status[role="alert"]')).toContainText('请确认文件为 UTF-8 编码');
+  await expect(page.locator('.error-panel')).toContainText('文件无效；当前稿件未被替换。');
   await expect(source).toHaveValue(longText);
-
 });
 
 test('a later file selection still wins over the earlier one', async ({ page }) => {
   await delayedReads(page);
   await open(page);
-  const source = page.locator('#translation-source');
-  const fileInput = page.getByLabel('选择原稿文本文件');
+  const source = page.locator('#review-source');
+  const fileInput = page.getByLabel('选择稿件文件');
 
   await fileInput.setInputFiles({ name: 'first.md', mimeType: 'text/markdown', buffer: Buffer.from('先选文件。') });
   await expect.poll(() => pendingReads(page)).toContain('first.md');
@@ -200,7 +199,7 @@ test('a later file selection still wins over the earlier one', async ({ page }) 
   await expect.poll(() => pendingReads(page)).toContain('second.md');
   await page.evaluate(() => window.__resolveRead('second.md'));
   await expect(source).toHaveValue('后选文件。');
-  await expect(page.locator('.translation-file-status[role="status"]', { hasText: '已从文件载入待翻译原文。' })).toHaveCount(1);
+  await expect(page.locator('.notice-state')).toHaveText('已导入原稿文本；可生成译文或填入已有译文后核对术语。');
   await page.evaluate(() => window.__resolveRead('first.md'));
   await expect(source).toHaveValue('后选文件。');
 });

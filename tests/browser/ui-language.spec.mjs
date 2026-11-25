@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -35,6 +36,7 @@ async function open(page) {
 }
 
 async function prepare(page) {
+  await openManuscript(page);
   await page.locator('#review-source').fill(SOURCE);
   await page.locator('#review-target').fill(TARGET);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
@@ -114,7 +116,8 @@ test('first visit defaults to Chinese with server-rendered lang and metadata', a
 test('toggling language switches copy in place, keeps workbench state, and sends no requests', async ({ page }) => {
   const { reviews } = await open(page);
   await prepare(page);
-  await page.locator('#translation-source').fill(CREDENTIAL_CANARY);
+  await page.locator('.term-lookup').getByRole('button', { name: '展开', exact: true }).click();
+  await page.locator('#term-query').fill(CREDENTIAL_CANARY);
   await page.getByRole('button', { name: '采用此官方词对', exact: true }).first().click();
   await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
   // The staged-choice notice stays visible and re-localizes when the language
@@ -137,7 +140,7 @@ test('toggling language switches copy in place, keeps workbench state, and sends
   // Workbench state survives: manuscript, currency semantics, choice, filter, active finding, expansion.
   await expect(page.locator('#review-source')).toHaveValue(SOURCE);
   await expect(page.locator('#review-target')).toHaveValue(TARGET);
-  await expect(page.locator('#translation-source')).toHaveValue(CREDENTIAL_CANARY);
+  await expect(page.locator('#term-query')).toHaveValue(CREDENTIAL_CANARY);
   // The staged choice reset the phase, so the honest state is "stale / re-check";
   // that semantics must survive the language switch unchanged.
   await expect(page.locator('.review-summary .review-stale')).toContainText('please check again');
@@ -163,6 +166,7 @@ test('toggling language switches copy in place, keeps workbench state, and sends
 
 test('translation direction is independent of interface language', async ({ page }) => {
   await open(page);
+  await openManuscript(page);
   await page.locator('#review-source').fill(SOURCE);
   await page.locator('#review-target').fill(TARGET);
   await page.getByLabel('译文语言').selectOption('zh');
@@ -220,6 +224,7 @@ test('a reason-less review error body still shows the localized fallback, and re
   });
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
+  await openManuscript(page);
   await page.locator('#review-source').fill('今汐。');
   await page.locator('#review-target').fill('Jinhsi.');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
@@ -265,8 +270,8 @@ test('the header keeps every label on one line from the phone layout up', async 
     for (const width of widths) {
       await page.setViewportSize({ width, height: 900 });
       const labels = await headerLabelLines(page);
-      // 1 brand, 4 pills, 2 document links and 2 language buttons.
-      expect(labels).toHaveLength(9);
+      // 1 brand, 2 pills, 2 document links and 2 language buttons.
+      expect(labels).toHaveLength(7);
       for (const { selector, text, lines } of labels) {
         expect(lines, `${language} ${width}px ${selector} “${text}”`).toBe(1);
       }

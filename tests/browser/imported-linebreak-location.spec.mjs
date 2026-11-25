@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { fixture } from '../fixtures/manuscript.mjs';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 
@@ -22,6 +23,7 @@ async function open(page) {
   });
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
+  await openManuscript(page);
   return calls;
 }
 

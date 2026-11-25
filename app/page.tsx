@@ -1,16 +1,15 @@
-import { DictionaryProvenance } from './components/dictionary-provenance';
-import { ReviewWorkbench } from './components/review-workbench';
-import { TranslationWorkbench } from './components/translation-workbench';
+import { DocumentWorkspace } from './components/document-workspace';
 import { SiteChrome } from './components/site-chrome';
+import { RuntimeProvider } from '../lib/runtime-provider';
 
 export default function Home() {
   return (
     <main id="top" className="site-main">
-      <SiteChrome>
-        <TranslationWorkbench />
-        <ReviewWorkbench />
-        <DictionaryProvenance />
-      </SiteChrome>
+      <RuntimeProvider>
+        <SiteChrome>
+          <DocumentWorkspace />
+        </SiteChrome>
+      </RuntimeProvider>
     </main>
   );
 }

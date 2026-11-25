@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 
@@ -46,6 +47,7 @@ async function open(page, reviewsRemaining) {
     throw new Error(`Unexpected API request: ${path}`);
   });
   await page.goto(BASE + '/');
+  await openManuscript(page);
   await expect(page.locator('.review-quota')).toContainText(`${reviewsRemaining} / 60`, { timeout: 30_000 });
   return reviews;
 }
@@ -77,11 +79,14 @@ async function downloadFrom(page, name) {
 /** Primary form vs draft-tool block, measured from the rendered DOM. */
 async function documentOrder(page) {
   return page.evaluate(() => {
-    const card = document.querySelector('.review-card');
+    const card = document.querySelector('.manuscript-editor-pane');
     const form = card.querySelector('form');
     const draft = card.querySelector('.draft-actions');
     const submit = form.querySelector('button[type="submit"]');
     const controls = [...draft.querySelectorAll('button, input[type="file"]')];
+    // Siblings between the form and the draft block: the hidden file input and the save-state line, no visible control.
+    const between = [];
+    for (let node = form.nextElementSibling; node && node !== draft; node = node.nextElementSibling) between.push(node.tagName + (node.type === 'file' ? '[file]' : ''));
     const buttons = controls.filter(node => node.tagName === 'BUTTON');
     const follows = (anchor, node) => !!(anchor.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING);
     let collapsed = false;
@@ -91,7 +96,7 @@ async function documentOrder(page) {
     return {
       formCount: card.querySelectorAll('form').length,
       draftAfterForm: follows(form, draft),
-      draftPreviousIsForm: draft.previousElementSibling === form,
+      between,
       draftOutsideForm: !form.contains(draft),
       checkBeforeDraftButtons: buttons.map(button => follows(submit, button)),
       labels: buttons.map(button => button.textContent),
@@ -103,7 +108,7 @@ async function documentOrder(page) {
 
 async function layout(page) {
   return page.evaluate(() => {
-    const card = document.querySelector('.review-card');
+    const card = document.querySelector('.manuscript-editor-pane');
     const form = card.querySelector('form');
     const draft = card.querySelector('.draft-actions');
     const submit = form.querySelector('button[type="submit"]');
@@ -127,10 +132,10 @@ test('the input form and its Check terms action precede every manuscript file to
   // The exact existing draft-tool block, still one uncollapsed sibling block.
   expect(order.draftOutsideForm).toBe(true);
   expect(order.collapsed).toBe(false);
-  expect(order.controlTags).toEqual(['BUTTON', 'BUTTON', 'BUTTON', 'INPUT[file]', 'BUTTON', 'BUTTON', 'BUTTON']);
+  expect(order.controlTags).toEqual(['BUTTON', 'BUTTON', 'BUTTON', 'BUTTON', 'BUTTON', 'BUTTON']);
   expect(order.labels).toEqual([ZH.clear, ZH.save, ZH.import, ZH.exportTxt, ZH.exportResult, ZH.exportMarkdown]);
-  // DOM hierarchy: the block sits immediately after the form, not before it.
-  expect(order.draftPreviousIsForm).toBe(true);
+  // DOM hierarchy: the block follows the form with only the hidden file input and the save-state line between them.
+  expect(order.between).toEqual(['INPUT[file]', 'P']);
   expect(order.draftAfterForm).toBe(true);
   // Rendered/accessibility-tree order: primary submit before every draft button.
   expect(order.checkBeforeDraftButtons).toEqual([true, true, true, true, true, true]);
@@ -185,7 +190,7 @@ test('keyboard order keeps the primary action before draft tools and skips it wh
       id: node?.id ?? '',
       label: node?.textContent?.trim() ?? '',
       inDraftActions: !!node?.closest('.draft-actions'),
-      isCheck: node === document.querySelector('.review-card form button[type="submit"]'),
+      isCheck: node === document.querySelector('.manuscript-editor-pane form button[type="submit"]'),
     };
   });
 

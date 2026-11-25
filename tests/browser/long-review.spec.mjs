@@ -376,7 +376,7 @@ test('a reused segment exports its rebuilt report, and an exported result cannot
   await expect(again.locator('#review-target')).toHaveValue(withTarget(n, 3, ' again'));
 });
 
-test('a sent draft asks before replacing a workbench that holds only the segment choice history', async ({ page }) => {
+test('a replacement asks before discarding a workbench that holds only the segment choice history', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: [] });
   const { source, target } = termPair(2);
   await fillPair(page, source, target);
@@ -385,11 +385,8 @@ test('a sent draft asks before replacing a workbench that holds only the segment
   // SPEC "Leaving long mode": emptying both boxes moves the choice to the segment choice history; it is still work.
   await fillPair(page, '', '');
   await expect(page.locator('.long-history summary')).toHaveText(fill(S.historyTitle, { n: 1 }));
-  await page.locator('#translation-source').fill('今汐。');
-  await page.getByRole('button', { name: '翻译整句', exact: true }).click();
-  await expect(page.locator('.translated-text')).toHaveText('Translated 1.');
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: M.review.dialogTitle });
+  await page.getByLabel(M.review.importFileAria).setInputFiles({ name: 'next.txt', mimeType: 'text/plain', buffer: Buffer.from('今汐。') });
+  const dialog = page.getByRole('dialog', { name: M.review.importReplaceTitle });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: M.review.dialogKeep, exact: true }).click();
   await expect(dialog).toBeHidden();

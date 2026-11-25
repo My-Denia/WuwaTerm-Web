@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -51,7 +52,7 @@ test('term results retain the response order and duplicate rows', async ({ page 
   ];
   const requests = await open(page, '', matches);
   await page.locator('#term-query').fill('候选');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   const rows = page.locator('.terms-results .term-result');
   await expect(rows).toHaveCount(matches.length);
   await expect(rows.locator('.term-pair strong')).toHaveText(matches.map(match => match.zh));
@@ -60,7 +61,7 @@ test('term results retain the response order and duplicate rows', async ({ page 
   expect(requests.terms).toBe(1);
 });
 
-test('moving a no-match query stops the old translation and ignores a late result', async ({ page }) => {
+test('moving a no-match query asks before replacing unsaved work, stops the old translation and ignores a late result', async ({ page }) => {
   await page.addInitScript(() => {
     const originalFetch = window.fetch;
     window.fetch = (input, init) => {
@@ -81,51 +82,63 @@ test('moving a no-match query stops the old translation and ignores a late resul
     } });
   });
   try {
-    await page.locator('#translation-source').fill('旧输入');
+    await page.locator('#review-source').fill('旧输入');
     await page.getByRole('button', { name: '翻译整句', exact: true }).click();
     await expect(page.getByRole('button', { name: '翻译中…', exact: true })).toBeVisible();
     await page.locator('#term-query').fill('新查询');
-    await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+    await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
     await page.getByRole('button', { name: '转到整句翻译', exact: true }).click();
+    // The typed source is unsaved work in the shared document, so moving the query asks first.
+    const dialog = page.getByRole('dialog', { name: '用查询词替换当前原文？' });
+    await dialog.getByRole('button', { name: '替换原文', exact: true }).click();
     expect(await page.evaluate(() => window.oldTranslationSignal.aborted)).toBe(true);
-    await expect(page.locator('#translation-source')).toHaveValue('新查询');
+    await expect(page.locator('#review-source')).toHaveValue('新查询');
     const response = page.waitForResponse('**/api/translations');
     release();
     await (await response).finished();
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    await expect(page.locator('#translation-source')).toHaveValue('新查询');
-    await expect(page.locator('.translated-text')).toHaveCount(0);
+    await expect(page.locator('#review-source')).toHaveValue('新查询');
+    await expect(page.locator('#review-target')).toHaveValue('');
+    await expect(page.locator('.translation-result')).toHaveCount(0);
+    // One undo brings the replaced source back.
+    await page.getByRole('button', { name: '撤销修订', exact: true }).click();
+    await expect(page.locator('#review-source')).toHaveValue('旧输入');
   } finally {
     release();
   }
 });
 
-test('term match actions: copy, insert to translation, and send to review', async ({ page }) => {
+test('term match actions: copy and insert into the source', async ({ page }) => {
   await open(page);
   await page.locator('#term-query').fill('今汐');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   const first = page.locator('.terms-results .term-result').first();
   await expect(first).toContainText('今汐');
   await expect(first).toContainText('Jinhsi');
 
   // Term actions exist and meet >= 40px touch height
   const insertBtn = first.getByRole('button', { name: '填入翻译', exact: true });
-  const reviewBtn = first.getByRole('button', { name: '送去审校', exact: true });
   await expect(insertBtn).toBeVisible();
-  await expect(reviewBtn).toBeVisible();
+  await expect(first.getByRole('button', { name: '送去审校', exact: true })).toHaveCount(0);
   const chipBox = await insertBtn.boundingBox();
   expect(chipBox?.height).toBeGreaterThanOrEqual(40);
 
-  // Test insert to translation
+  // Insert appends to the source of the one document, as one undoable edit.
   await insertBtn.click();
-  await expect(page.locator('#translation-source')).toHaveValue('今汐');
-  await expect(page.locator('#translation-source')).toBeFocused();
-
-  // Test send to review
-  await reviewBtn.click();
   await expect(page.locator('#review-source')).toHaveValue('今汐');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi');
   await expect(page.locator('#review-source')).toBeFocused();
+  await insertBtn.click();
+  await expect(page.locator('#review-source')).toHaveValue('今汐 今汐');
+  await page.getByRole('button', { name: '撤销修订', exact: true }).click();
+  await expect(page.locator('#review-source')).toHaveValue('今汐');
+
+  // Manuscript review folds the lookup and offers copying only.
+  await openManuscript(page);
+  await expect(page.locator('#term-lookup-body')).toBeHidden();
+  await page.locator('.term-lookup').getByRole('button', { name: '展开', exact: true }).click();
+  await expect(first).toBeVisible();
+  await expect(first.getByRole('button', { name: '填入翻译', exact: true })).toHaveCount(0);
+  await expect(first.getByRole('button', { name: '复制中文', exact: true })).toBeVisible();
 });
 
 test('query clear button resets input and results on demand without form button override', async ({ page }) => {
@@ -143,7 +156,7 @@ test('query clear button resets input and results on demand without form button 
 
   // Erasing query with backspace removes q from URL
   await page.locator('#term-query').fill('今汐');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   await expect(page).toHaveURL(/\/\?q=%E4%BB%8A%E6%B1%90/);
   await page.locator('#term-query').fill('');
   await expect(page).toHaveURL(/^http:\/\/[^/?]+(?:\/)?$/);
@@ -167,7 +180,7 @@ test('URL parameter ?q=... initializes and triggers term lookup on mount', async
 test('editing a submitted nonempty query drops q so return cannot rerun the stale lookup', async ({ page }) => {
   const requests = await open(page);
   await page.locator('#term-query').fill('今汐');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   await expect(page).toHaveURL(/\/\?q=%E4%BB%8A%E6%B1%90/);
   await expect(page.locator('.terms-results .term-result').first()).toContainText('Jinhsi');
 
@@ -178,7 +191,7 @@ test('editing a submitted nonempty query drops q so return cannot rerun the stal
   await expect(page.locator('.terms-results')).toHaveCount(0);
 
   // Internal links stop carrying the stale query
-  await expect(page.locator('.pool-notice a')).toHaveAttribute('href', '/limits');
+  await expect(page.locator('.runtime-drawer a[href^="/limits"]')).toHaveAttribute('href', '/limits');
 
   // Round trip through /limits restores neither the stale query nor its results
   await page.locator('.nav-links a[href*="/limits"]').click();
@@ -192,6 +205,7 @@ test('editing a submitted nonempty query drops q so return cannot rerun the stal
 
 test('clear draft in review workbench empties manuscript and undo restores it', async ({ page }) => {
   await open(page);
+  await openManuscript(page);
   await page.locator('#review-source').fill('测试原文');
   await page.locator('#review-target').fill('Test target');
   const clearBtn = page.getByRole('button', { name: '清空稿件', exact: true });
@@ -227,26 +241,29 @@ test('clear draft in review workbench empties manuscript and undo restores it', 
 test('section pills have at least 40px touch targets and allow direct navigation', async ({ page }) => {
   await open(page);
   const pills = page.locator('.section-pills .section-pill');
-  await expect(pills).toHaveCount(4);
-  for (let i = 0; i < 4; i += 1) {
+  await expect(pills).toHaveCount(2);
+  for (let i = 0; i < 2; i += 1) {
     const box = await pills.nth(i).boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(40);
   }
   await expect(pills.nth(0)).toHaveAttribute('href', '#terms-title');
-  await expect(pills.nth(1)).toHaveAttribute('href', '#translation-title');
-  await expect(pills.nth(2)).toHaveAttribute('href', '#review-title');
-  await expect(pills.nth(3)).toHaveAttribute('href', '#provenance-section');
+  await expect(pills.nth(1)).toHaveAttribute('href', '#workspace-title');
+  await pills.nth(1).click();
+  await expect(page).toHaveURL(/#workspace-title$/);
 });
 
 test('document return link preserves query parameter across navigation', async ({ page }) => {
   await open(page);
   await page.locator('#term-query').fill('今汐');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   await expect(page.locator('.terms-results .term-result').first()).toContainText('Jinhsi');
 
-  // Verify pool-notice limits link carries ?q=
-  const noticeLink = page.locator('.pool-notice a');
-  await expect(noticeLink).toHaveAttribute('href', '/limits?q=%E4%BB%8A%E6%B1%90');
+  // The shared-pool explanation in the runtime drawer links to limits with ?q=
+  await page.getByRole('button', { name: '运行详情', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: '运行详情' });
+  await expect(drawer.getByRole('link', { name: '了解额度' })).toHaveAttribute('href', '/limits?q=%E4%BB%8A%E6%B1%90');
+  await drawer.getByRole('button', { name: '关闭', exact: true }).click();
+  await expect(drawer).toBeHidden();
 
   // Navigate to limits via topbar link
   await page.locator('.nav-links a[href*="/limits"]').click();
@@ -284,6 +301,7 @@ test('document return link preserves query parameter across navigation', async (
 
 test('findings display excerpt labels and verdict badges', async ({ page }) => {
   await open(page);
+  await openManuscript(page);
   await page.locator('#review-source').fill('今汐在。');
   await page.locator('#review-target').fill('Jinhsi is here.');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();

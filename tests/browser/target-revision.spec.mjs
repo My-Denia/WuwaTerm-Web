@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { serializeWorkfile, makeChoice } from '../../lib/manuscript.js';
@@ -32,6 +33,7 @@ async function open(page, data = engine.cases[0], responder) {
   });
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
+  await openManuscript(page);
   await page.locator('#review-source').fill(data.before_request.source);
   await page.locator('#review-target').fill(data.before_request.target);
   if (data.before_request.direction === 'zh') await page.getByLabel('译文语言').selectOption('zh');
@@ -173,7 +175,8 @@ test('imported choices/provenance, explicit alignments and historical reports su
   expect(JSON.parse(await download(page, '保存稿件'))).toEqual(edited);
 });
 
-for (const mutation of ['source', 'target', 'direction', 'alignment', 'choice', 'undo', 'handoff', 'new-check', 'import']) {
+// A replacement of the whole document is covered by 'import'; the retired send-to-review event no longer exists.
+for (const mutation of ['source', 'target', 'direction', 'alignment', 'choice', 'undo', 'new-check', 'import']) {
   test(`pending revision cancels before ${mutation}; retained confirm cannot splice`, async ({ page }) => {
     const requests = await open(page); await start(page); await select(page, 'sound shell');
     const target = await page.locator('#review-target').inputValue();
@@ -188,12 +191,11 @@ for (const mutation of ['source', 'target', 'direction', 'alignment', 'choice', 
         const box = document.querySelector('#review-' + mutation);
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
         setter.call(box, box.value + '!'); box.dispatchEvent(new Event('input', { bubbles: true }));
-      } else if (mutation === 'direction') { const box = document.querySelector('.review-card select'); box.value = 'zh'; box.dispatchEvent(new Event('change', { bubbles: true })); }
+      } else if (mutation === 'direction') { const box = document.querySelector('.manuscript-editor-pane select'); box.value = 'zh'; box.dispatchEvent(new Event('change', { bubbles: true })); }
       else if (mutation === 'alignment') clickText('确认全文为一个对应段');
       else if (mutation === 'choice') clickText('采用此官方词对');
       else if (mutation === 'undo') clickText('撤销修订');
-      else if (mutation === 'handoff') window.dispatchEvent(new CustomEvent('wuwaterm-send-review', { detail: { source: '今汐。', target: 'Jinxi.', direction: 'en' } }));
-      else if (mutation === 'new-check') document.querySelector('.review-card form').requestSubmit();
+      else if (mutation === 'new-check') document.querySelector('.manuscript-editor-pane form').requestSubmit();
       confirm.click();
     }, mutation);
     await expect(dialog(page)).not.toBeVisible();
@@ -281,16 +283,4 @@ test('trusted located shortcut replaces one official-form span and does not adop
   await page.locator('.review-findings .term-result').nth(1).getByRole('button', { name: '替换已定位词语', exact: true }).nth(1).click();
   await expect(page.locator('#review-target')).toHaveValue('Jinhsi. Echo.');
   expect(JSON.parse(await download(page, '保存稿件')).choices).toEqual([]);
-});
-
-test('identical and invalid handoffs keep pending intent; no automatic second modal', async ({ page }) => {
-  const data = engine.cases[0]; await open(page); await start(page); await select(page, 'sound shell');
-  await page.evaluate(data => {
-    window.dispatchEvent(new CustomEvent('wuwaterm-send-review', { detail: data.before_request }));
-    window.dispatchEvent(new CustomEvent('wuwaterm-send-review', { detail: { source: 123 } }));
-  }, data);
-  await expect(dialog(page).getByRole('radio')).toBeChecked();
-  await expect(page.locator('dialog[open]')).toHaveCount(1);
-  await dialog(page).getByRole('button', { name: confirmName }).click();
-  await expect(page.locator('#review-target')).toHaveValue(data.after_request.target);
 });

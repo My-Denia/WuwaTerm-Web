@@ -4,7 +4,7 @@
 import { SEGMENT_LIMIT, core, paragraphRanges, segmentText } from './segmentation.ts';
 import { contextBefore, diffSplice, fitRequestBody, initialRun, nextToSend, runReducer, selectPrecedents } from './semantic-run.js';
 import {
-  applyResult, chooseTerm, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
+  applyResult, chooseTerm, isLong, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
   removeChoice, removeHistoryEntry, restorableHistory, restoreHistoryEntry, reviseSegmentTarget,
   sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished, spliceTargetSpan,
   termPlan, termSegmentKey, workfileParts,
@@ -33,8 +33,6 @@ import { highlightSegments, revisionOf } from './review-report.js';
 import { spliceOccurrence } from './target-revision.js';
 import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from './markdown-report.ts';
 import { msg } from './messages.ts';
-import { requestPoolRefresh } from './pool-snapshot.ts';
-import { workbenchPath } from './ui-runtime.ts';
 import { semanticExport, semanticFromWorkfile, semanticWorkfileParts } from './workbench-persistence.ts';
 import { postWorkbench, REVIEW_REQUEST_LIMIT, runFailure } from './workbench-transport.ts';
 import type { UiLanguage } from './ui-language.ts';
@@ -94,6 +92,23 @@ export type WorkbenchPost = (
 
 export type WorkbenchFetchCapabilities = (signal: AbortSignal) => Promise<string[]>;
 
+/**
+ * How the one document workspace is laid out. `quick`: a short source and its translation side by side; `manuscript`: the
+ * same document with alignments, term and semantic review, save and export. Both modes edit the same draft, history and
+ * reports; a long document, an imported manuscript or the user's explicit switch moves to `manuscript`, never back on its own.
+ */
+export type WorkspaceMode = 'quick' | 'manuscript';
+
+/** What the last whole-text translation returned, for the quick view; it describes the draft only while both texts match. */
+export type QuickTranslation = {
+  source: string;
+  text: string;
+  kind: 'noop' | 'exact' | 'fuzzy' | 'llm' | null;
+  direction: 'en' | 'zh';
+  dictionaryMiss: boolean;
+  requestId: string | null;
+};
+
 export type WorkbenchClock = {
   now: () => number;
   setTimeout: (fn: () => void, ms: number) => unknown;
@@ -110,6 +125,7 @@ export type WorkbenchControllerOptions = {
   uid?: () => string;
   initialCapabilities?: string[] | null;
   initialLang?: UiLanguage;
+  initialMode?: WorkspaceMode;
 };
 
 export type WorkbenchSnapshot = {
@@ -144,6 +160,12 @@ export type WorkbenchSnapshot = {
   lang: UiLanguage;
   usePrecedents: boolean;
   lastSemanticAction: SemanticActionRecord | null;
+  workspaceMode: WorkspaceMode;
+  /** Quick mode only: translate without a target language and take the direction the service detected. */
+  autoDirection: boolean;
+  lastTranslation: QuickTranslation | null;
+  /** How many undone steps redo can bring back; kept in the snapshot so a view re-renders when it changes. */
+  redoCount: number;
 };
 
 type TranslateRunStep =
@@ -171,20 +193,6 @@ const defaultClock: WorkbenchClock = {
   setInterval: (fn, ms) => globalThis.setInterval(fn, ms),
   clearInterval: id => globalThis.clearInterval(id as ReturnType<typeof setInterval>),
 };
-
-async function defaultFetchCapabilities(signal: AbortSignal): Promise<string[]> {
-  try {
-    const response = await fetch(workbenchPath('/api/capabilities'), { cache: 'no-store', signal });
-    let value: unknown = null;
-    try { value = await response.json(); } catch { value = null; }
-    const obj = value as { capabilities?: unknown } | null;
-    return response.ok && Array.isArray(obj?.capabilities)
-      ? obj.capabilities.filter((x): x is string => typeof x === 'string')
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 export function documentSignature(draft: Draft, resolutions: object[]): string {
   return JSON.stringify({ ...draft, resolutions });
@@ -272,8 +280,14 @@ export class WorkbenchController {
   private activeTypingTx: { side: 'source' | 'target'; at: number; serial: number } | null = null;
   /** Redo steps, newest last; any new edit clears them. */
   private future: UndoEntry[] = [];
-  /** An IME composition in progress: its side, the draft before it and the session invalidations then (one undo step). */
-  private composition: { side: 'source' | 'target'; base: Draft; invalidations: InvalidatedAlignment[] } | null = null;
+  /**
+   * An IME composition in progress: its side, the draft, session invalidations and semantic state before it (one undo step),
+   * and the semantic state its last update produced. While nothing else changed the semantic state, every update maps it from
+   * the base, so a composition that ends where it began leaves live spans and regions exactly as they were.
+   */
+  private composition: {
+    side: 'source' | 'target'; base: Draft; invalidations: InvalidatedAlignment[]; semantic: SemanticState; mapped: SemanticState | null;
+  } | null = null;
   private documentEpoch = 0;
   private reconcileGeneration = 0;
 
@@ -292,9 +306,10 @@ export class WorkbenchController {
 
   constructor(options: WorkbenchControllerOptions = {}) {
     this.post = options.post ?? postWorkbench;
-    this.fetchCapabilities = options.fetchCapabilities ?? defaultFetchCapabilities;
+    // The page's runtime provider is the one source of capabilities and the pool; a controller without it reads neither.
+    this.fetchCapabilities = options.fetchCapabilities ?? (async () => []);
     this.clock = options.clock ?? defaultClock;
-    this.onPoolRefresh = options.onPoolRefresh ?? requestPoolRefresh;
+    this.onPoolRefresh = options.onPoolRefresh ?? (() => {});
     this.uid = options.uid ?? defaultUid;
     this.state = {
       draft: EMPTY_DRAFT,
@@ -324,6 +339,10 @@ export class WorkbenchController {
       lang: options.initialLang ?? 'zh',
       usePrecedents: PRECEDENTS_DEFAULT_ON,
       lastSemanticAction: null,
+      workspaceMode: options.initialMode ?? 'quick',
+      autoDirection: true,
+      lastTranslation: null,
+      redoCount: 0,
     };
   }
 
@@ -363,9 +382,16 @@ export class WorkbenchController {
     this.translateRun = null;
   }
 
-  private setState(patch: Partial<WorkbenchSnapshot>): void {
+  private setState(update: Partial<WorkbenchSnapshot>): void {
     if (this.disposed) return;
     const prev = this.state;
+    // A document past the one-request limit is only edited in manuscript mode: the switch happens with the edit itself, in
+    // place, so the texts, history and caret stay where they are. Nothing switches back to quick on its own.
+    const patch: Partial<WorkbenchSnapshot> = { ...update, redoCount: this.future.length };
+    if (update.draft && update.draft !== prev.draft && prev.workspaceMode === 'quick' && update.workspaceMode !== 'quick' && isLong(update.draft)) {
+      patch.workspaceMode = 'manuscript';
+      if (!update.notice) patch.notice = 'switchedToManuscript';
+    }
     let changed = false;
     for (const key of Object.keys(patch) as (keyof WorkbenchSnapshot)[]) {
       if (!Object.is(prev[key], patch[key])) {
@@ -427,6 +453,27 @@ export class WorkbenchController {
 
   setCapabilities(capabilities: string[] | null): void {
     this.setState({ capabilities });
+  }
+
+  /**
+   * Switch the workspace layout. The document, history and reports are the same in both modes; quick is refused while the
+   * document is past the one-request limit, since quick translation could not send it.
+   */
+  setWorkspaceMode(mode: WorkspaceMode): boolean {
+    if (mode === this.state.workspaceMode) return true;
+    if (mode === 'quick' && isLong(this.state.draft)) return false;
+    this.setState({ workspaceMode: mode });
+    return true;
+  }
+
+  /** The quick direction control: `auto` lets the service detect it; a language is the document's target language. */
+  setQuickDirection(choice: 'auto' | 'en' | 'zh'): void {
+    if (choice === 'auto') {
+      this.setState({ autoDirection: true });
+      return;
+    }
+    this.setState({ autoDirection: false });
+    if (choice !== this.state.draft.direction) this.setDirection(choice);
   }
 
   loadCapabilities(): Promise<string[]> {
@@ -598,6 +645,8 @@ export class WorkbenchController {
       this.activeTypingTx = null;
       return;
     }
+    // An editor may report the same text again (a composition end with nothing open, a repeated input event): no step.
+    if (!open && value === this.state.draft[side]) return;
     const { draft, reports } = this.state;
     const latest = reports.at(-1) ?? null;
     const sourceDirtyForTranslation = side === 'source' ? Boolean(value.trim() && draft.target.trim()) : false;
@@ -631,16 +680,22 @@ export class WorkbenchController {
       serial = pushed.serial;
     }
     this.future = [];
-    this.composition = composing ? (open ?? { side, base: before, invalidations: baseInvalidations }) : null;
     this.activeTypingTx = !composing && !open && !touched && deltaLen <= 1 ? { side, at: now, serial } : null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
+    // Within a composition the semantic state maps from the base in one splice, unless something else replaced it meanwhile.
+    const fromBase = open !== null && open.mapped === this.state.semantic;
+    const semanticBefore = fromBase ? open.base : before;
+    const semanticSplice = fromBase ? diffSplice(open.base[side], value) : splice;
     const splices = {
-      source: side === 'source' ? splice : null,
-      target: side === 'target' ? splice : null,
+      source: side === 'source' ? semanticSplice : null,
+      target: side === 'target' ? semanticSplice : null,
     };
-    const nextSemantic = mapSemanticEdit(this.state.semantic, before, next, splices) as SemanticState;
+    const nextSemantic = mapSemanticEdit(fromBase ? open.semantic : this.state.semantic, semanticBefore, next, splices) as SemanticState;
+    this.composition = composing
+      ? (open ? { ...open, mapped: nextSemantic } : { side, base: before, invalidations: baseInvalidations, semantic: this.state.semantic, mapped: nextSemantic })
+      : null;
     this.setState({
       history,
       phase: 'idle',
@@ -1369,24 +1424,7 @@ export class WorkbenchController {
     return true;
   }
 
-  receiveDraft(next: Draft): boolean {
-    const before = this.state.draft;
-    if (before.source === next.source && before.target === next.target && before.direction === next.direction) return false;
-    const { history: nextHistory, checkpoint } = this.pushDocumentUndo('replace');
-    this.replaceDocumentState({
-      draft: next,
-      choices: [],
-      imported: [],
-      reports: [],
-      history: nextHistory,
-      documentCheckpoint: checkpoint,
-      sourceDirtyForTranslation: false,
-      notice: 'receivedDraft',
-    }, freshSemantic(next) as SemanticState);
-    return true;
-  }
-
-  replaceWithText(text: string): void {
+  replaceWithText(text: string, notice: NoticeState = 'importedSourceText'): void {
     const { history: nextHistory, checkpoint } = this.pushDocumentUndo('replace');
     const textDraft: Draft = { source: text, target: '', direction: this.state.draft.direction, alignments: null };
     this.replaceDocumentState({
@@ -1398,7 +1436,7 @@ export class WorkbenchController {
       documentCheckpoint: checkpoint,
       importedCanonical: null,
       sourceDirtyForTranslation: false,
-      notice: 'importedSourceText',
+      notice,
     }, freshSemantic(textDraft) as SemanticState);
   }
 
@@ -1414,6 +1452,7 @@ export class WorkbenchController {
       sourceDirtyForTranslation: false,
       importedCanonical: pending.importedBody,
       notice: 'imported',
+      workspaceMode: 'manuscript',
     }, pending.semantic);
   }
 
@@ -1435,6 +1474,11 @@ export class WorkbenchController {
   }
 
   // ---- Import / Save / Export ----
+
+  /** Whether replacing the document now would drop work no recoverable manuscript holds (the leave guard's rule). */
+  replacementNeedsConfirm(): boolean {
+    return this.shouldConfirmImport();
+  }
 
   private shouldConfirmImport(): boolean {
     const { draft, choices, reports, semantic, basis, importedCanonical, downloadedCanonical } = this.state;
@@ -1766,22 +1810,30 @@ export class WorkbenchController {
     this.docAbort = abort;
     this.setState({ translating: true, notice: null, inFlight: true });
 
+    // Quick mode with automatic direction sends no target language and adopts the direction the service reports.
+    const auto = this.state.workspaceMode === 'quick' && this.state.autoDirection;
     try {
       const known = this.state.capabilities ?? await (this.capabilitiesPromise ?? Promise.resolve([]));
       if (this.disposed || abort.signal.aborted || this.docGeneration !== mine) return;
       const context = known.includes(CAPABILITY_TRANSLATION_CONTEXT) ? { context: {} } : {};
-      const { response, value } = await this.post('/api/translations', { text: source, to: direction, ...context }, { signal: abort.signal });
+      const body = auto ? { text: source, ...context } : { text: source, to: direction, ...context };
+      const { response, value } = await this.post('/api/translations', body, { signal: abort.signal });
       if (this.disposed || abort.signal.aborted || this.docGeneration !== mine) return;
       if (!response.ok || !value || typeof value !== 'object' || typeof (value as { text?: unknown }).text !== 'string') {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof (value as { reason?: unknown }).reason === 'string'
           ? String((value as { reason: string }).reason) : '';
         throw Object.assign(new Error(), { gahReason: reason, gahDetail: failureFields(response, value) });
       }
-      const translated = (value as { text: string }).text;
+      const reply = value as { text: string; kind?: unknown; direction?: unknown; dictionary_miss?: unknown; request_id?: unknown };
+      const translated = reply.text;
+      const replied = reply.direction === 'en' || reply.direction === 'zh' ? reply.direction : null;
       const before = this.state.draft;
+      const nextDirection = auto && replied ? replied : before.direction;
       const { history } = this.pushUndo();
-      const translatedDraft: Draft = { ...before, target: translated, alignments: alignments === null ? null : [] };
+      // The translation and a detected direction form one undo step; a new target leaves no explicit alignment confirmed.
+      const translatedDraft: Draft = { ...before, target: translated, direction: nextDirection, alignments: alignments === null ? null : [] };
       const nextSemantic = mapSemanticEdit(this.state.semantic, before, translatedDraft) as SemanticState;
+      const kind = reply.kind === 'noop' || reply.kind === 'exact' || reply.kind === 'fuzzy' || reply.kind === 'llm' ? reply.kind : null;
       this.setState({
         history,
         draft: translatedDraft,
@@ -1789,7 +1841,13 @@ export class WorkbenchController {
         translating: false,
         inFlight: false,
         sourceDirtyForTranslation: false,
-        notice: alignments !== null ? 'editedAlignments' : 'translatedInReview',
+        // Quick mode shows the translation itself; the review hint belongs to manuscript mode.
+        notice: alignments !== null ? 'editedAlignments' : this.state.workspaceMode === 'quick' ? null : 'translatedInReview',
+        lastTranslation: {
+          source, text: translated, kind, direction: nextDirection,
+          dictionaryMiss: reply.dictionary_miss === true,
+          requestId: typeof reply.request_id === 'string' && reply.request_id ? reply.request_id : null,
+        },
       });
       this.onPoolRefresh();
     } catch (cause) {

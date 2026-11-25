@@ -12,7 +12,7 @@ test('an exported Markdown report is not imported as source text, and plain text
   const report = await downloadFrom(page, M.review.exportMarkdown);
   const input = page.getByLabel('选择稿件文件');
   await input.setInputFiles({ name: 'wuwaterm-report.md', mimeType: 'text/markdown', buffer: Buffer.from(report.text) });
-  await expect(page.locator('.review-card .error-panel')).toHaveText(M.errors.importReportExport);
+  await expect(page.locator('.document-workspace .error-panel')).toHaveText(M.errors.importReportExport);
   await expect(page.locator('#review-source')).toHaveValue('今汐。');
   await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
 
@@ -27,5 +27,5 @@ test('an exported Markdown report is not imported as source text, and plain text
   await dialog.getByRole('button', { name: M.review.importReplaceConfirm, exact: true }).click();
   await expect(page.locator('#review-source')).toHaveValue('新的原文。');
   await expect(page.locator('#review-target')).toHaveValue('');
-  await expect(page.locator('.review-card .notice-state')).toHaveText(M.notices.importedSourceText);
+  await expect(page.locator('.document-workspace .notice-state')).toHaveText(M.notices.importedSourceText);
 });

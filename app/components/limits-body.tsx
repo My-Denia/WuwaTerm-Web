@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { POOL_LIMITS as limits } from '../../lib/shared-pool.js';
 import { fill, msg } from '../../lib/messages';
-import { isPool, type Pool } from '../../lib/pool-snapshot';
 import { numberLocale } from '../../lib/ui-language';
-import { isSelfHosted, workbenchPath } from '../../lib/ui-runtime';
+import { useRuntime } from '../../lib/runtime-provider';
+import { isSelfHosted } from '../../lib/ui-runtime';
 import { useTermQuery, withQuery } from '../query-state';
 import { useUiLanguage } from './ui-language-context';
 import { LanguageToggle } from './language-toggle';
@@ -16,21 +16,11 @@ export function LimitsBody() {
   const locale = numberLocale(lang);
   const termQuery = useTermQuery();
   const selfhost = isSelfHosted();
-  const [instance, setInstance] = useState<{ kind: 'loading' | 'error' } | { kind: 'success'; data: Pool }>({ kind: 'loading' });
+  const { pool } = useRuntime();
   // Keep the tab title in step with an in-place language switch.
   useEffect(() => { document.title = m.limits.title; }, [lang, m.limits.title]);
-  useEffect(() => {
-    if (!selfhost) return;
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const response = await fetch(workbenchPath('/api/pool'), { cache: 'no-store', signal: controller.signal });
-        const value: unknown = await response.json();
-        if (!controller.signal.aborted) setInstance(response.ok && isPool(value) && value.shared === false ? { kind: 'success', data: value } : { kind: 'error' });
-      } catch { if (!controller.signal.aborted) setInstance({ kind: 'error' }); }
-    })();
-    return () => controller.abort();
-  }, [selfhost]);
+  // The instance's own pool, not a shared one: anything else is not this instance's snapshot.
+  const instance = pool.kind === 'success' && pool.data.shared === false ? pool : pool.kind === 'success' ? { kind: 'error' as const } : pool;
   const local = instance.kind === 'success' ? instance.data : null;
   const localUpstream = local?.upstream?.limit;
   const terms = selfhost ? local?.terms.limit : limits.termsPerDay;

@@ -8,9 +8,14 @@ import { recordView } from '../lib/long-review.ts';
 import {
   makeChoice, remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, remapForSplice, remapForTargetFill, sanitizeDuplicateChoices, serializeWorkfile,
 } from '../lib/manuscript.js';
-import { issueStatus } from '../lib/semantic-state.js';
+import { freshSemantic, issueStatus } from '../lib/semantic-state.js';
 import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from './fixtures/manuscript.mjs';
 import { defaultSemanticResponse, semanticResponse } from './helpers/semantic-fixture.mjs';
+
+/** Load `draft` as a new document through the public replacement path (one protected undo step, fresh semantic state). */
+function load(doc, draft) {
+  doc.replaceWithWorkfile({ draft, choices: [], reports: [], semantic: freshSemantic(draft), importedBody: null });
+}
 
 function makeClock(start = 1_700_000_000_000) {
   let current = start;
@@ -339,13 +344,13 @@ test('piece translation, pair translation with epoch guard, and clean dispose()'
   assert.equal(doc.getSnapshot().draft.target, '');
 
   // 2. Pair translation succeeds on an untranslated pair, and epoch guard blocks stale writes on replacement.
-  doc.receiveDraft({ source: '她看见三只鸟。', target: '', direction: 'en', alignments: null });
+  load(doc, { source: '她看见三只鸟。', target: '', direction: 'en', alignments: null });
   await doc.translatePair(0);
   assert.equal(doc.getSnapshot().pairTranslating, null);
   assert.equal(doc.getSnapshot().draft.target, 'EN(她看见三只鸟。)');
   assert.equal(doc.getSnapshot().notice, 'sem:translated');
 
-  doc.receiveDraft({ source: '另一段待译文本。', target: '', direction: 'en', alignments: null });
+  load(doc, { source: '另一段待译文本。', target: '', direction: 'en', alignments: null });
   const epochBefore = doc.getSnapshot().documentEpoch;
   const pairGate = deferred();
   heldCall = pairGate;
@@ -355,14 +360,14 @@ test('piece translation, pair translation with epoch guard, and clean dispose()'
 
   // Install a brand-new manuscript while pair translation is in flight.
   // The epoch guard drops the late response without mutating the new manuscript.
-  doc.receiveDraft({ source: '新稿件。', target: 'New draft.', direction: 'en', alignments: null });
+  load(doc, { source: '新稿件。', target: 'New draft.', direction: 'en', alignments: null });
   assert.equal(doc.getSnapshot().documentEpoch, epochBefore + 1);
   assert.equal(doc.getSnapshot().pairTranslating, null);
 
   pairGate.resolve();
   await pairPromise;
   assert.equal(doc.getSnapshot().draft.target, 'New draft.');
-  assert.equal(doc.getSnapshot().notice, 'receivedDraft');
+  assert.equal(doc.getSnapshot().notice, 'imported');
 
   // 3. Clean dispose() while waiting timer and requests are active: aborts signals, clears timers, silences listeners.
   const reviewGate = deferred();
@@ -408,7 +413,7 @@ test('piece translation, pair translation with epoch guard, and clean dispose()'
 
 test('React workbench views do not assemble commit/commitLong/reconcile/domain mutations directly', () => {
   const semanticView = readFileSync(fileURLToPath(new URL('../app/components/semantic-workbench.tsx', import.meta.url)), 'utf8');
-  const reviewView = readFileSync(fileURLToPath(new URL('../app/components/review-workbench.tsx', import.meta.url)), 'utf8');
+  const reviewView = readFileSync(fileURLToPath(new URL('../app/components/document-workspace.tsx', import.meta.url)), 'utf8');
   const forbidden = [
     /\bcommitLong\s*\(/u,
     /\bdoc\.commit\s*\(/u,
@@ -429,7 +434,7 @@ test('React workbench views do not assemble commit/commitLong/reconcile/domain m
   ];
   for (const [name, src] of [
     ['app/components/semantic-workbench.tsx', semanticView],
-    ['app/components/review-workbench.tsx', reviewView],
+    ['app/components/document-workspace.tsx', reviewView],
   ]) {
     for (const pattern of forbidden) {
       assert.equal(pattern.test(src), false, `${name} must not match ${pattern}`);
@@ -780,7 +785,7 @@ test('manual paragraph repair commands and document-level target revision / choi
   assert.equal(doc.getSnapshot().draft.target, 'First. Second. Third.');
 
   // 2. Document-level target revision and choice confirmation.
-  doc.receiveDraft({ source: '今汐在今州。', target: 'Someone is in Jinzhou.', direction: 'en', alignments: null });
+  load(doc, { source: '今汐在今州。', target: 'Someone is in Jinzhou.', direction: 'en', alignments: null });
   await doc.check();
   const snap = doc.getSnapshot();
   const latest = snap.reports.at(-1);
@@ -991,11 +996,11 @@ test('localized target edits, reopened batch resume, ready retranslate and undo 
 
   // 2. Short unaligned manuscript with existing translation must NOT offer partial-prefix resume;
   // multi-segment unaligned partial-prefix DOES offer resume and keeps prefix + context.
-  doc.receiveDraft({ source: '第一段。\n\n第二段。', target: '已有译文', direction: 'en', alignments: null });
+  load(doc, { source: '第一段。\n\n第二段。', target: '已有译文', direction: 'en', alignments: null });
   assert.equal(doc.hasResumableTranslate(), false);
 
   translateCalls.length = 0;
-  doc.receiveDraft({ source: src3, target: 'Prefix one.', direction: 'en', alignments: null });
+  load(doc, { source: src3, target: 'Prefix one.', direction: 'en', alignments: null });
   assert.equal(doc.hasResumableTranslate(), true);
   doc.startTranslateRun();
   await waitUntil(() => doc.getSnapshot().run.phase === 'done');
@@ -1009,7 +1014,7 @@ test('localized target edits, reopened batch resume, ready retranslate and undo 
   const tA = `Night is in Jinzhou.${'x'.repeat(980)}`;
   const tB = `Echo.${'x'.repeat(980)}`;
   const tBOrigStart = Array.from(tA).length + 2;
-  doc.receiveDraft({
+  load(doc, {
     source: `${sA}\n\n${sB}`,
     target: `${tA}\n\n${tB}`,
     direction: 'en',
@@ -1051,7 +1056,7 @@ test('localized target edits, reopened batch resume, ready retranslate and undo 
   assert.equal(doc.getSnapshot().draft.alignments?.[1].target?.start, tBOrigStart + 1);
 
   // Short-doc applyTargetRevision preserves explicit alignments too.
-  doc.receiveDraft({
+  load(doc, {
     source: '今汐在今州。',
     target: 'Someone is in Jinzhou.',
     direction: 'en',
@@ -1085,7 +1090,7 @@ test('localized target edits, reopened batch resume, ready retranslate and undo 
   assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, 'Jinhsi! is in Jinzhou.');
 
   // Merged short aligned pairs fail closed to [] on retranslate and emit editedAlignments notice (never misleading sem:retranslated).
-  doc.receiveDraft({
+  load(doc, {
     source: '甲一。\n\n甲二。',
     target: 'One.\n\nTwo.',
     direction: 'en',
@@ -1167,7 +1172,7 @@ test('workfile import guard protects unsaved edits, coalesces typing undo, keeps
     candidate: null,
   });
   const docConflict = createWorkbenchController({ clock, onPoolRefresh: () => {} });
-  docConflict.receiveDraft({ source: s1, target: '阿尔法', direction: 'en', alignments: null });
+  load(docConflict, { source: s1, target: '阿尔法', direction: 'en', alignments: null });
   docConflict['setState']({ choices: [collidingA, collidingB] });
   assert.equal(docConflict.save(), null);
   assert.equal(docConflict.getSnapshot().error?.code, 'workfile_duplicate_choices');

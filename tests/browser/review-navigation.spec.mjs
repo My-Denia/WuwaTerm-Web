@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { writeFile } from 'node:fs/promises';
 import { FRESH_MATCHER_REVISION, candidate, dictionary, echo, hash } from '../fixtures/manuscript.mjs';
 import { scalarToUtf16 } from '../../lib/review-report.js';
@@ -94,6 +95,7 @@ async function open(page, respond = reportFor) {
   // cold-start can push the first pool read past the default 5s on shared
   // CI runners, so allow a generous wait here.
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
+  await openManuscript(page);
   return reviews;
 }
 

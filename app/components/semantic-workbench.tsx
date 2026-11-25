@@ -21,7 +21,7 @@ import { highlightSegments } from '../../lib/review-report.js';
 import { compactScalarContext } from '../../lib/review-navigation.js';
 import { failureDetails, fill, msg } from '../../lib/messages';
 import { semanticMsg, type SemanticMessages } from '../../lib/semantic-messages';
-import type { Pool } from '../../lib/pool-snapshot';
+import type { PoolView } from '../../lib/runtime-store';
 import { numberLocale, type UiLanguage } from '../../lib/ui-language';
 import { longExportRows as rowsOf } from '../../lib/workbench-persistence';
 import { isRunActive, PRECEDENTS_DEFAULT_ON, type WorkbenchController, type WorkbenchSnapshot } from '../../lib/workbench-controller';
@@ -37,7 +37,6 @@ type TermFinding = { id: string; verdict: string; source_span: Span; target_span
 type TermGroup = import('../../lib/long-review.ts').TermGroup;
 type Occurrence = import('../../lib/long-review.ts').Occurrence;
 type ContextSnippet = import('../../lib/long-review.ts').Snippet;
-type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
 type Props = {
   doc: WorkbenchController;
   snapshot: WorkbenchSnapshot;

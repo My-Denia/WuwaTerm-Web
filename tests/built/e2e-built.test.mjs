@@ -29,7 +29,7 @@ test('built site renders landing pages and serves the emitted client assets', as
   const home = await server.fetch('/');
   assert.equal(home.status, 200);
   const html = await home.text();
-  for (const label of ['术语查询', '整句翻译', '双语稿件工作台']) assert.ok(html.includes(label));
+  for (const label of ['术语查询', '快速翻译', '稿件审校', '翻译整句']) assert.ok(html.includes(label));
   const scripts = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map(match => match[1]);
   assert.ok(scripts.length > 0, 'the real client entry must be present');
   for (const script of scripts) {

@@ -8,6 +8,7 @@ import {
   INVALIDATION_REASONS, applyEditTransaction, computeMinimalScalarSplice, parseWorkfile, serializeWorkfile,
 } from '../lib/manuscript.js';
 import * as L from '../lib/long-review.ts';
+import { freshSemantic } from '../lib/semantic-state.js';
 import { MAX_UNDO, TYPING_COALESCE_MS, canonicalOf, createWorkbenchController } from '../lib/workbench-controller.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('../contracts/workbench-state/edit-transactions.json', import.meta.url), 'utf8'));
@@ -42,11 +43,16 @@ function stepClock(start = 1_700_000_000_000) {
   };
 }
 
+/** Load `draft` as a new document through the public replacement path (one protected undo step, fresh semantic state). */
+function load(doc, draft) {
+  doc.replaceWithWorkfile({ draft, choices: [], reports: [], semantic: freshSemantic(draft), importedBody: null });
+}
+
 /** A controller holding `draft`; trace depths count only steps after this load. */
 function loaded(draft) {
   const { clock, at } = stepClock();
   const doc = createWorkbenchController({ clock, onPoolRefresh: () => {} });
-  assert.equal(doc.receiveDraft(draft), true);
+  load(doc, draft);
   const base = doc.getSnapshot().history.at(-1).serial;
   const undoDepth = () => {
     const history = doc.getSnapshot().history;
@@ -173,7 +179,7 @@ test('every trace: undo, redo, coalescing and IME composition steps match throug
 test('redo of a document replacement restores the replaced text and its protected checkpoint', () => {
   const { doc } = loaded({ source: 'Alpha', target: '甲', direction: 'en', alignments: null });
   doc.editText('source', 'Alpha!');
-  assert.equal(doc.receiveDraft({ source: 'Other', target: '乙', direction: 'en', alignments: null }), true);
+  load(doc, { source: 'Other', target: '乙', direction: 'en', alignments: null });
   const checkpoint = doc.getSnapshot().documentCheckpoint;
   assert.ok(checkpoint);
   doc.undo();
