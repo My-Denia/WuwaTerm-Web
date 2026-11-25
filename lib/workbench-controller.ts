@@ -2,7 +2,7 @@
 // Owns canonical manuscript state, request orchestration, abort/generation/epoch
 // guards, serial run scheduling, waiting timers, and persistence/export shaping.
 import { SEGMENT_LIMIT, core, paragraphRanges, segmentText } from './segmentation.ts';
-import { contextBefore, fitRequestBody, initialRun, nextToSend, runReducer, selectPrecedents } from './semantic-run.js';
+import { contextBefore, diffSplice, fitRequestBody, initialRun, nextToSend, runReducer, selectPrecedents } from './semantic-run.js';
 import {
   applyResult, chooseTerm, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
   removeChoice, removeHistoryEntry, restorableHistory, restoreHistoryEntry, reviseSegmentTarget,
@@ -24,7 +24,7 @@ import {
   MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, MAX_V4_CHOICES, REPORT_V4,
   canonicalManuscript, compareReports, leaveGuardActive, makeChoice, manuscriptSaveView,
   mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent, recoverSpan,
-  remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices,
+  remapAlignmentsForFreeEdit, remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices,
   serializeWorkfile, validAlignments, validReport, validSpan,
   WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
 } from './manuscript.js';
@@ -536,11 +536,16 @@ export class WorkbenchController {
     const { draft, reports } = this.state;
     const latest = reports.at(-1) ?? null;
     const sourceDirtyForTranslation = side === 'source' ? Boolean(value.trim() && draft.target.trim()) : false;
-    const next: Draft = { ...draft, [side]: value, alignments: draft.alignments === null ? null : [] };
-    const message = draft.alignments !== null ? 'editedAlignments' : latest ? 'editedText' : '';
     const before = this.state.draft;
+    const nextSource = side === 'source' ? value : draft.source;
+    const nextTarget = side === 'target' ? value : draft.target;
+    const remapped = remapAlignmentsForFreeEdit(draft.alignments, side, draft.source, draft.target, nextSource, nextTarget);
+    const lostAlignments = alignmentsLost(draft.alignments, remapped);
+    const next: Draft = { ...draft, [side]: value, alignments: remapped };
+    const message = lostAlignments ? 'editedAlignments' : latest ? 'editedText' : '';
     const now = this.clock.now();
-    const deltaLen = Math.abs(chars(value).length - chars(before[side]).length);
+    const splice = diffSplice(before[side], value);
+    const deltaLen = splice ? Math.max(splice.oldEnd - splice.start, splice.newEnd - splice.start) : 0;
     const top = this.state.history.at(-1);
     const canCoalesce = this.activeTypingTx !== null
       && this.activeTypingTx.side === side
@@ -553,7 +558,11 @@ export class WorkbenchController {
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
-    const nextSemantic = mapSemanticEdit(this.state.semantic, before, next) as SemanticState;
+    const splices = {
+      source: side === 'source' ? splice : null,
+      target: side === 'target' ? splice : null,
+    };
+    const nextSemantic = mapSemanticEdit(this.state.semantic, before, next, splices) as SemanticState;
     this.setState({
       history,
       phase: 'idle',

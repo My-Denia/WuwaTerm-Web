@@ -146,6 +146,8 @@ test('editing confirmed alignments keeps their separate reset notice', async ({ 
   await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
   await expect(page.locator('.alignment-row')).toHaveCount(1);
   await page.locator('#review-target').fill(A.target + ' Echo.');
+  await expect(page.locator('.alignment-row')).toHaveCount(1);
+  await page.locator('#review-target').fill('');
   await expect(page.locator('.notice-state')).toContainText('原分段对应已取消确认');
   await expect(page.locator('.alignment-row')).toHaveCount(0);
   expect(reviews).toHaveLength(0);
@@ -484,7 +486,10 @@ test('plain-text import, clear-then-handoff, in-review translation, alignment re
   await page.locator('.alignment-panel > summary').click();
   await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
   await page.locator('#review-target').fill(B.target + '!');
+  await expect(page.locator('.alignment-row')).toHaveCount(1);
+  await page.locator('#review-target').fill('');
   await expect(page.locator('.alignment-recovery')).toBeVisible();
+  await page.locator('#review-target').fill(B.target + '!');
   await page.getByRole('button', { name: '重新确认全文对应', exact: true }).click();
   await expect(page.locator('.alignment-recovery')).toHaveCount(0);
   await expect(page.locator('.alignment-row')).toHaveCount(1);

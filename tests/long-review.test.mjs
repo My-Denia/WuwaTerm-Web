@@ -703,3 +703,67 @@ test('Explicit edit splices disambiguate deleting the first of two identical par
   assert.equal(reconciled.records[0].status, 'done');
   assert.deepEqual(reconciled.history.map(h => h.choice), ['official_pair']);
 });
+
+test('reconcileLong and semanticSegmentViews handle a 500-segment single-character edit cleanly and fast', async () => {
+  const { emptySemantic, mapSemanticEdit, semanticSegmentViews } = await import('../lib/semantic-state.js');
+  const { segmentKey } = await import('../lib/semantic-run.js');
+  const segCount = 500;
+  const pad = 'a'.repeat(950);
+  const srcs = Array.from({ length: segCount }, (_, i) => `seg-${i}-${pad}`);
+  const tgts = Array.from({ length: segCount }, (_, i) => `段-${i}-${pad}`);
+  const before = { source: srcs.join('\n\n'), target: tgts.join('\n\n'), direction: 'en', alignments: null };
+  const afterSrcs = [...srcs];
+  afterSrcs[0] = `${srcs[0]}!`;
+  const after = { ...before, source: afterSrcs.join('\n\n') };
+
+  const beforeInputs = L.segmentInputs(before);
+  assert.equal(beforeInputs.long, true);
+  assert.equal(beforeInputs.items.length, segCount);
+  const emptyResult = L.compactResult({ truncated: false, evaluated: 1, not_evaluated: 0, findings: [] });
+  let long = L.reconcileLong(L.emptyLong(), { ...before, source: '', target: '' }, before);
+  long = {
+    ...long,
+    records: long.records.map((rec, index) => {
+      const it = beforeInputs.items[index];
+      return {
+        ...rec,
+        status: 'done',
+        basis: B,
+        direction: before.direction,
+        alignment_input: it.alignmentInput,
+        source_hash: it.sourceHash,
+        target_hash: it.targetHash,
+        sent: '',
+        result: emptyResult,
+      };
+    }),
+  };
+  const semanticResults = beforeInputs.items.map(it => ({
+    segmentKey: segmentKey(before.direction, it.sourceCore, it.targetCore),
+    region: {
+      source: { start: it.pair.source.core_start, end: it.pair.source.core_end },
+      target: { start: it.pair.target.core_start, end: it.pair.target.core_end },
+    },
+    issues: [],
+  }));
+  const beforeSemantic = { ...emptySemantic(), long, results: semanticResults };
+
+  const splices = {
+    source: { start: srcs[0].length, oldEnd: srcs[0].length, newEnd: srcs[0].length + 1 },
+    target: null,
+  };
+  const t0 = performance.now();
+  const afterSemantic = mapSemanticEdit(beforeSemantic, before, after, splices);
+  const semViews = semanticSegmentViews(after, afterSemantic, B);
+  const elapsedMs = performance.now() - t0;
+
+  assert.equal(afterSemantic.long.records.length, segCount);
+  assert.equal(afterSemantic.long.records[0].status, 'pending');
+  assert.equal(afterSemantic.long.records[1].status, 'done');
+  assert.equal(afterSemantic.long.records[segCount - 1].status, 'done');
+  assert.equal(semViews.items.length, segCount);
+  assert.equal(semViews.items[0].edited, true);
+  assert.equal(semViews.items[1].result !== null, true);
+  assert.equal(semViews.items[segCount - 1].result !== null, true);
+  assert.equal(elapsedMs < 250, true, `expected <250ms, got ${elapsedMs.toFixed(1)}ms`);
+});

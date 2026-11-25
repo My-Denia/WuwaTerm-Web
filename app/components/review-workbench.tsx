@@ -403,6 +403,7 @@ export function ReviewWorkbench() {
     .map(([key, label]) => ({ key, label, items: comparison ? comparison[key] : [] }));
   const semanticSummary = semanticCounts(semantic) as { total: number; pending: number; handled: number; reconfirm: number; stale: number };
   const termTotal = (latest?.report.findings.length ?? 0) + semantic.long.records.reduce((n, r) => n + (r.result?.findings.length ?? 0), 0);
+  const translatePrimary = !!source.trim() && !target.trim();
 
   const termTrack = (longTerms: ReactNode): ReactNode => <section className="term-track" aria-labelledby="term-track-title">
     <h3 id="term-track-title">{sm.termTrackTitle}</h3>
@@ -432,7 +433,7 @@ export function ReviewWorkbench() {
           const active = finding.id === activeFindingId;
           const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
           const targetLocated = finding.target_span !== null && latest.target === target && highlightSegments(target, finding.target_span) !== null;
-          return <article className="term-result" key={finding.id} data-mention-id={finding.id} data-active={active ? 'true' : 'false'} aria-current={active ? 'true' : undefined}><p className="result-summary">{active ? m.review.currentMark : ''}<span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span> · {fill(m.review.spanRange, { start: finding.source_span.start + 1, end: finding.source_span.end })}{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
+          return <article className="term-result" key={finding.id} data-mention-id={finding.id} data-active={active ? 'true' : 'false'} aria-current={active ? 'true' : undefined}><p className="result-summary">{active ? m.review.currentMark : ''}<span className={`verdict-badge verdict-${finding.verdict}`}>{(m.review.verdicts as Record<string, string>)[finding.verdict]}</span>{finding.candidates_truncated ? m.review.truncatedMark : ''}</p>
             {finding.reason && <p className="finding-reason" data-reason={finding.reason}>{fill(m.review.reasonLabel, { reason: (m.review.reasons as Record<string, string>)[finding.reason] ?? finding.reason })}</p>}
             <div className="excerpt-labeled">
               <span className="excerpt-tag">{m.review.excerptSourceLabel}</span>
@@ -456,6 +457,7 @@ export function ReviewWorkbench() {
                 <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
               </details>
             </div>)}
+            <details className="finding-basis"><summary>{m.review.findingBasis}</summary><p>{fill(m.review.spanRange, { start: finding.source_span.start + 1, end: finding.source_span.end })}</p><p>{finding.rule_id} · {finding.id}</p></details>
             <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.choose(finding, null)}>{m.review.notTerm}</button>
           </article>;
         })}
@@ -532,6 +534,8 @@ export function ReviewWorkbench() {
       </ol>
     )}
     <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
+    <div className="manuscript-workspace">
+    <div className="manuscript-editor-pane">
     <form onSubmit={submit}>
       <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => doc.setDirection(e.target.value as 'en' | 'zh')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
       <textarea ref={sourceBox} id="review-source" value={source} onChange={e => doc.editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />
@@ -557,26 +561,30 @@ export function ReviewWorkbench() {
         </> : <p>{pool.kind === 'loading' ? m.pool.loading : m.pool.unavailable}</p>}
       </div>
       <div className="actions">
-        <button type="submit" disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
+        <button type="submit" className={translatePrimary ? 'secondary-button' : undefined} disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
         <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
-        {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className="secondary-button" type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
+        {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
         {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.review.cancelWait}</button>}
         <button className="secondary-button" type="button" onClick={() => doc.undo()} disabled={!history.length}>{m.review.undo}</button>
       </div>
     </form>
     <div className="actions draft-actions">
-      <button type="button" className="secondary-button" onClick={clearDraft} disabled={!holdsWork}>{m.review.clearDraft}</button>
-      <button type="button" className="secondary-button" onClick={save}>{m.review.save}</button>
-      <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>{m.review.import}</button>
-      <input ref={fileBox} className="visually-hidden" type="file" accept=".json,.txt,.md,application/json,text/plain,text/markdown" aria-label={m.review.importFileAria} onChange={e => {
-        const file = e.target.files?.[0];
-        e.target.value = '';
-        void importFile(file);
-      }} />
-      <button type="button" className="secondary-button" onClick={exportTxt}>{m.review.exportTxt}</button>
-      <button type="button" className="secondary-button" onClick={exportResult}>{m.review.exportResult}</button>
-      <button type="button" className="secondary-button" onClick={exportMarkdown}>{m.review.exportMarkdown}</button>
-      {documentCheckpoint && <button type="button" className="secondary-button" onClick={() => doc.restoreDocumentCheckpoint()}>{m.review.restoreCheckpoint}</button>}
+      <div className="draft-primary-actions">
+        <button type="button" className="secondary-button" onClick={clearDraft} disabled={!holdsWork}>{m.review.clearDraft}</button>
+        <button type="button" className="secondary-button" onClick={save}>{m.review.save}</button>
+        <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>{m.review.import}</button>
+        <input ref={fileBox} className="visually-hidden" type="file" accept=".json,.txt,.md,application/json,text/plain,text/markdown" aria-label={m.review.importFileAria} onChange={e => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          void importFile(file);
+        }} />
+        {documentCheckpoint && <button type="button" className="secondary-button" onClick={() => doc.restoreDocumentCheckpoint()}>{m.review.restoreCheckpoint}</button>}
+      </div>
+      <div className="export-actions">
+        <button type="button" className="secondary-button" onClick={exportTxt}>{m.review.exportTxt}</button>
+        <button type="button" className="secondary-button" onClick={exportResult}>{m.review.exportResult}</button>
+        <button type="button" className="secondary-button" onClick={exportMarkdown}>{m.review.exportMarkdown}</button>
+      </div>
     </div>
     {notice && <p className="notice-state" role="status">{noticeText}</p>}
     {alignments !== null && alignments.length === 0 && <div className="alignment-recovery" role="region" aria-label={m.review.alignmentRecoveryAria}>
@@ -589,6 +597,8 @@ export function ReviewWorkbench() {
     {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}{error.saveConflict && <div className="actions save-conflict-actions"><button type="button" className="secondary-button" onClick={resolveConflictsAndSave}>{m.review.resolveConflictsAndSave}</button><button type="button" className="secondary-button" onClick={exportProseTxt}>{m.review.exportProseTxt}</button></div>}</div>}
     {phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
     {basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
+    </div>
+    <div className="manuscript-review-pane">
     {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
       {choices.map((choice, i) => {
         const canConfirm = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' && doc.canConfirmChoice(i);
@@ -607,5 +617,7 @@ export function ReviewWorkbench() {
       locate={(side, span) => (side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span))}
       termTrack={termTrack}
     />
+    </div>
+    </div>
   </section>;
 }

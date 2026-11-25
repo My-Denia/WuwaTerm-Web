@@ -1180,3 +1180,54 @@ test('workfile import guard protects unsaved edits, coalesces typing undo, keeps
   docConflict.dispose();
   doc.dispose();
 });
+
+test('editText remaps confirmed alignments on safe edits and emits editedAlignments only when lost', () => {
+  const doc = createWorkbenchController({});
+  doc.editText('source', 'Alpha Beta');
+  doc.editText('target', '甲 乙');
+  assert.equal(doc.recordAlignment(
+    { start: 0, end: 5, text: 'Alpha' },
+    { start: 0, end: 1, text: '甲' },
+  ), true);
+  assert.equal(doc.recordAlignment(
+    { start: 6, end: 10, text: 'Beta' },
+    { start: 2, end: 3, text: '乙' },
+  ), true);
+
+  doc.editText('source', '00 Alpha Beta');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, [
+    { source: { start: 3, end: 8, text: 'Alpha' }, target: { start: 0, end: 1, text: '甲' } },
+    { source: { start: 9, end: 13, text: 'Beta' }, target: { start: 2, end: 3, text: '乙' } },
+  ]);
+  assert.notEqual(doc.getSnapshot().notice, 'editedAlignments');
+
+  doc.editText('target', '');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, []);
+  assert.equal(doc.getSnapshot().notice, 'editedAlignments');
+
+  // Clearing a single-span confirmed translation (or deleting one segment's target in full) fails closed.
+  doc.editText('source', '今汐。');
+  doc.editText('target', 'Jinhsi.');
+  assert.equal(doc.recordAlignment(
+    { start: 0, end: 3, text: '今汐。' },
+    { start: 0, end: 7, text: 'Jinhsi.' },
+  ), true);
+  doc.editText('target', '');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, []);
+  assert.equal(doc.getSnapshot().notice, 'editedAlignments');
+
+  doc.editText('source', 'Alpha Beta');
+  doc.editText('target', '甲 乙');
+  assert.equal(doc.recordAlignment(
+    { start: 0, end: 5, text: 'Alpha' },
+    { start: 0, end: 1, text: '甲' },
+  ), true);
+  assert.equal(doc.recordAlignment(
+    { start: 6, end: 10, text: 'Beta' },
+    { start: 2, end: 3, text: '乙' },
+  ), true);
+  doc.editText('target', ' 乙');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, []);
+  assert.equal(doc.getSnapshot().notice, 'editedAlignments');
+  doc.dispose();
+});

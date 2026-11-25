@@ -575,12 +575,19 @@ function matchRecords(
   const owner = items.map(() => -1);
   const used = new Set<number>();
   const ranges = old.map((r, k) => rangeOf(r, k));
-  // Pass 1: an occurrence sitting at its exact source span keeps its record first.
+  // Pass 1: exact source occurrence (`source_start:source_end:source_hash`) in O(N).
+  const pass1 = new Map<string, number[]>();
+  for (let k = 0; k < old.length; k++) {
+    const key = `${ranges[k].source_start}:${ranges[k].source_end}:${old[k].source_hash}`;
+    const list = pass1.get(key);
+    if (list) list.push(k);
+    else pass1.set(key, [k]);
+  }
   items.forEach((item, j) => {
-    const k = old.findIndex((r, kk) => !used.has(kk)
-      && ranges[kk].source_start === item.range.source_start && ranges[kk].source_end === item.range.source_end
-      && r.source_hash === item.sourceHash);
-    if (k >= 0) { owner[j] = k; used.add(k); }
+    const bucket = pass1.get(`${item.range.source_start}:${item.range.source_end}:${item.sourceHash}`);
+    if (!bucket) return;
+    const k = bucket.find(kk => !used.has(kk));
+    if (k !== undefined) { owner[j] = k; used.add(k); }
   });
   const rank = (k: number, j: number): Rank5 => {
     const rr = ranges[k];
@@ -593,24 +600,48 @@ function matchRecords(
       -k,
     ];
   };
-  const globalBestPass = (predicate: (r: RuntimeRecord, item: SegmentInput) => boolean): void => {
-    const pairs: { j: number; k: number; score: Rank5 }[] = [];
+  // Pass 2 & Pass 3: hash-bucketed global-best assignment (identical to O(N^2) scan, O(N) on distinct segments).
+  const globalBestPass = (keyOfRecord: (r: RuntimeRecord) => string, keyOfItem: (item: SegmentInput) => string): void => {
+    const recBuckets = new Map<string, number[]>();
+    for (let k = 0; k < old.length; k++) {
+      if (used.has(k)) continue;
+      const key = keyOfRecord(old[k]);
+      const list = recBuckets.get(key);
+      if (list) list.push(k);
+      else recBuckets.set(key, [k]);
+    }
+    const itemBuckets = new Map<string, number[]>();
     for (let j = 0; j < items.length; j++) {
       if (owner[j] >= 0) continue;
-      for (let k = 0; k < old.length; k++) {
-        if (used.has(k) || !predicate(old[k], items[j])) continue;
-        pairs.push({ j, k, score: rank(k, j) });
+      const key = keyOfItem(items[j]);
+      if (!recBuckets.has(key)) continue;
+      const list = itemBuckets.get(key);
+      if (list) list.push(j);
+      else itemBuckets.set(key, [j]);
+    }
+    for (const [key, jList] of itemBuckets) {
+      const kList = recBuckets.get(key)!;
+      if (jList.length === 1 && kList.length === 1) {
+        const j = jList[0];
+        const k = kList[0];
+        owner[j] = k;
+        used.add(k);
+        continue;
+      }
+      const pairs: { j: number; k: number; score: Rank5 }[] = [];
+      for (const j of jList) {
+        for (const k of kList) pairs.push({ j, k, score: rank(k, j) });
+      }
+      pairs.sort((a, b) => compareMatchRank(b.score, a.score));
+      for (const { j, k } of pairs) {
+        if (owner[j] >= 0 || used.has(k)) continue;
+        owner[j] = k;
+        used.add(k);
       }
     }
-    pairs.sort((a, b) => compareMatchRank(b.score, a.score));
-    for (const { j, k } of pairs) {
-      if (owner[j] >= 0 || used.has(k)) continue;
-      owner[j] = k;
-      used.add(k);
-    }
   };
-  globalBestPass((r, item) => r.source_hash === item.sourceHash && r.target_hash === item.targetHash);
-  globalBestPass((r, item) => r.source_hash === item.sourceHash);
+  globalBestPass(r => `${r.source_hash}\0${r.target_hash}`, item => `${item.sourceHash}\0${item.targetHash}`);
+  globalBestPass(r => r.source_hash, item => item.sourceHash);
   return owner;
 }
 
@@ -769,10 +800,21 @@ export function reconcileLong(
     }
   });
   if (before.direction !== after.direction) records = records.map(r => ({ ...r, ...BLANK, prior: null, choices: r.choices.map(unconfirm) }));
-  // A current segment that changed follows its position: the new pair whose region holds its mapped start.
+  // A current segment that changed follows its position via binary search on ordered pair regions.
+  const findItemIndex = (predicate: (item: SegmentInput) => number): number => {
+    let lo = 0;
+    let hi = items.length - 1;
+    let match = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (predicate(items[mid]) > 0) { match = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    return match;
+  };
   const near = (k: number): number | null => {
-    if (!mapped[k]) return null;
-    const j = items.findIndex(item => mapped[k].start < item.pair.source.end);
+    if (!mapped[k] || !items.length) return null;
+    const pos = mapped[k].start;
+    const j = findItemIndex(item => (pos < item.pair.source.end ? 1 : -1));
     return j >= 0 ? j : items.length - 1;
   };
   return { records, history, progress: followProgress(long.progress, owner, records, near) };
