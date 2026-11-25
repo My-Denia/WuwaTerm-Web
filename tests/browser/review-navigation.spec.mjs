@@ -284,6 +284,7 @@ for (const viewport of [
       expect(JSON.parse(stale.result).changes).toBeNull();
 
       await page.getByLabel('选择稿件文件').setInputFiles({ name: 'history.json', mimeType: 'application/json', buffer: saved.manuscript });
+      await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
       await expect(page.locator('.review-summary')).toContainText('来自文件的历史报告');
       await expect(page.locator('.choice-records')).toContainText('待确认');
       const historical = await invariantPhase(page, info, reviews, 'historical', () => preservationSequence(page));

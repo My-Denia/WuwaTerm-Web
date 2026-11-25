@@ -21,10 +21,10 @@ import {
 } from './semantic-state.js';
 import { insertParagraphBreak, linesToParagraphs, mergeParagraphs } from './manual-split.ts';
 import {
-  MAX_V3_WORKFILE_BYTES, MAX_V4_CHOICES, MAX_WORKFILE_BYTES, REPORT_V4,
+  MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, MAX_V4_CHOICES, REPORT_V4,
   canonicalManuscript, compareReports, leaveGuardActive, makeChoice, manuscriptSaveView,
   mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent, recoverSpan,
-  remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice,
+  remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices,
   serializeWorkfile, validAlignments, validReport, validSpan,
   WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
 } from './manuscript.js';
@@ -39,15 +39,17 @@ import { postWorkbench, REVIEW_REQUEST_LIMIT, runFailure } from './workbench-tra
 import type { UiLanguage } from './ui-language.ts';
 import { scalarOffset } from './workbench-model.ts';
 import type {
-  Candidate, Choice, Decision, DocumentPhase, Draft, DraftEditSplices, ErrorState, ExportArtifact,
+  Candidate, Choice, Decision, DocumentCheckpoint, DocumentPhase, Draft, DraftEditSplices, ErrorState, ExportArtifact,
   Finding, ImportFileLike, ImportOutcome, LongCtx, LongState, NoticeState, Pair, PairView,
-  ParagraphCut, Region, Report, Resolution, RunItem, RunKind, RunState,
+  ParagraphCut, PendingWorkfile, Region, Report, Resolution, RunItem, RunKind, RunState,
   SegmentInput, SemanticActionRecord, SemanticDecisionCommand, SemanticDecisionResult,
   SemanticReport, SemanticState, SessionBasis, Snapshot, Span, TargetRevisionCommand,
   TargetRevisionResult, TermCandidateRef, TermFindingRef, TermOccurrenceAction, Undo,
 } from './workbench-model.ts';
 
 export const MAX_CHOICES = MAX_V4_CHOICES;
+export const MAX_UNDO = 50;
+export const TYPING_COALESCE_MS = 1200;
 export const EMPTY_DRAFT: Draft = { source: '', target: '', direction: 'en', alignments: null };
 
 /**
@@ -98,6 +100,7 @@ export type WorkbenchSnapshot = {
   imported: Choice[];
   reports: Snapshot[];
   history: Undo[];
+  documentCheckpoint: DocumentCheckpoint | null;
   semantic: SemanticState;
   basis: SessionBasis;
   capabilities: string[] | null;
@@ -242,6 +245,7 @@ export class WorkbenchController {
   private docGeneration = 0;
   private importAttempt = 0;
   private historySerial = 0;
+  private activeTypingTx: { side: 'source' | 'target'; at: number } | null = null;
   private documentEpoch = 0;
   private reconcileGeneration = 0;
 
@@ -270,6 +274,7 @@ export class WorkbenchController {
       imported: [],
       reports: [],
       history: [],
+      documentCheckpoint: null,
       semantic: emptySemantic() as SemanticState,
       basis: null,
       capabilities: options.initialCapabilities ?? null,
@@ -422,6 +427,7 @@ export class WorkbenchController {
   // ---- Request / document lifecycle guards ----
 
   discardInFlight(): void {
+    this.activeTypingTx = null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
@@ -450,6 +456,7 @@ export class WorkbenchController {
   }
 
   private replaceDocumentState(nextPatch: Partial<WorkbenchSnapshot>, nextSemantic: SemanticState): void {
+    this.activeTypingTx = null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
@@ -473,18 +480,25 @@ export class WorkbenchController {
   }
 
   private pushUndo(): { history: Undo[]; serial: number } {
+    this.activeTypingTx = null;
     const serial = ++this.historySerial;
     const { draft, choices, imported, semantic, history } = this.state;
     return {
       serial,
-      history: [...history.slice(-19), { draft, choices, imported, semantic, serial }],
+      history: [...history.slice(-(MAX_UNDO - 1)), { draft, choices, imported, semantic, serial }],
     };
   }
 
-  private pushDocumentUndo(): Undo[] {
-    const { draft, choices, imported, reports, semantic, history } = this.state;
-    const saved: Undo = { draft, choices, imported, reports, semantic, replacedDocument: true };
-    return [...history.slice(-19), saved];
+  private pushDocumentUndo(kind?: DocumentCheckpoint['kind']): { history: Undo[]; checkpoint: DocumentCheckpoint | null } {
+    this.activeTypingTx = null;
+    const serial = ++this.historySerial;
+    const { draft, choices, imported, reports, semantic, history, documentCheckpoint } = this.state;
+    const saved: Undo = { draft, choices, imported, reports, semantic, serial, replacedDocument: true };
+    const nextHistory = [...history.slice(-(MAX_UNDO - 1)), saved];
+    const checkpoint = kind && workPresent(draft, choices, reports, semantic)
+      ? { entry: saved, kind, createdAt: this.clock.now() }
+      : documentCheckpoint;
+    return { history: nextHistory, checkpoint };
   }
 
   canUndoLast(serial: number): boolean {
@@ -525,7 +539,17 @@ export class WorkbenchController {
     const next: Draft = { ...draft, [side]: value, alignments: draft.alignments === null ? null : [] };
     const message = draft.alignments !== null ? 'editedAlignments' : latest ? 'editedText' : '';
     const before = this.state.draft;
-    const { history } = this.pushUndo();
+    const now = this.clock.now();
+    const deltaLen = Math.abs(chars(value).length - chars(before[side]).length);
+    const top = this.state.history.at(-1);
+    const canCoalesce = this.activeTypingTx !== null
+      && this.activeTypingTx.side === side
+      && now - this.activeTypingTx.at <= TYPING_COALESCE_MS
+      && deltaLen <= 1
+      && this.state.history.length > 0
+      && !top?.replacedDocument;
+    const history = canCoalesce ? this.state.history : this.pushUndo().history;
+    this.activeTypingTx = deltaLen <= 1 ? { side, at: now } : null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
@@ -1179,17 +1203,21 @@ export class WorkbenchController {
   }
 
   undo(): void {
+    this.activeTypingTx = null;
     const last = this.state.history.at(-1);
     if (!last) return;
     const nextHistory = this.state.history.slice(0, -1);
     const notice = last.reports ? 'undoWithReports' : 'undoLocal';
     const clearLastSemantic = this.state.lastSemanticAction?.marker === last.serial;
+    const cp = this.state.documentCheckpoint;
+    const clearCheckpoint = !!(last.replacedDocument && cp && cp.entry.serial !== undefined && cp.entry.serial === last.serial);
     const basePatch: Partial<WorkbenchSnapshot> = {
       draft: last.draft,
       choices: last.choices,
       imported: last.imported,
       history: nextHistory,
       sourceDirtyForTranslation: false,
+      ...(clearCheckpoint ? { documentCheckpoint: null } : {}),
       ...(last.reports ? { reports: last.reports } : {}),
       ...(clearLastSemantic ? { lastSemanticAction: null } : {}),
       notice,
@@ -1212,16 +1240,36 @@ export class WorkbenchController {
     }
   }
 
+  restoreDocumentCheckpoint(): boolean {
+    const cp = this.state.documentCheckpoint;
+    if (!cp) return false;
+    const { history } = this.pushDocumentUndo();
+    const restored = cp.entry;
+    this.replaceDocumentState({
+      draft: restored.draft,
+      choices: restored.choices,
+      imported: restored.imported,
+      ...(restored.reports ? { reports: restored.reports } : {}),
+      history,
+      documentCheckpoint: null,
+      importedCanonical: null,
+      sourceDirtyForTranslation: false,
+      notice: 'restoredCheckpoint',
+    }, restored.semantic);
+    return true;
+  }
+
   receiveDraft(next: Draft): boolean {
     const before = this.state.draft;
     if (before.source === next.source && before.target === next.target && before.direction === next.direction) return false;
-    const nextHistory = this.pushDocumentUndo();
+    const { history: nextHistory, checkpoint } = this.pushDocumentUndo('replace');
     this.replaceDocumentState({
       draft: next,
       choices: [],
       imported: [],
       reports: [],
       history: nextHistory,
+      documentCheckpoint: checkpoint,
       sourceDirtyForTranslation: false,
       notice: 'receivedDraft',
     }, freshSemantic(next) as SemanticState);
@@ -1229,7 +1277,7 @@ export class WorkbenchController {
   }
 
   replaceWithText(text: string): void {
-    const nextHistory = this.pushDocumentUndo();
+    const { history: nextHistory, checkpoint } = this.pushDocumentUndo('replace');
     const textDraft: Draft = { source: text, target: '', direction: this.state.draft.direction, alignments: null };
     this.replaceDocumentState({
       draft: textDraft,
@@ -1237,22 +1285,39 @@ export class WorkbenchController {
       imported: [],
       reports: [],
       history: nextHistory,
+      documentCheckpoint: checkpoint,
       importedCanonical: null,
       sourceDirtyForTranslation: false,
       notice: 'importedSourceText',
     }, freshSemantic(textDraft) as SemanticState);
   }
 
+  replaceWithWorkfile(pending: PendingWorkfile): void {
+    const { history: nextHistory, checkpoint } = this.pushDocumentUndo('import');
+    this.replaceDocumentState({
+      draft: pending.draft,
+      choices: pending.choices,
+      imported: pending.choices,
+      reports: pending.reports,
+      history: nextHistory,
+      documentCheckpoint: checkpoint,
+      sourceDirtyForTranslation: false,
+      importedCanonical: pending.importedBody,
+      notice: 'imported',
+    }, pending.semantic);
+  }
+
   clearDraft(): boolean {
     const { draft, choices, reports, semantic } = this.state;
     if (!workPresent(draft, choices, reports, semantic)) return false;
-    const nextHistory = this.pushDocumentUndo();
+    const { history: nextHistory, checkpoint } = this.pushDocumentUndo('clear');
     this.replaceDocumentState({
       draft: EMPTY_DRAFT,
       choices: [],
       imported: [],
       reports: [],
       history: nextHistory,
+      documentCheckpoint: checkpoint,
       sourceDirtyForTranslation: false,
       notice: 'clearedDraft',
     }, emptySemantic() as SemanticState);
@@ -1260,6 +1325,14 @@ export class WorkbenchController {
   }
 
   // ---- Import / Save / Export ----
+
+  private shouldConfirmImport(): boolean {
+    const { draft, choices, reports, semantic, basis, importedCanonical, downloadedCanonical } = this.state;
+    const canonical = canonicalOf(draft, choices, reports, semantic, basis);
+    const holdsWork = workPresent(draft, choices, reports, semantic);
+    const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
+    return leaveGuardActive({ view: saveView });
+  }
 
   async importFile(file?: ImportFileLike): Promise<ImportOutcome> {
     if (!file) return { status: 'ignored' };
@@ -1286,15 +1359,7 @@ export class WorkbenchController {
           this.setState({ error: { code: 'importReportExport' } });
           return { status: 'error' };
         }
-        const canonical = canonicalOf(this.state.draft, this.state.choices, this.state.reports, this.state.semantic, this.state.basis);
-        const holdsWork = workPresent(this.state.draft, this.state.choices, this.state.reports, this.state.semantic);
-        const saveView = manuscriptSaveView({
-          holdsWork,
-          canonical,
-          importedCanonical: this.state.importedCanonical,
-          downloadedCanonical: this.state.downloadedCanonical,
-        });
-        if (leaveGuardActive({ view: saveView })) {
+        if (this.shouldConfirmImport()) {
           return { status: 'needs_confirm_text', pendingText: text };
         }
         this.replaceWithText(text);
@@ -1327,17 +1392,17 @@ export class WorkbenchController {
         return { status: 'ignored' };
       }
       const importedBody = canonicalOf(nextDraft, nextChoices, nextReports, nextSemantic, null);
-      const nextHistory = this.pushDocumentUndo();
-      this.replaceDocumentState({
+      const pendingWorkfile: PendingWorkfile = {
         draft: nextDraft,
         choices: nextChoices,
-        imported: nextChoices,
         reports: nextReports,
-        history: nextHistory,
-        sourceDirtyForTranslation: false,
-        ...(importedBody ? { importedCanonical: importedBody } : {}),
-        notice: 'imported',
-      }, nextSemantic);
+        semantic: nextSemantic,
+        importedBody,
+      };
+      if (this.shouldConfirmImport()) {
+        return { status: 'needs_confirm_workfile', pendingWorkfile };
+      }
+      this.replaceWithWorkfile(pendingWorkfile);
       return { status: 'imported' };
     } catch (cause) {
       if (!this.disposed && this.importAttempt === attempt && this.docGeneration === mine) {
@@ -1351,12 +1416,77 @@ export class WorkbenchController {
     const { draft, choices, reports, semantic, basis } = this.state;
     try {
       const content = serializeWorkfile(manuscriptBody(draft, choices, reports, semantic, basis));
+      this.activeTypingTx = null;
       this.setState({ downloadedCanonical: content, error: null, notice: 'saved' });
       return { filename: 'wuwaterm-manuscript.json', content, mimeType: 'application/json' };
     } catch (cause) {
-      this.setState({ error: errorFrom(cause, 'saveFailed') });
+      const parsed = errorFrom(cause, 'saveFailed');
+      this.setState({
+        error: parsed?.code === 'workfile_duplicate_choices' ? { ...parsed, saveConflict: true } : parsed,
+      });
       return null;
     }
+  }
+
+  resolveConflictingChoicesAndSave(): ExportArtifact | null {
+    const { draft, choices, reports, semantic, basis } = this.state;
+    const cleaned = sanitizeDuplicateChoices({
+      source: draft.source,
+      direction: draft.direction,
+      choices,
+      semantic_decisions: semantic.decisions,
+      segments: semantic.long.records,
+    });
+    if (cleaned.dropped <= 0) {
+      return this.save();
+    }
+    const { history } = this.pushUndo();
+    const nextSemantic: SemanticState = {
+      ...semantic,
+      decisions: cleaned.semantic_decisions,
+      long: { ...semantic.long, records: cleaned.segments },
+    };
+    this.docAbort?.abort();
+    this.docAbort = null;
+    this.docGeneration += 1;
+    try {
+      const content = serializeWorkfile(manuscriptBody(draft, cleaned.choices, reports, nextSemantic, basis));
+      this.setState({
+        history,
+        phase: 'idle',
+        translating: false,
+        inFlight: false,
+        generation: this.docGeneration,
+        choices: cleaned.choices,
+        imported: this.state.imported.filter(c => cleaned.choices.includes(c)),
+        semantic: nextSemantic,
+        downloadedCanonical: content,
+        error: null,
+        notice: 'resolvedConflictsSaved',
+      });
+      return { filename: 'wuwaterm-manuscript.json', content, mimeType: 'application/json' };
+    } catch (cause) {
+      const parsed = errorFrom(cause, 'saveFailed');
+      this.setState({
+        history,
+        phase: 'idle',
+        translating: false,
+        inFlight: false,
+        generation: this.docGeneration,
+        choices: cleaned.choices,
+        imported: this.state.imported.filter(c => cleaned.choices.includes(c)),
+        semantic: nextSemantic,
+        error: parsed?.code === 'workfile_duplicate_choices' ? { ...parsed, saveConflict: true } : parsed,
+      });
+      return null;
+    }
+  }
+
+  exportProseTxt(): ExportArtifact {
+    const { source, target } = this.state.draft;
+    const content = target ? `${source}\n\n---\n\n${target}` : source;
+    this.setState({ notice: 'exportProseTxt' });
+    return { filename: 'wuwaterm-prose.txt', content, mimeType: 'text/plain;charset=utf-8' };
   }
 
   exportTxt(): ExportArtifact {

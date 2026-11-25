@@ -75,6 +75,7 @@ test('long translation handoff can be saved, reopened and shortened for review w
   expect(reviews).toHaveLength(0);
   await page.locator('#review-target').fill('temporary edit');
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'long-manuscript.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(saved)) });
+  await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('#review-target')).toHaveValue(target);
   await page.locator('#review-target').fill(B.target);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
@@ -322,8 +323,11 @@ function savedManuscript(draft = B) {
     history: [{ ...draft, alignments: null, report: saved.report, resolutions: [] }] });
 }
 
-async function importManuscript(page, content) {
+async function importManuscript(page, content, { confirm = true } = {}) {
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(content) });
+  if (confirm) {
+    await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
+  }
 }
 
 for (const origin of ['checked', 'imported']) test(`import undo restores both ${origin} reports and the full manuscript without certifying it`, async ({ page }, info) => {
@@ -337,7 +341,7 @@ for (const origin of ['checked', 'imported']) test(`import undo restores both ${
   }
   const before = await workfile(page);
   expect(before.history).toHaveLength(2);
-  await importManuscript(page, savedManuscript());
+  await importManuscript(page, savedManuscript(), { confirm: origin === 'checked' });
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
   const restored = await workfile(page);
@@ -391,13 +395,14 @@ test('import undo snapshots reports completed during the pending file read', asy
   gate.next = new Promise(resolve => { release = resolve; });
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect.poll(() => reviews.length).toBe(2);
-  await importManuscript(page, savedManuscript());
+  await importManuscript(page, savedManuscript(), { confirm: false });
   await expect.poll(() => page.evaluate(() => window.importReadStarted)).toBe(true);
   release();
   await expect(page.locator('.review-current')).toBeVisible();
   const acceptedTime = await workfile(page);
   expect(acceptedTime.history).toHaveLength(2);
   await page.evaluate(() => window.finishImportRead());
+  await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
   expect(await workfile(page)).toEqual(acceptedTime);
@@ -412,7 +417,7 @@ test('a narrow keyboard resume fetches fresh basis before explicitly reconfirmin
   const { reviews } = await open(page);
   const saved = fixture(A.source, A.target, A.direction);
   const choice = makeChoice({ ...saved, finding: saved.report.findings[0], candidate: null });
-  await importManuscript(page, serializeWorkfile({ ...A, alignments: null, choices: [choice], history: [{ ...A, alignments: null, report: saved.report, resolutions: [] }] }));
+  await importManuscript(page, serializeWorkfile({ ...A, alignments: null, choices: [choice], history: [{ ...A, alignments: null, report: saved.report, resolutions: [] }] }), { confirm: false });
   await expect(page.locator('.choice-records')).toContainText('0 处适用 / 1 处待确认');
   expect(reviews).toHaveLength(0);
   const fresh = page.getByRole('button', { name: '仅获取新依据', exact: true });
