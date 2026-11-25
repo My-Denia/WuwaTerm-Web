@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, computeMinimalScalarSplice, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, remapAlignmentsForFreeEdit, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
+import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, computeMinimalScalarSplice, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, remapAlignmentsForFreeEdit, remapAlignmentsForTargetSplice, remapForFreeEdit, sanitizeDuplicateChoices, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
 import { fixture, hash } from './fixtures/manuscript.mjs';
 const choiceFor = (s, i = 0, c = s.report.findings[i].candidates[0]) => makeChoice({ ...s, finding: s.report.findings[i], candidate: c });
 const clean = s => { const { source, target, direction, alignments, report, resolutions } = s; return { source, target, direction, alignments, report, resolutions }; };
@@ -340,7 +340,7 @@ test('sanitizeDuplicateChoices drops colliding duplicate choices while keeping v
   assert.deepEqual(cleaned.segments[0].choices, [exactB]);
 });
 
-test('remapAlignmentsForFreeEdit preserves outside/shifted/inside edits and clears crossing edits across surrogates', () => {
+test('remapAlignmentsForFreeEdit preserves outside/shifted/inside edits and invalidates only the entries an edit crosses or empties, across surrogates', () => {
   const source = '😀Alpha Beta';
   const target = '甲 乙';
   const alignments = [
@@ -377,24 +377,41 @@ test('remapAlignmentsForFreeEdit preserves outside/shifted/inside edits and clea
     ],
   );
 
-  // Deleting an entire aligned span or crossing a span boundary drops alignments to [].
+  // Edit transactions (contracts/workbench-state/edit-transactions.json). R3: deleting an aligned source span invalidates only
+  // that entry (source_emptied); the entry after it shifts.
   assert.deepEqual(
-    remapAlignmentsForFreeEdit(alignments, 'source', source, target, '😀 Beta', target),
-    [],
+    remapForFreeEdit(alignments, 'source', source, target, '😀 Beta', target),
+    {
+      alignments: [{ source: { start: 2, end: 6, text: 'Beta' }, target: { start: 2, end: 3, text: '乙' } }],
+      invalidated: [{ originalIndex: 0, reason: 'source_emptied', entry: alignments[0] }],
+      emptiedTargets: [],
+      fallbackAll: false,
+    },
   );
+  // R3: an edit crossing the Beta boundary invalidates only Beta; Alpha before it stays as it was.
   assert.deepEqual(
-    remapAlignmentsForFreeEdit(alignments, 'source', source, target, '😀AlphaEta', target),
-    [],
+    remapForFreeEdit(alignments, 'source', source, target, '😀AlphaEta', target),
+    {
+      alignments: [alignments[0]],
+      invalidated: [{ originalIndex: 1, reason: 'crossed_boundary', entry: alignments[1] }],
+      emptiedTargets: [],
+      fallbackAll: false,
+    },
   );
-  // Deleting an aligned non-empty target span (whole document or one segment) also fails closed to [].
+  assert.deepEqual(remapAlignmentsForFreeEdit(alignments, 'source', source, target, '😀AlphaEta', target), [alignments[0]]);
+  // R4: deleting one aligned target span in full keeps the entry with `target: null` (its source anchor stays for a
+  // re-translation); the later target span shifts. Free edit and explicit splice agree.
+  const emptiedFirst = [
+    { source: { start: 1, end: 6, text: 'Alpha' }, target: null },
+    { source: { start: 7, end: 11, text: 'Beta' }, target: { start: 1, end: 2, text: '乙' } },
+  ];
+  assert.deepEqual(remapAlignmentsForFreeEdit(alignments, 'target', source, target, source, ' 乙'), emptiedFirst);
+  assert.deepEqual(remapAlignmentsForTargetSplice(alignments, source, ' 乙', 0, 1, 0), emptiedFirst);
   assert.deepEqual(
-    remapAlignmentsForFreeEdit(alignments, 'target', source, target, source, ' 乙'),
-    [],
+    remapForFreeEdit(alignments, 'target', source, target, source, ' 乙').emptiedTargets,
+    [{ originalIndex: 0, entry: alignments[0] }],
   );
-  assert.deepEqual(
-    remapAlignmentsForTargetSplice(alignments, source, ' 乙', 0, 1, 0),
-    [],
-  );
+  // R4: clearing a single-span confirmed translation keeps the source anchor with `target: null`.
   assert.deepEqual(
     remapAlignmentsForFreeEdit(
       [{ source: { start: 0, end: 3, text: '今汐。' }, target: { start: 0, end: 7, text: 'Jinhsi.' } }],
@@ -404,6 +421,6 @@ test('remapAlignmentsForFreeEdit preserves outside/shifted/inside edits and clea
       '今汐。',
       '',
     ),
-    [],
+    [{ source: { start: 0, end: 3, text: '今汐。' }, target: null }],
   );
 });

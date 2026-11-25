@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { MAX_UNDO, canonicalOf, createWorkbenchController, isRunActive } from '../lib/workbench-controller.ts';
 import { recordView } from '../lib/long-review.ts';
 import {
-  makeChoice, remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices, serializeWorkfile,
+  makeChoice, remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, remapForSplice, remapForTargetFill, sanitizeDuplicateChoices, serializeWorkfile,
 } from '../lib/manuscript.js';
 import { issueStatus } from '../lib/semantic-state.js';
 import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from './fixtures/manuscript.mjs';
@@ -836,7 +836,7 @@ test('manual paragraph repair commands and document-level target revision / choi
   doc.dispose();
 });
 
-test('remapAlignmentsForTargetSplice and remapAlignmentsForTargetFill preserve valid spans and fail closed on boundary cross', () => {
+test('remapAlignmentsForTargetSplice and remapAlignmentsForTargetFill preserve valid spans and invalidate only crossed or ambiguous entries', () => {
   const source = '甲一。\n\n甲二。\n\n甲三。';
   const target = 'Alpha one.\n\nBeta two.\n\nGamma three.';
   const alignments = [
@@ -859,8 +859,20 @@ test('remapAlignmentsForTargetSplice and remapAlignmentsForTargetFill preserve v
   assert.equal(remapped?.[2].target?.text, 'Gamma three.');
   assert.equal(remapped?.[2].target?.start, 16);
 
-  // Boundary-crossing splice fails closed to [].
+  // R3: a splice crossing the end of span 0 and the start of span 1 invalidates those two only; span 2 stays (delta 0).
+  const crossedTarget = 'Alpha oncrosseda two.\n\nGamma three.';
+  assert.deepEqual(remapForSplice(alignments, 'target', source, crossedTarget, 8, 15, 7), {
+    alignments: [alignments[2]],
+    invalidated: [
+      { originalIndex: 0, reason: 'crossed_boundary', entry: alignments[0] },
+      { originalIndex: 1, reason: 'crossed_boundary', entry: alignments[1] },
+    ],
+    emptiedTargets: [],
+    fallbackAll: false,
+  });
+  // R6 safety net: coordinates that do not fit the next text (malformed input, never an edit) still clear every alignment.
   assert.deepEqual(remapAlignmentsForTargetSplice(alignments, source, 'crossed', 8, 15, 7), []);
+  assert.equal(remapForSplice(alignments, 'target', source, 'crossed', 8, 15, 7).fallbackAll, true);
 
   // Filling an untranslated span populates target:null and preserves surrounding spans.
   const partialAlign = [
@@ -875,17 +887,23 @@ test('remapAlignmentsForTargetSplice and remapAlignmentsForTargetFill preserve v
   assert.equal(filled?.[2].target?.text, 'Gamma three.');
   assert.equal(filled?.[2].target?.start, 27);
 
-  // remapAlignmentsForTargetFill preserves null and fails closed on 0 or >1 matching target:null entries.
+  // remapAlignmentsForTargetFill preserves null. With no untranslated entry in the pair region the fill is a plain insertion:
+  // span 0 ends before the insertion point and stays.
   assert.equal(remapAlignmentsForTargetFill(null, source, filledTarget, 5, 8, 12, 12, 25, 15), null);
   assert.deepEqual(
     remapAlignmentsForTargetFill([alignments[0]], source, filledTarget, 5, 8, 12, 12, 25, 15),
-    [],
+    [alignments[0]],
   );
+  // R3 fill_ambiguous: two untranslated entries in the pair region; only they are invalidated (here that is every entry).
   const twoNull = [
     { source: { start: 0, end: 3, text: '甲一。' }, target: null },
     { source: { start: 5, end: 8, text: '甲二。' }, target: null },
   ];
   assert.deepEqual(remapAlignmentsForTargetFill(twoNull, '甲一。\n\n甲二。', 'One.\n\nTwo.', 0, 8, 0, 0, 4, 4), []);
+  assert.deepEqual(
+    remapForTargetFill(twoNull, '甲一。\n\n甲二。', 'One.\n\nTwo.', 0, 8, 0, 0, 4, 4).invalidated.map(x => [x.originalIndex, x.reason]),
+    [[0, 'fill_ambiguous'], [1, 'fill_ambiguous']],
+  );
 });
 
 test('localized target edits, reopened batch resume, ready retranslate and undo preserve explicit alignments', async () => {
@@ -1181,7 +1199,7 @@ test('workfile import guard protects unsaved edits, coalesces typing undo, keeps
   doc.dispose();
 });
 
-test('editText remaps confirmed alignments on safe edits and emits editedAlignments only when lost', () => {
+test('editText remaps confirmed alignments, keeps emptied targets as null and emits editedAlignments only when every entry is lost', () => {
   const doc = createWorkbenchController({});
   doc.editText('source', 'Alpha Beta');
   doc.editText('target', '甲 乙');
@@ -1201,11 +1219,16 @@ test('editText remaps confirmed alignments on safe edits and emits editedAlignme
   ]);
   assert.notEqual(doc.getSnapshot().notice, 'editedAlignments');
 
+  // R4: clearing the translation empties both targets; both entries keep their source anchors as untranslated.
   doc.editText('target', '');
-  assert.deepEqual(doc.getSnapshot().draft.alignments, []);
-  assert.equal(doc.getSnapshot().notice, 'editedAlignments');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, [
+    { source: { start: 3, end: 8, text: 'Alpha' }, target: null },
+    { source: { start: 9, end: 13, text: 'Beta' }, target: null },
+  ]);
+  assert.equal(doc.getSnapshot().notice, '', 'no alignment was lost and there is no report to mark stale');
+  assert.deepEqual(doc.getSnapshot().alignmentInvalidations, []);
 
-  // Clearing a single-span confirmed translation (or deleting one segment's target in full) fails closed.
+  // R4: clearing a single-span confirmed translation keeps the source anchor.
   doc.editText('source', '今汐。');
   doc.editText('target', 'Jinhsi.');
   assert.equal(doc.recordAlignment(
@@ -1213,8 +1236,13 @@ test('editText remaps confirmed alignments on safe edits and emits editedAlignme
     { start: 0, end: 7, text: 'Jinhsi.' },
   ), true);
   doc.editText('target', '');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, [{ source: { start: 0, end: 3, text: '今汐。' }, target: null }]);
+
+  // R3: deleting the only aligned source text invalidates the only entry, so every alignment is lost.
+  doc.editText('source', '');
   assert.deepEqual(doc.getSnapshot().draft.alignments, []);
   assert.equal(doc.getSnapshot().notice, 'editedAlignments');
+  assert.deepEqual(doc.getSnapshot().alignmentInvalidations.map(x => x.reason), ['source_emptied']);
 
   doc.editText('source', 'Alpha Beta');
   doc.editText('target', '甲 乙');
@@ -1226,7 +1254,16 @@ test('editText remaps confirmed alignments on safe edits and emits editedAlignme
     { start: 6, end: 10, text: 'Beta' },
     { start: 2, end: 3, text: '乙' },
   ), true);
+  assert.deepEqual(doc.getSnapshot().alignmentInvalidations, [], 'recording an alignment starts the session list over');
+  // R4: deleting the first target span in full keeps it as untranslated and shifts the second.
   doc.editText('target', ' 乙');
+  assert.deepEqual(doc.getSnapshot().draft.alignments, [
+    { source: { start: 0, end: 5, text: 'Alpha' }, target: null },
+    { source: { start: 6, end: 10, text: 'Beta' }, target: { start: 1, end: 2, text: '乙' } },
+  ]);
+  // R3: an edit across the Alpha/Beta source boundary invalidates both crossed entries only; nothing else is left here.
+  doc.undo();
+  doc.editText('source', 'AlphXeta');
   assert.deepEqual(doc.getSnapshot().draft.alignments, []);
   assert.equal(doc.getSnapshot().notice, 'editedAlignments');
   doc.dispose();

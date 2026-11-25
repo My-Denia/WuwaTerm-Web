@@ -1,0 +1,4522 @@
+{
+  "schema": "wuwaterm-edit-transaction-cases-v1",
+  "description": "Edit transactions on a manuscript draft with explicit alignments: which entries an edit keeps, shifts, resizes, empties (target: null) or invalidates, and how undo and redo step over them. Shared by Web (lib/manuscript.js applyEditTransaction, lib/workbench-controller.ts) and Windows.",
+  "coordinates": "Unicode scalar offsets (JavaScript Array.from indexes, Python str indexes). utf16_splice fields are informational; assertions use scalars.",
+  "splice_rule": "A free edit becomes the minimal splice between the old and new side text: the longest common UTF-16 prefix, backed off one unit when it ends after a high surrogate, then the longest common suffix of the rest, backed off when it starts at a low surrogate; offsets are then counted in scalars.",
+  "rules": {
+    "R1": "An entry whose span ends at or before the splice start is kept as is; one that starts at or after the splice end shifts by the length delta, with its text sliced from the new side text.",
+    "R2": "A splice inside a span (start <= splice start and splice end <= end) resizes it while text remains.",
+    "R3": "Only the entries a splice crosses (crossed_boundary), whose source text it deletes (source_emptied) or that a target fill matched ambiguously (fill_ambiguous) leave the list; entries before and after them are kept or shifted.",
+    "R4": "A target span whose text is deleted (an inside edit that leaves nothing, or a pure deletion covering it) becomes target: null; the entry keeps its source anchor and is listed in emptied_targets.",
+    "R5": "An insertion at a span boundary point is outside the span: at its end the span is kept, at its start it shifts.",
+    "R6": "An entry whose span an inside edit grows past 2,000 scalars leaves the list alone (span_too_long). Only malformed input reaches fallback_all, which clears every alignment; no case here does.",
+    "R7": "A direction change clears every explicit alignment to [] (null stays null).",
+    "R8": "Undo and redo hold at most 50 steps. A one-scalar edit on the same side within 1,200 ms of the last one joins its step, unless the edit invalidates or empties an alignment, which is a step of its own and is never joined; edits on the other side never join. An IME composition is one step judged against the text before it. Undo restores every entry a step invalidated, and the session list of invalidated entries with it; a new edit clears the redo steps.",
+    "R9": "Saved manuscripts (v1-v4) hold only the kept alignments; the session list of invalidated entries lives in session state, undo steps and the document checkpoint only, never in browser storage."
+  },
+  "reasons": [
+    "crossed_boundary",
+    "source_emptied",
+    "fill_ambiguous",
+    "span_too_long"
+  ],
+  "alignment_notice": {
+    "all": "the edit left none of the previous explicit alignments",
+    "partial": "the edit invalidated some entries and kept others",
+    "null": "no entry was invalidated (kept, shifted, resized or emptied-target entries only)"
+  },
+  "undo": {
+    "limit": 50,
+    "coalesce_ms": 1200
+  },
+  "transaction_kinds": {
+    "edit": "{side, text}: the side text becomes `text` (a free edit; see splice_rule)",
+    "splice": "{side, start, end, replacement}: scalars start..end of the side text replaced by `replacement`",
+    "fill": "{pair_source, at, insert, core}: `insert` placed at scalar `at` of the target; `core` (absolute, in the new target) becomes the target of the one untranslated entry whose source lies inside pair_source",
+    "direction": "{direction}: the translation direction changes"
+  },
+  "cases": [
+    {
+      "id": "source-inside-edit-resizes-and-shifts",
+      "rules": [
+        "R1",
+        "R2"
+      ],
+      "draft": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "Alpha BeXXta Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 8,
+        "old_end": 8,
+        "new_end": 10
+      },
+      "expect": {
+        "source": "Alpha BeXXta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 12,
+              "text": "BeXXta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 13,
+              "end": 18,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "source-free-edit-crosses-boundary",
+      "rules": [
+        "R3",
+        "R1"
+      ],
+      "draft": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "AlphXta Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 4,
+        "old_end": 8,
+        "new_end": 5
+      },
+      "expect": {
+        "source": "AlphXta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 8,
+              "end": 13,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 0,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 0,
+                "end": 5,
+                "text": "Alpha"
+              },
+              "target": {
+                "start": 0,
+                "end": 1,
+                "text": "甲"
+              }
+            }
+          },
+          {
+            "original_index": 1,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 6,
+                "end": 10,
+                "text": "Beta"
+              },
+              "target": {
+                "start": 2,
+                "end": 3,
+                "text": "乙"
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "target-splice-crosses-boundary",
+      "rules": [
+        "R3",
+        "R1"
+      ],
+      "draft": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "Alpha one.\n\nBeta two.\n\nGamma three.",
+        "direction": "zh",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 10,
+              "text": "Alpha one."
+            }
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": {
+              "start": 12,
+              "end": 21,
+              "text": "Beta two."
+            }
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 23,
+              "end": 35,
+              "text": "Gamma three."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "splice",
+        "side": "target",
+        "start": 8,
+        "end": 15,
+        "replacement": "crossed"
+      },
+      "expect": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "Alpha oncrosseda two.\n\nGamma three.",
+        "direction": "zh",
+        "alignments": [
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 23,
+              "end": 35,
+              "text": "Gamma three."
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 0,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 0,
+                "end": 3,
+                "text": "甲一。"
+              },
+              "target": {
+                "start": 0,
+                "end": 10,
+                "text": "Alpha one."
+              }
+            }
+          },
+          {
+            "original_index": 1,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 5,
+                "end": 8,
+                "text": "甲二。"
+              },
+              "target": {
+                "start": 12,
+                "end": 21,
+                "text": "Beta two."
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "source-emptied",
+      "rules": [
+        "R3",
+        "R1"
+      ],
+      "draft": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "Alpha Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 6,
+        "old_end": 11,
+        "new_end": 6
+      },
+      "expect": {
+        "source": "Alpha Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 11,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 1,
+            "reason": "source_emptied",
+            "entry": {
+              "source": {
+                "start": 6,
+                "end": 10,
+                "text": "Beta"
+              },
+              "target": {
+                "start": 2,
+                "end": 3,
+                "text": "乙"
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "target-emptied-becomes-null",
+      "rules": [
+        "R4",
+        "R1"
+      ],
+      "draft": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "target",
+        "text": "甲  丙"
+      },
+      "splice": {
+        "side": "target",
+        "start": 2,
+        "old_end": 3,
+        "new_end": 2
+      },
+      "expect": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲  丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": null
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 3,
+              "end": 4,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [
+          {
+            "original_index": 1,
+            "entry": {
+              "source": {
+                "start": 6,
+                "end": 10,
+                "text": "Beta"
+              },
+              "target": {
+                "start": 2,
+                "end": 3,
+                "text": "乙"
+              }
+            }
+          }
+        ],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "target-paragraph-free-delete-prefix-first-crosses",
+      "rules": [
+        "R3",
+        "R5"
+      ],
+      "draft": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One.\n\nTwo.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 4,
+              "text": "One."
+            }
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": {
+              "start": 6,
+              "end": 10,
+              "text": "Two."
+            }
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 12,
+              "end": 18,
+              "text": "Three."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "target",
+        "text": "One.\n\nThree."
+      },
+      "splice": {
+        "side": "target",
+        "start": 7,
+        "old_end": 13,
+        "new_end": 7
+      },
+      "expect": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 4,
+              "text": "One."
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 1,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 5,
+                "end": 8,
+                "text": "甲二。"
+              },
+              "target": {
+                "start": 6,
+                "end": 10,
+                "text": "Two."
+              }
+            }
+          },
+          {
+            "original_index": 2,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 10,
+                "end": 13,
+                "text": "甲三。"
+              },
+              "target": {
+                "start": 12,
+                "end": 18,
+                "text": "Three."
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "target-paragraph-splice-becomes-null",
+      "rules": [
+        "R4",
+        "R1"
+      ],
+      "draft": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One.\n\nTwo.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 4,
+              "text": "One."
+            }
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": {
+              "start": 6,
+              "end": 10,
+              "text": "Two."
+            }
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 12,
+              "end": 18,
+              "text": "Three."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "splice",
+        "side": "target",
+        "start": 6,
+        "end": 12,
+        "replacement": ""
+      },
+      "expect": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 4,
+              "text": "One."
+            }
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": null
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 6,
+              "end": 12,
+              "text": "Three."
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [
+          {
+            "original_index": 1,
+            "entry": {
+              "source": {
+                "start": 5,
+                "end": 8,
+                "text": "甲二。"
+              },
+              "target": {
+                "start": 6,
+                "end": 10,
+                "text": "Two."
+              }
+            }
+          }
+        ],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "target-fill-ambiguous",
+      "rules": [
+        "R3",
+        "R1"
+      ],
+      "draft": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "Three.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": null
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": null
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 0,
+              "end": 6,
+              "text": "Three."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "fill",
+        "pair_source": {
+          "start": 0,
+          "end": 10
+        },
+        "at": 0,
+        "insert": "One. Two.\n\n",
+        "core": {
+          "start": 0,
+          "end": 9
+        }
+      },
+      "expect": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One. Two.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 11,
+              "end": 17,
+              "text": "Three."
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 0,
+            "reason": "fill_ambiguous",
+            "entry": {
+              "source": {
+                "start": 0,
+                "end": 3,
+                "text": "甲一。"
+              },
+              "target": null
+            }
+          },
+          {
+            "original_index": 1,
+            "reason": "fill_ambiguous",
+            "entry": {
+              "source": {
+                "start": 5,
+                "end": 8,
+                "text": "甲二。"
+              },
+              "target": null
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "target-fill-single-match",
+      "rules": [
+        "R1"
+      ],
+      "draft": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 4,
+              "text": "One."
+            }
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": null
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 6,
+              "end": 12,
+              "text": "Three."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "fill",
+        "pair_source": {
+          "start": 5,
+          "end": 10
+        },
+        "at": 6,
+        "insert": "Two.\n\n",
+        "core": {
+          "start": 6,
+          "end": 10
+        }
+      },
+      "expect": {
+        "source": "甲一。\n\n甲二。\n\n甲三。",
+        "target": "One.\n\nTwo.\n\nThree.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 3,
+              "text": "甲一。"
+            },
+            "target": {
+              "start": 0,
+              "end": 4,
+              "text": "One."
+            }
+          },
+          {
+            "source": {
+              "start": 5,
+              "end": 8,
+              "text": "甲二。"
+            },
+            "target": {
+              "start": 6,
+              "end": 10,
+              "text": "Two."
+            }
+          },
+          {
+            "source": {
+              "start": 10,
+              "end": 13,
+              "text": "甲三。"
+            },
+            "target": {
+              "start": 12,
+              "end": 18,
+              "text": "Three."
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "insertion-at-span-start-is-outside",
+      "rules": [
+        "R5",
+        "R1"
+      ],
+      "draft": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "Alpha XBeta Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 6,
+        "old_end": 6,
+        "new_end": 7
+      },
+      "expect": {
+        "source": "Alpha XBeta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 11,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 12,
+              "end": 17,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "insertion-at-span-end-is-outside",
+      "rules": [
+        "R5",
+        "R1"
+      ],
+      "draft": {
+        "source": "Alpha Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "AlphaY Beta Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 5,
+        "old_end": 5,
+        "new_end": 6
+      },
+      "expect": {
+        "source": "AlphaY Beta Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 11,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 12,
+              "end": 17,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "repeated-scalars-prefix-first-splice",
+      "rules": [
+        "R5",
+        "R1"
+      ],
+      "draft": {
+        "source": "aa aa",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 2,
+              "text": "aa"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 3,
+              "end": 5,
+              "text": "aa"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "aaa aa"
+      },
+      "splice": {
+        "side": "source",
+        "start": 2,
+        "old_end": 2,
+        "new_end": 3
+      },
+      "expect": {
+        "source": "aaa aa",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 2,
+              "text": "aa"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 4,
+              "end": 6,
+              "text": "aa"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "sixty-four-alignments-one-affected",
+      "rules": [
+        "R3",
+        "R1"
+      ],
+      "draft": {
+        "source": "段落00。\n\n段落01。\n\n段落02。\n\n段落03。\n\n段落04。\n\n段落05。\n\n段落06。\n\n段落07。\n\n段落08。\n\n段落09。\n\n段落10。\n\n段落11。\n\n段落12。\n\n段落13。\n\n段落14。\n\n段落15。\n\n段落16。\n\n段落17。\n\n段落18。\n\n段落19。\n\n段落20。\n\n段落21。\n\n段落22。\n\n段落23。\n\n段落24。\n\n段落25。\n\n段落26。\n\n段落27。\n\n段落28。\n\n段落29。\n\n段落30。\n\n段落31。\n\n段落32。\n\n段落33。\n\n段落34。\n\n段落35。\n\n段落36。\n\n段落37。\n\n段落38。\n\n段落39。\n\n段落40。\n\n段落41。\n\n段落42。\n\n段落43。\n\n段落44。\n\n段落45。\n\n段落46。\n\n段落47。\n\n段落48。\n\n段落49。\n\n段落50。\n\n段落51。\n\n段落52。\n\n段落53。\n\n段落54。\n\n段落55。\n\n段落56。\n\n段落57。\n\n段落58。\n\n段落59。\n\n段落60。\n\n段落61。\n\n段落62。\n\n段落63。",
+        "target": "Paragraph 00.\n\nParagraph 01.\n\nParagraph 02.\n\nParagraph 03.\n\nParagraph 04.\n\nParagraph 05.\n\nParagraph 06.\n\nParagraph 07.\n\nParagraph 08.\n\nParagraph 09.\n\nParagraph 10.\n\nParagraph 11.\n\nParagraph 12.\n\nParagraph 13.\n\nParagraph 14.\n\nParagraph 15.\n\nParagraph 16.\n\nParagraph 17.\n\nParagraph 18.\n\nParagraph 19.\n\nParagraph 20.\n\nParagraph 21.\n\nParagraph 22.\n\nParagraph 23.\n\nParagraph 24.\n\nParagraph 25.\n\nParagraph 26.\n\nParagraph 27.\n\nParagraph 28.\n\nParagraph 29.\n\nParagraph 30.\n\nParagraph 31.\n\nParagraph 32.\n\nParagraph 33.\n\nParagraph 34.\n\nParagraph 35.\n\nParagraph 36.\n\nParagraph 37.\n\nParagraph 38.\n\nParagraph 39.\n\nParagraph 40.\n\nParagraph 41.\n\nParagraph 42.\n\nParagraph 43.\n\nParagraph 44.\n\nParagraph 45.\n\nParagraph 46.\n\nParagraph 47.\n\nParagraph 48.\n\nParagraph 49.\n\nParagraph 50.\n\nParagraph 51.\n\nParagraph 52.\n\nParagraph 53.\n\nParagraph 54.\n\nParagraph 55.\n\nParagraph 56.\n\nParagraph 57.\n\nParagraph 58.\n\nParagraph 59.\n\nParagraph 60.\n\nParagraph 61.\n\nParagraph 62.\n\nParagraph 63.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "段落00。"
+            },
+            "target": {
+              "start": 0,
+              "end": 13,
+              "text": "Paragraph 00."
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 12,
+              "text": "段落01。"
+            },
+            "target": {
+              "start": 15,
+              "end": 28,
+              "text": "Paragraph 01."
+            }
+          },
+          {
+            "source": {
+              "start": 14,
+              "end": 19,
+              "text": "段落02。"
+            },
+            "target": {
+              "start": 30,
+              "end": 43,
+              "text": "Paragraph 02."
+            }
+          },
+          {
+            "source": {
+              "start": 21,
+              "end": 26,
+              "text": "段落03。"
+            },
+            "target": {
+              "start": 45,
+              "end": 58,
+              "text": "Paragraph 03."
+            }
+          },
+          {
+            "source": {
+              "start": 28,
+              "end": 33,
+              "text": "段落04。"
+            },
+            "target": {
+              "start": 60,
+              "end": 73,
+              "text": "Paragraph 04."
+            }
+          },
+          {
+            "source": {
+              "start": 35,
+              "end": 40,
+              "text": "段落05。"
+            },
+            "target": {
+              "start": 75,
+              "end": 88,
+              "text": "Paragraph 05."
+            }
+          },
+          {
+            "source": {
+              "start": 42,
+              "end": 47,
+              "text": "段落06。"
+            },
+            "target": {
+              "start": 90,
+              "end": 103,
+              "text": "Paragraph 06."
+            }
+          },
+          {
+            "source": {
+              "start": 49,
+              "end": 54,
+              "text": "段落07。"
+            },
+            "target": {
+              "start": 105,
+              "end": 118,
+              "text": "Paragraph 07."
+            }
+          },
+          {
+            "source": {
+              "start": 56,
+              "end": 61,
+              "text": "段落08。"
+            },
+            "target": {
+              "start": 120,
+              "end": 133,
+              "text": "Paragraph 08."
+            }
+          },
+          {
+            "source": {
+              "start": 63,
+              "end": 68,
+              "text": "段落09。"
+            },
+            "target": {
+              "start": 135,
+              "end": 148,
+              "text": "Paragraph 09."
+            }
+          },
+          {
+            "source": {
+              "start": 70,
+              "end": 75,
+              "text": "段落10。"
+            },
+            "target": {
+              "start": 150,
+              "end": 163,
+              "text": "Paragraph 10."
+            }
+          },
+          {
+            "source": {
+              "start": 77,
+              "end": 82,
+              "text": "段落11。"
+            },
+            "target": {
+              "start": 165,
+              "end": 178,
+              "text": "Paragraph 11."
+            }
+          },
+          {
+            "source": {
+              "start": 84,
+              "end": 89,
+              "text": "段落12。"
+            },
+            "target": {
+              "start": 180,
+              "end": 193,
+              "text": "Paragraph 12."
+            }
+          },
+          {
+            "source": {
+              "start": 91,
+              "end": 96,
+              "text": "段落13。"
+            },
+            "target": {
+              "start": 195,
+              "end": 208,
+              "text": "Paragraph 13."
+            }
+          },
+          {
+            "source": {
+              "start": 98,
+              "end": 103,
+              "text": "段落14。"
+            },
+            "target": {
+              "start": 210,
+              "end": 223,
+              "text": "Paragraph 14."
+            }
+          },
+          {
+            "source": {
+              "start": 105,
+              "end": 110,
+              "text": "段落15。"
+            },
+            "target": {
+              "start": 225,
+              "end": 238,
+              "text": "Paragraph 15."
+            }
+          },
+          {
+            "source": {
+              "start": 112,
+              "end": 117,
+              "text": "段落16。"
+            },
+            "target": {
+              "start": 240,
+              "end": 253,
+              "text": "Paragraph 16."
+            }
+          },
+          {
+            "source": {
+              "start": 119,
+              "end": 124,
+              "text": "段落17。"
+            },
+            "target": {
+              "start": 255,
+              "end": 268,
+              "text": "Paragraph 17."
+            }
+          },
+          {
+            "source": {
+              "start": 126,
+              "end": 131,
+              "text": "段落18。"
+            },
+            "target": {
+              "start": 270,
+              "end": 283,
+              "text": "Paragraph 18."
+            }
+          },
+          {
+            "source": {
+              "start": 133,
+              "end": 138,
+              "text": "段落19。"
+            },
+            "target": {
+              "start": 285,
+              "end": 298,
+              "text": "Paragraph 19."
+            }
+          },
+          {
+            "source": {
+              "start": 140,
+              "end": 145,
+              "text": "段落20。"
+            },
+            "target": {
+              "start": 300,
+              "end": 313,
+              "text": "Paragraph 20."
+            }
+          },
+          {
+            "source": {
+              "start": 147,
+              "end": 152,
+              "text": "段落21。"
+            },
+            "target": {
+              "start": 315,
+              "end": 328,
+              "text": "Paragraph 21."
+            }
+          },
+          {
+            "source": {
+              "start": 154,
+              "end": 159,
+              "text": "段落22。"
+            },
+            "target": {
+              "start": 330,
+              "end": 343,
+              "text": "Paragraph 22."
+            }
+          },
+          {
+            "source": {
+              "start": 161,
+              "end": 166,
+              "text": "段落23。"
+            },
+            "target": {
+              "start": 345,
+              "end": 358,
+              "text": "Paragraph 23."
+            }
+          },
+          {
+            "source": {
+              "start": 168,
+              "end": 173,
+              "text": "段落24。"
+            },
+            "target": {
+              "start": 360,
+              "end": 373,
+              "text": "Paragraph 24."
+            }
+          },
+          {
+            "source": {
+              "start": 175,
+              "end": 180,
+              "text": "段落25。"
+            },
+            "target": {
+              "start": 375,
+              "end": 388,
+              "text": "Paragraph 25."
+            }
+          },
+          {
+            "source": {
+              "start": 182,
+              "end": 187,
+              "text": "段落26。"
+            },
+            "target": {
+              "start": 390,
+              "end": 403,
+              "text": "Paragraph 26."
+            }
+          },
+          {
+            "source": {
+              "start": 189,
+              "end": 194,
+              "text": "段落27。"
+            },
+            "target": {
+              "start": 405,
+              "end": 418,
+              "text": "Paragraph 27."
+            }
+          },
+          {
+            "source": {
+              "start": 196,
+              "end": 201,
+              "text": "段落28。"
+            },
+            "target": {
+              "start": 420,
+              "end": 433,
+              "text": "Paragraph 28."
+            }
+          },
+          {
+            "source": {
+              "start": 203,
+              "end": 208,
+              "text": "段落29。"
+            },
+            "target": {
+              "start": 435,
+              "end": 448,
+              "text": "Paragraph 29."
+            }
+          },
+          {
+            "source": {
+              "start": 210,
+              "end": 215,
+              "text": "段落30。"
+            },
+            "target": {
+              "start": 450,
+              "end": 463,
+              "text": "Paragraph 30."
+            }
+          },
+          {
+            "source": {
+              "start": 217,
+              "end": 222,
+              "text": "段落31。"
+            },
+            "target": {
+              "start": 465,
+              "end": 478,
+              "text": "Paragraph 31."
+            }
+          },
+          {
+            "source": {
+              "start": 224,
+              "end": 229,
+              "text": "段落32。"
+            },
+            "target": {
+              "start": 480,
+              "end": 493,
+              "text": "Paragraph 32."
+            }
+          },
+          {
+            "source": {
+              "start": 231,
+              "end": 236,
+              "text": "段落33。"
+            },
+            "target": {
+              "start": 495,
+              "end": 508,
+              "text": "Paragraph 33."
+            }
+          },
+          {
+            "source": {
+              "start": 238,
+              "end": 243,
+              "text": "段落34。"
+            },
+            "target": {
+              "start": 510,
+              "end": 523,
+              "text": "Paragraph 34."
+            }
+          },
+          {
+            "source": {
+              "start": 245,
+              "end": 250,
+              "text": "段落35。"
+            },
+            "target": {
+              "start": 525,
+              "end": 538,
+              "text": "Paragraph 35."
+            }
+          },
+          {
+            "source": {
+              "start": 252,
+              "end": 257,
+              "text": "段落36。"
+            },
+            "target": {
+              "start": 540,
+              "end": 553,
+              "text": "Paragraph 36."
+            }
+          },
+          {
+            "source": {
+              "start": 259,
+              "end": 264,
+              "text": "段落37。"
+            },
+            "target": {
+              "start": 555,
+              "end": 568,
+              "text": "Paragraph 37."
+            }
+          },
+          {
+            "source": {
+              "start": 266,
+              "end": 271,
+              "text": "段落38。"
+            },
+            "target": {
+              "start": 570,
+              "end": 583,
+              "text": "Paragraph 38."
+            }
+          },
+          {
+            "source": {
+              "start": 273,
+              "end": 278,
+              "text": "段落39。"
+            },
+            "target": {
+              "start": 585,
+              "end": 598,
+              "text": "Paragraph 39."
+            }
+          },
+          {
+            "source": {
+              "start": 280,
+              "end": 285,
+              "text": "段落40。"
+            },
+            "target": {
+              "start": 600,
+              "end": 613,
+              "text": "Paragraph 40."
+            }
+          },
+          {
+            "source": {
+              "start": 287,
+              "end": 292,
+              "text": "段落41。"
+            },
+            "target": {
+              "start": 615,
+              "end": 628,
+              "text": "Paragraph 41."
+            }
+          },
+          {
+            "source": {
+              "start": 294,
+              "end": 299,
+              "text": "段落42。"
+            },
+            "target": {
+              "start": 630,
+              "end": 643,
+              "text": "Paragraph 42."
+            }
+          },
+          {
+            "source": {
+              "start": 301,
+              "end": 306,
+              "text": "段落43。"
+            },
+            "target": {
+              "start": 645,
+              "end": 658,
+              "text": "Paragraph 43."
+            }
+          },
+          {
+            "source": {
+              "start": 308,
+              "end": 313,
+              "text": "段落44。"
+            },
+            "target": {
+              "start": 660,
+              "end": 673,
+              "text": "Paragraph 44."
+            }
+          },
+          {
+            "source": {
+              "start": 315,
+              "end": 320,
+              "text": "段落45。"
+            },
+            "target": {
+              "start": 675,
+              "end": 688,
+              "text": "Paragraph 45."
+            }
+          },
+          {
+            "source": {
+              "start": 322,
+              "end": 327,
+              "text": "段落46。"
+            },
+            "target": {
+              "start": 690,
+              "end": 703,
+              "text": "Paragraph 46."
+            }
+          },
+          {
+            "source": {
+              "start": 329,
+              "end": 334,
+              "text": "段落47。"
+            },
+            "target": {
+              "start": 705,
+              "end": 718,
+              "text": "Paragraph 47."
+            }
+          },
+          {
+            "source": {
+              "start": 336,
+              "end": 341,
+              "text": "段落48。"
+            },
+            "target": {
+              "start": 720,
+              "end": 733,
+              "text": "Paragraph 48."
+            }
+          },
+          {
+            "source": {
+              "start": 343,
+              "end": 348,
+              "text": "段落49。"
+            },
+            "target": {
+              "start": 735,
+              "end": 748,
+              "text": "Paragraph 49."
+            }
+          },
+          {
+            "source": {
+              "start": 350,
+              "end": 355,
+              "text": "段落50。"
+            },
+            "target": {
+              "start": 750,
+              "end": 763,
+              "text": "Paragraph 50."
+            }
+          },
+          {
+            "source": {
+              "start": 357,
+              "end": 362,
+              "text": "段落51。"
+            },
+            "target": {
+              "start": 765,
+              "end": 778,
+              "text": "Paragraph 51."
+            }
+          },
+          {
+            "source": {
+              "start": 364,
+              "end": 369,
+              "text": "段落52。"
+            },
+            "target": {
+              "start": 780,
+              "end": 793,
+              "text": "Paragraph 52."
+            }
+          },
+          {
+            "source": {
+              "start": 371,
+              "end": 376,
+              "text": "段落53。"
+            },
+            "target": {
+              "start": 795,
+              "end": 808,
+              "text": "Paragraph 53."
+            }
+          },
+          {
+            "source": {
+              "start": 378,
+              "end": 383,
+              "text": "段落54。"
+            },
+            "target": {
+              "start": 810,
+              "end": 823,
+              "text": "Paragraph 54."
+            }
+          },
+          {
+            "source": {
+              "start": 385,
+              "end": 390,
+              "text": "段落55。"
+            },
+            "target": {
+              "start": 825,
+              "end": 838,
+              "text": "Paragraph 55."
+            }
+          },
+          {
+            "source": {
+              "start": 392,
+              "end": 397,
+              "text": "段落56。"
+            },
+            "target": {
+              "start": 840,
+              "end": 853,
+              "text": "Paragraph 56."
+            }
+          },
+          {
+            "source": {
+              "start": 399,
+              "end": 404,
+              "text": "段落57。"
+            },
+            "target": {
+              "start": 855,
+              "end": 868,
+              "text": "Paragraph 57."
+            }
+          },
+          {
+            "source": {
+              "start": 406,
+              "end": 411,
+              "text": "段落58。"
+            },
+            "target": {
+              "start": 870,
+              "end": 883,
+              "text": "Paragraph 58."
+            }
+          },
+          {
+            "source": {
+              "start": 413,
+              "end": 418,
+              "text": "段落59。"
+            },
+            "target": {
+              "start": 885,
+              "end": 898,
+              "text": "Paragraph 59."
+            }
+          },
+          {
+            "source": {
+              "start": 420,
+              "end": 425,
+              "text": "段落60。"
+            },
+            "target": {
+              "start": 900,
+              "end": 913,
+              "text": "Paragraph 60."
+            }
+          },
+          {
+            "source": {
+              "start": 427,
+              "end": 432,
+              "text": "段落61。"
+            },
+            "target": {
+              "start": 915,
+              "end": 928,
+              "text": "Paragraph 61."
+            }
+          },
+          {
+            "source": {
+              "start": 434,
+              "end": 439,
+              "text": "段落62。"
+            },
+            "target": {
+              "start": 930,
+              "end": 943,
+              "text": "Paragraph 62."
+            }
+          },
+          {
+            "source": {
+              "start": 441,
+              "end": 446,
+              "text": "段落63。"
+            },
+            "target": {
+              "start": 945,
+              "end": 958,
+              "text": "Paragraph 63."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "target",
+        "text": "Paragraph 00.\n\nParagraph 01.\n\nParagraph 02.\n\nParagraph 03.\n\nParagraph 04.\n\nParagraph 05.\n\nParagraph 06.\n\nParagraph 07.\n\nParagraph 08.\n\nParagraph 09.\n\nParagraph 10.\n\nParagraph 11.\n\nParagraph 12.\n\nParagraph 13.\n\nParagraph 14.\n\nParagraph 15.\n\nParagraph 16.\n\nParagraph 17.\n\nParagraph 18.\n\nParagraph 19.\n\nParagraph 20.\n\nParagraph 21.\n\nParagraph 22.\n\nParagraph 23.\n\nParagraph 24.\n\nParagraph 25.\n\nParagraph 26.\n\nParagraph 27.\n\nParagraph 28.\n\nParagraph 29.\n\nParagraph 30.\n\nParagraph 3Paragraph 32.\n\nParagraph 33.\n\nParagraph 34.\n\nParagraph 35.\n\nParagraph 36.\n\nParagraph 37.\n\nParagraph 38.\n\nParagraph 39.\n\nParagraph 40.\n\nParagraph 41.\n\nParagraph 42.\n\nParagraph 43.\n\nParagraph 44.\n\nParagraph 45.\n\nParagraph 46.\n\nParagraph 47.\n\nParagraph 48.\n\nParagraph 49.\n\nParagraph 50.\n\nParagraph 51.\n\nParagraph 52.\n\nParagraph 53.\n\nParagraph 54.\n\nParagraph 55.\n\nParagraph 56.\n\nParagraph 57.\n\nParagraph 58.\n\nParagraph 59.\n\nParagraph 60.\n\nParagraph 61.\n\nParagraph 62.\n\nParagraph 63."
+      },
+      "splice": {
+        "side": "target",
+        "start": 476,
+        "old_end": 480,
+        "new_end": 476
+      },
+      "expect": {
+        "source": "段落00。\n\n段落01。\n\n段落02。\n\n段落03。\n\n段落04。\n\n段落05。\n\n段落06。\n\n段落07。\n\n段落08。\n\n段落09。\n\n段落10。\n\n段落11。\n\n段落12。\n\n段落13。\n\n段落14。\n\n段落15。\n\n段落16。\n\n段落17。\n\n段落18。\n\n段落19。\n\n段落20。\n\n段落21。\n\n段落22。\n\n段落23。\n\n段落24。\n\n段落25。\n\n段落26。\n\n段落27。\n\n段落28。\n\n段落29。\n\n段落30。\n\n段落31。\n\n段落32。\n\n段落33。\n\n段落34。\n\n段落35。\n\n段落36。\n\n段落37。\n\n段落38。\n\n段落39。\n\n段落40。\n\n段落41。\n\n段落42。\n\n段落43。\n\n段落44。\n\n段落45。\n\n段落46。\n\n段落47。\n\n段落48。\n\n段落49。\n\n段落50。\n\n段落51。\n\n段落52。\n\n段落53。\n\n段落54。\n\n段落55。\n\n段落56。\n\n段落57。\n\n段落58。\n\n段落59。\n\n段落60。\n\n段落61。\n\n段落62。\n\n段落63。",
+        "target": "Paragraph 00.\n\nParagraph 01.\n\nParagraph 02.\n\nParagraph 03.\n\nParagraph 04.\n\nParagraph 05.\n\nParagraph 06.\n\nParagraph 07.\n\nParagraph 08.\n\nParagraph 09.\n\nParagraph 10.\n\nParagraph 11.\n\nParagraph 12.\n\nParagraph 13.\n\nParagraph 14.\n\nParagraph 15.\n\nParagraph 16.\n\nParagraph 17.\n\nParagraph 18.\n\nParagraph 19.\n\nParagraph 20.\n\nParagraph 21.\n\nParagraph 22.\n\nParagraph 23.\n\nParagraph 24.\n\nParagraph 25.\n\nParagraph 26.\n\nParagraph 27.\n\nParagraph 28.\n\nParagraph 29.\n\nParagraph 30.\n\nParagraph 3Paragraph 32.\n\nParagraph 33.\n\nParagraph 34.\n\nParagraph 35.\n\nParagraph 36.\n\nParagraph 37.\n\nParagraph 38.\n\nParagraph 39.\n\nParagraph 40.\n\nParagraph 41.\n\nParagraph 42.\n\nParagraph 43.\n\nParagraph 44.\n\nParagraph 45.\n\nParagraph 46.\n\nParagraph 47.\n\nParagraph 48.\n\nParagraph 49.\n\nParagraph 50.\n\nParagraph 51.\n\nParagraph 52.\n\nParagraph 53.\n\nParagraph 54.\n\nParagraph 55.\n\nParagraph 56.\n\nParagraph 57.\n\nParagraph 58.\n\nParagraph 59.\n\nParagraph 60.\n\nParagraph 61.\n\nParagraph 62.\n\nParagraph 63.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "段落00。"
+            },
+            "target": {
+              "start": 0,
+              "end": 13,
+              "text": "Paragraph 00."
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 12,
+              "text": "段落01。"
+            },
+            "target": {
+              "start": 15,
+              "end": 28,
+              "text": "Paragraph 01."
+            }
+          },
+          {
+            "source": {
+              "start": 14,
+              "end": 19,
+              "text": "段落02。"
+            },
+            "target": {
+              "start": 30,
+              "end": 43,
+              "text": "Paragraph 02."
+            }
+          },
+          {
+            "source": {
+              "start": 21,
+              "end": 26,
+              "text": "段落03。"
+            },
+            "target": {
+              "start": 45,
+              "end": 58,
+              "text": "Paragraph 03."
+            }
+          },
+          {
+            "source": {
+              "start": 28,
+              "end": 33,
+              "text": "段落04。"
+            },
+            "target": {
+              "start": 60,
+              "end": 73,
+              "text": "Paragraph 04."
+            }
+          },
+          {
+            "source": {
+              "start": 35,
+              "end": 40,
+              "text": "段落05。"
+            },
+            "target": {
+              "start": 75,
+              "end": 88,
+              "text": "Paragraph 05."
+            }
+          },
+          {
+            "source": {
+              "start": 42,
+              "end": 47,
+              "text": "段落06。"
+            },
+            "target": {
+              "start": 90,
+              "end": 103,
+              "text": "Paragraph 06."
+            }
+          },
+          {
+            "source": {
+              "start": 49,
+              "end": 54,
+              "text": "段落07。"
+            },
+            "target": {
+              "start": 105,
+              "end": 118,
+              "text": "Paragraph 07."
+            }
+          },
+          {
+            "source": {
+              "start": 56,
+              "end": 61,
+              "text": "段落08。"
+            },
+            "target": {
+              "start": 120,
+              "end": 133,
+              "text": "Paragraph 08."
+            }
+          },
+          {
+            "source": {
+              "start": 63,
+              "end": 68,
+              "text": "段落09。"
+            },
+            "target": {
+              "start": 135,
+              "end": 148,
+              "text": "Paragraph 09."
+            }
+          },
+          {
+            "source": {
+              "start": 70,
+              "end": 75,
+              "text": "段落10。"
+            },
+            "target": {
+              "start": 150,
+              "end": 163,
+              "text": "Paragraph 10."
+            }
+          },
+          {
+            "source": {
+              "start": 77,
+              "end": 82,
+              "text": "段落11。"
+            },
+            "target": {
+              "start": 165,
+              "end": 178,
+              "text": "Paragraph 11."
+            }
+          },
+          {
+            "source": {
+              "start": 84,
+              "end": 89,
+              "text": "段落12。"
+            },
+            "target": {
+              "start": 180,
+              "end": 193,
+              "text": "Paragraph 12."
+            }
+          },
+          {
+            "source": {
+              "start": 91,
+              "end": 96,
+              "text": "段落13。"
+            },
+            "target": {
+              "start": 195,
+              "end": 208,
+              "text": "Paragraph 13."
+            }
+          },
+          {
+            "source": {
+              "start": 98,
+              "end": 103,
+              "text": "段落14。"
+            },
+            "target": {
+              "start": 210,
+              "end": 223,
+              "text": "Paragraph 14."
+            }
+          },
+          {
+            "source": {
+              "start": 105,
+              "end": 110,
+              "text": "段落15。"
+            },
+            "target": {
+              "start": 225,
+              "end": 238,
+              "text": "Paragraph 15."
+            }
+          },
+          {
+            "source": {
+              "start": 112,
+              "end": 117,
+              "text": "段落16。"
+            },
+            "target": {
+              "start": 240,
+              "end": 253,
+              "text": "Paragraph 16."
+            }
+          },
+          {
+            "source": {
+              "start": 119,
+              "end": 124,
+              "text": "段落17。"
+            },
+            "target": {
+              "start": 255,
+              "end": 268,
+              "text": "Paragraph 17."
+            }
+          },
+          {
+            "source": {
+              "start": 126,
+              "end": 131,
+              "text": "段落18。"
+            },
+            "target": {
+              "start": 270,
+              "end": 283,
+              "text": "Paragraph 18."
+            }
+          },
+          {
+            "source": {
+              "start": 133,
+              "end": 138,
+              "text": "段落19。"
+            },
+            "target": {
+              "start": 285,
+              "end": 298,
+              "text": "Paragraph 19."
+            }
+          },
+          {
+            "source": {
+              "start": 140,
+              "end": 145,
+              "text": "段落20。"
+            },
+            "target": {
+              "start": 300,
+              "end": 313,
+              "text": "Paragraph 20."
+            }
+          },
+          {
+            "source": {
+              "start": 147,
+              "end": 152,
+              "text": "段落21。"
+            },
+            "target": {
+              "start": 315,
+              "end": 328,
+              "text": "Paragraph 21."
+            }
+          },
+          {
+            "source": {
+              "start": 154,
+              "end": 159,
+              "text": "段落22。"
+            },
+            "target": {
+              "start": 330,
+              "end": 343,
+              "text": "Paragraph 22."
+            }
+          },
+          {
+            "source": {
+              "start": 161,
+              "end": 166,
+              "text": "段落23。"
+            },
+            "target": {
+              "start": 345,
+              "end": 358,
+              "text": "Paragraph 23."
+            }
+          },
+          {
+            "source": {
+              "start": 168,
+              "end": 173,
+              "text": "段落24。"
+            },
+            "target": {
+              "start": 360,
+              "end": 373,
+              "text": "Paragraph 24."
+            }
+          },
+          {
+            "source": {
+              "start": 175,
+              "end": 180,
+              "text": "段落25。"
+            },
+            "target": {
+              "start": 375,
+              "end": 388,
+              "text": "Paragraph 25."
+            }
+          },
+          {
+            "source": {
+              "start": 182,
+              "end": 187,
+              "text": "段落26。"
+            },
+            "target": {
+              "start": 390,
+              "end": 403,
+              "text": "Paragraph 26."
+            }
+          },
+          {
+            "source": {
+              "start": 189,
+              "end": 194,
+              "text": "段落27。"
+            },
+            "target": {
+              "start": 405,
+              "end": 418,
+              "text": "Paragraph 27."
+            }
+          },
+          {
+            "source": {
+              "start": 196,
+              "end": 201,
+              "text": "段落28。"
+            },
+            "target": {
+              "start": 420,
+              "end": 433,
+              "text": "Paragraph 28."
+            }
+          },
+          {
+            "source": {
+              "start": 203,
+              "end": 208,
+              "text": "段落29。"
+            },
+            "target": {
+              "start": 435,
+              "end": 448,
+              "text": "Paragraph 29."
+            }
+          },
+          {
+            "source": {
+              "start": 210,
+              "end": 215,
+              "text": "段落30。"
+            },
+            "target": {
+              "start": 450,
+              "end": 463,
+              "text": "Paragraph 30."
+            }
+          },
+          {
+            "source": {
+              "start": 224,
+              "end": 229,
+              "text": "段落32。"
+            },
+            "target": {
+              "start": 476,
+              "end": 489,
+              "text": "Paragraph 32."
+            }
+          },
+          {
+            "source": {
+              "start": 231,
+              "end": 236,
+              "text": "段落33。"
+            },
+            "target": {
+              "start": 491,
+              "end": 504,
+              "text": "Paragraph 33."
+            }
+          },
+          {
+            "source": {
+              "start": 238,
+              "end": 243,
+              "text": "段落34。"
+            },
+            "target": {
+              "start": 506,
+              "end": 519,
+              "text": "Paragraph 34."
+            }
+          },
+          {
+            "source": {
+              "start": 245,
+              "end": 250,
+              "text": "段落35。"
+            },
+            "target": {
+              "start": 521,
+              "end": 534,
+              "text": "Paragraph 35."
+            }
+          },
+          {
+            "source": {
+              "start": 252,
+              "end": 257,
+              "text": "段落36。"
+            },
+            "target": {
+              "start": 536,
+              "end": 549,
+              "text": "Paragraph 36."
+            }
+          },
+          {
+            "source": {
+              "start": 259,
+              "end": 264,
+              "text": "段落37。"
+            },
+            "target": {
+              "start": 551,
+              "end": 564,
+              "text": "Paragraph 37."
+            }
+          },
+          {
+            "source": {
+              "start": 266,
+              "end": 271,
+              "text": "段落38。"
+            },
+            "target": {
+              "start": 566,
+              "end": 579,
+              "text": "Paragraph 38."
+            }
+          },
+          {
+            "source": {
+              "start": 273,
+              "end": 278,
+              "text": "段落39。"
+            },
+            "target": {
+              "start": 581,
+              "end": 594,
+              "text": "Paragraph 39."
+            }
+          },
+          {
+            "source": {
+              "start": 280,
+              "end": 285,
+              "text": "段落40。"
+            },
+            "target": {
+              "start": 596,
+              "end": 609,
+              "text": "Paragraph 40."
+            }
+          },
+          {
+            "source": {
+              "start": 287,
+              "end": 292,
+              "text": "段落41。"
+            },
+            "target": {
+              "start": 611,
+              "end": 624,
+              "text": "Paragraph 41."
+            }
+          },
+          {
+            "source": {
+              "start": 294,
+              "end": 299,
+              "text": "段落42。"
+            },
+            "target": {
+              "start": 626,
+              "end": 639,
+              "text": "Paragraph 42."
+            }
+          },
+          {
+            "source": {
+              "start": 301,
+              "end": 306,
+              "text": "段落43。"
+            },
+            "target": {
+              "start": 641,
+              "end": 654,
+              "text": "Paragraph 43."
+            }
+          },
+          {
+            "source": {
+              "start": 308,
+              "end": 313,
+              "text": "段落44。"
+            },
+            "target": {
+              "start": 656,
+              "end": 669,
+              "text": "Paragraph 44."
+            }
+          },
+          {
+            "source": {
+              "start": 315,
+              "end": 320,
+              "text": "段落45。"
+            },
+            "target": {
+              "start": 671,
+              "end": 684,
+              "text": "Paragraph 45."
+            }
+          },
+          {
+            "source": {
+              "start": 322,
+              "end": 327,
+              "text": "段落46。"
+            },
+            "target": {
+              "start": 686,
+              "end": 699,
+              "text": "Paragraph 46."
+            }
+          },
+          {
+            "source": {
+              "start": 329,
+              "end": 334,
+              "text": "段落47。"
+            },
+            "target": {
+              "start": 701,
+              "end": 714,
+              "text": "Paragraph 47."
+            }
+          },
+          {
+            "source": {
+              "start": 336,
+              "end": 341,
+              "text": "段落48。"
+            },
+            "target": {
+              "start": 716,
+              "end": 729,
+              "text": "Paragraph 48."
+            }
+          },
+          {
+            "source": {
+              "start": 343,
+              "end": 348,
+              "text": "段落49。"
+            },
+            "target": {
+              "start": 731,
+              "end": 744,
+              "text": "Paragraph 49."
+            }
+          },
+          {
+            "source": {
+              "start": 350,
+              "end": 355,
+              "text": "段落50。"
+            },
+            "target": {
+              "start": 746,
+              "end": 759,
+              "text": "Paragraph 50."
+            }
+          },
+          {
+            "source": {
+              "start": 357,
+              "end": 362,
+              "text": "段落51。"
+            },
+            "target": {
+              "start": 761,
+              "end": 774,
+              "text": "Paragraph 51."
+            }
+          },
+          {
+            "source": {
+              "start": 364,
+              "end": 369,
+              "text": "段落52。"
+            },
+            "target": {
+              "start": 776,
+              "end": 789,
+              "text": "Paragraph 52."
+            }
+          },
+          {
+            "source": {
+              "start": 371,
+              "end": 376,
+              "text": "段落53。"
+            },
+            "target": {
+              "start": 791,
+              "end": 804,
+              "text": "Paragraph 53."
+            }
+          },
+          {
+            "source": {
+              "start": 378,
+              "end": 383,
+              "text": "段落54。"
+            },
+            "target": {
+              "start": 806,
+              "end": 819,
+              "text": "Paragraph 54."
+            }
+          },
+          {
+            "source": {
+              "start": 385,
+              "end": 390,
+              "text": "段落55。"
+            },
+            "target": {
+              "start": 821,
+              "end": 834,
+              "text": "Paragraph 55."
+            }
+          },
+          {
+            "source": {
+              "start": 392,
+              "end": 397,
+              "text": "段落56。"
+            },
+            "target": {
+              "start": 836,
+              "end": 849,
+              "text": "Paragraph 56."
+            }
+          },
+          {
+            "source": {
+              "start": 399,
+              "end": 404,
+              "text": "段落57。"
+            },
+            "target": {
+              "start": 851,
+              "end": 864,
+              "text": "Paragraph 57."
+            }
+          },
+          {
+            "source": {
+              "start": 406,
+              "end": 411,
+              "text": "段落58。"
+            },
+            "target": {
+              "start": 866,
+              "end": 879,
+              "text": "Paragraph 58."
+            }
+          },
+          {
+            "source": {
+              "start": 413,
+              "end": 418,
+              "text": "段落59。"
+            },
+            "target": {
+              "start": 881,
+              "end": 894,
+              "text": "Paragraph 59."
+            }
+          },
+          {
+            "source": {
+              "start": 420,
+              "end": 425,
+              "text": "段落60。"
+            },
+            "target": {
+              "start": 896,
+              "end": 909,
+              "text": "Paragraph 60."
+            }
+          },
+          {
+            "source": {
+              "start": 427,
+              "end": 432,
+              "text": "段落61。"
+            },
+            "target": {
+              "start": 911,
+              "end": 924,
+              "text": "Paragraph 61."
+            }
+          },
+          {
+            "source": {
+              "start": 434,
+              "end": 439,
+              "text": "段落62。"
+            },
+            "target": {
+              "start": 926,
+              "end": 939,
+              "text": "Paragraph 62."
+            }
+          },
+          {
+            "source": {
+              "start": 441,
+              "end": 446,
+              "text": "段落63。"
+            },
+            "target": {
+              "start": 941,
+              "end": 954,
+              "text": "Paragraph 63."
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 31,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 217,
+                "end": 222,
+                "text": "段落31。"
+              },
+              "target": {
+                "start": 465,
+                "end": 478,
+                "text": "Paragraph 31."
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "supplementary-plane-inside-edit",
+      "rules": [
+        "R2",
+        "R1"
+      ],
+      "draft": {
+        "source": "😀Alpha 𠀀Beta Gamma",
+        "target": "𠀁甲 😃乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 1,
+              "end": 6,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 1,
+              "end": 2,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 12,
+              "text": "𠀀Beta"
+            },
+            "target": {
+              "start": 3,
+              "end": 5,
+              "text": "😃乙"
+            }
+          },
+          {
+            "source": {
+              "start": 13,
+              "end": 18,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 6,
+              "end": 7,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "😀Alpha 𠀀😃Beta Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 8,
+        "old_end": 8,
+        "new_end": 9
+      },
+      "utf16_splice": {
+        "side": "source",
+        "start": 10,
+        "old_end": 10,
+        "new_end": 12
+      },
+      "expect": {
+        "source": "😀Alpha 𠀀😃Beta Gamma",
+        "target": "𠀁甲 😃乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 1,
+              "end": 6,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 1,
+              "end": 2,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 13,
+              "text": "𠀀😃Beta"
+            },
+            "target": {
+              "start": 3,
+              "end": 5,
+              "text": "😃乙"
+            }
+          },
+          {
+            "source": {
+              "start": 14,
+              "end": 19,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 6,
+              "end": 7,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "supplementary-plane-surrogate-backoff",
+      "rules": [
+        "R2"
+      ],
+      "draft": {
+        "source": "😀 𠀀乙",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 1,
+              "text": "😀"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 2,
+              "end": 4,
+              "text": "𠀀乙"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "😃 𠀀乙"
+      },
+      "splice": {
+        "side": "source",
+        "start": 0,
+        "old_end": 1,
+        "new_end": 1
+      },
+      "utf16_splice": {
+        "side": "source",
+        "start": 0,
+        "old_end": 2,
+        "new_end": 2
+      },
+      "expect": {
+        "source": "😃 𠀀乙",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 1,
+              "text": "😃"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 2,
+              "end": 4,
+              "text": "𠀀乙"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          }
+        ],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "supplementary-plane-crossed",
+      "rules": [
+        "R3",
+        "R1"
+      ],
+      "draft": {
+        "source": "😀Alpha 𠀀Beta Gamma",
+        "target": "𠀁甲 😃乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 1,
+              "end": 6,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 1,
+              "end": 2,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 7,
+              "end": 12,
+              "text": "𠀀Beta"
+            },
+            "target": {
+              "start": 3,
+              "end": 5,
+              "text": "😃乙"
+            }
+          },
+          {
+            "source": {
+              "start": 13,
+              "end": 18,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 6,
+              "end": 7,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "😀AlphaBeta Gamma"
+      },
+      "splice": {
+        "side": "source",
+        "start": 6,
+        "old_end": 8,
+        "new_end": 6
+      },
+      "utf16_splice": {
+        "side": "source",
+        "start": 7,
+        "old_end": 10,
+        "new_end": 7
+      },
+      "expect": {
+        "source": "😀AlphaBeta Gamma",
+        "target": "𠀁甲 😃乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 1,
+              "end": 6,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 1,
+              "end": 2,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 11,
+              "end": 16,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 6,
+              "end": 7,
+              "text": "丙"
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 1,
+            "reason": "crossed_boundary",
+            "entry": {
+              "source": {
+                "start": 7,
+                "end": 12,
+                "text": "𠀀Beta"
+              },
+              "target": {
+                "start": 3,
+                "end": 5,
+                "text": "😃乙"
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "inside-edit-span-too-long",
+      "rules": [
+        "R6",
+        "R1"
+      ],
+      "draft": {
+        "source": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n乙。",
+        "target": "Long.\n\nB.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 1999,
+              "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+            },
+            "target": {
+              "start": 0,
+              "end": 5,
+              "text": "Long."
+            }
+          },
+          {
+            "source": {
+              "start": 2001,
+              "end": 2003,
+              "text": "乙。"
+            },
+            "target": {
+              "start": 7,
+              "end": 9,
+              "text": "B."
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "splice",
+        "side": "source",
+        "start": 1,
+        "end": 1,
+        "replacement": "甲乙"
+      },
+      "expect": {
+        "source": "文甲乙文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文\n\n乙。",
+        "target": "Long.\n\nB.",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 2003,
+              "end": 2005,
+              "text": "乙。"
+            },
+            "target": {
+              "start": 7,
+              "end": 9,
+              "text": "B."
+            }
+          }
+        ],
+        "invalidated": [
+          {
+            "original_index": 0,
+            "reason": "span_too_long",
+            "entry": {
+              "source": {
+                "start": 0,
+                "end": 1999,
+                "text": "文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文文"
+              },
+              "target": {
+                "start": 0,
+                "end": 5,
+                "text": "Long."
+              }
+            }
+          }
+        ],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": "partial"
+      }
+    },
+    {
+      "id": "direction-change-clears-all",
+      "rules": [
+        "R7"
+      ],
+      "draft": {
+        "source": "Alpha Beta",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 10,
+              "text": "Beta"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          }
+        ]
+      },
+      "transaction": {
+        "kind": "direction",
+        "direction": "zh"
+      },
+      "expect": {
+        "source": "Alpha Beta",
+        "target": "甲 乙",
+        "direction": "zh",
+        "alignments": [],
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    },
+    {
+      "id": "automatic-alignments-untouched",
+      "rules": [
+        "R1"
+      ],
+      "draft": {
+        "source": "Alpha Beta",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": null
+      },
+      "transaction": {
+        "kind": "edit",
+        "side": "source",
+        "text": "Alpha  Beta"
+      },
+      "splice": {
+        "side": "source",
+        "start": 6,
+        "old_end": 6,
+        "new_end": 7
+      },
+      "expect": {
+        "source": "Alpha  Beta",
+        "target": "甲 乙",
+        "direction": "en",
+        "alignments": null,
+        "invalidated": [],
+        "emptied_targets": [],
+        "fallback_all": false,
+        "alignment_notice": null
+      }
+    }
+  ],
+  "traces": [
+    {
+      "id": "undo-restores-invalidated-alignments",
+      "rules": [
+        "R8",
+        "R3"
+      ],
+      "initial": {
+        "source": "Alpha B Gamma",
+        "target": "甲 乙 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 7,
+              "text": "B"
+            },
+            "target": {
+              "start": 2,
+              "end": 3,
+              "text": "乙"
+            }
+          },
+          {
+            "source": {
+              "start": 8,
+              "end": 13,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 4,
+              "end": 5,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "op": "edit",
+          "at_ms": 0,
+          "side": "source",
+          "text": "Alxpha B Gamma",
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 300,
+          "side": "source",
+          "text": "Alxypha B Gamma",
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 400,
+          "side": "target",
+          "text": "甲甲 乙 丙",
+          "expect": {
+            "undo_depth": 2,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 500,
+          "side": "source",
+          "text": "Alxypha  Gamma",
+          "expect": {
+            "undo_depth": 3,
+            "redo_depth": 0,
+            "alignments_count": 2,
+            "session_invalidated": [
+              "source_emptied"
+            ],
+            "alignment_notice": "partial",
+            "alignments": [
+              {
+                "source": {
+                  "start": 0,
+                  "end": 7,
+                  "text": "Alxypha"
+                },
+                "target": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "甲"
+                }
+              },
+              {
+                "source": {
+                  "start": 9,
+                  "end": 14,
+                  "text": "Gamma"
+                },
+                "target": {
+                  "start": 5,
+                  "end": 6,
+                  "text": "丙"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 600,
+          "side": "source",
+          "text": "Alxypha  Gammaa",
+          "expect": {
+            "undo_depth": 4,
+            "redo_depth": 0,
+            "alignments_count": 2,
+            "session_invalidated": [
+              "source_emptied"
+            ]
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 3,
+            "redo_depth": 1,
+            "alignments_count": 2,
+            "session_invalidated": [
+              "source_emptied"
+            ],
+            "source": "Alxypha  Gamma"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 2,
+            "redo_depth": 2,
+            "alignments_count": 3,
+            "session_invalidated": [],
+            "source": "Alxypha B Gamma",
+            "target": "甲甲 乙 丙",
+            "alignments": [
+              {
+                "source": {
+                  "start": 0,
+                  "end": 7,
+                  "text": "Alxypha"
+                },
+                "target": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "甲"
+                }
+              },
+              {
+                "source": {
+                  "start": 8,
+                  "end": 9,
+                  "text": "B"
+                },
+                "target": {
+                  "start": 3,
+                  "end": 4,
+                  "text": "乙"
+                }
+              },
+              {
+                "source": {
+                  "start": 10,
+                  "end": 15,
+                  "text": "Gamma"
+                },
+                "target": {
+                  "start": 5,
+                  "end": 6,
+                  "text": "丙"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "op": "redo",
+          "expect": {
+            "undo_depth": 3,
+            "redo_depth": 1,
+            "alignments_count": 2,
+            "session_invalidated": [
+              "source_emptied"
+            ],
+            "source": "Alxypha  Gamma"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 2,
+            "redo_depth": 2,
+            "alignments_count": 3,
+            "session_invalidated": [],
+            "source": "Alxypha B Gamma"
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 5000,
+          "side": "target",
+          "text": "甲甲 乙 丙丙",
+          "expect": {
+            "undo_depth": 3,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 6201,
+          "side": "target",
+          "text": "甲甲 乙 丙丙丙",
+          "expect": {
+            "undo_depth": 4,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 3,
+            "redo_depth": 1,
+            "target": "甲甲 乙 丙丙"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 2,
+            "redo_depth": 2,
+            "target": "甲甲 乙 丙"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 3,
+            "target": "甲 乙 丙",
+            "source": "Alxypha B Gamma"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 0,
+            "redo_depth": 4,
+            "source": "Alpha B Gamma",
+            "target": "甲 乙 丙",
+            "alignments": [
+              {
+                "source": {
+                  "start": 0,
+                  "end": 5,
+                  "text": "Alpha"
+                },
+                "target": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "甲"
+                }
+              },
+              {
+                "source": {
+                  "start": 6,
+                  "end": 7,
+                  "text": "B"
+                },
+                "target": {
+                  "start": 2,
+                  "end": 3,
+                  "text": "乙"
+                }
+              },
+              {
+                "source": {
+                  "start": 8,
+                  "end": 13,
+                  "text": "Gamma"
+                },
+                "target": {
+                  "start": 4,
+                  "end": 5,
+                  "text": "丙"
+                }
+              }
+            ],
+            "session_invalidated": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "ime-composition-is-one-step",
+      "rules": [
+        "R8",
+        "R2"
+      ],
+      "initial": {
+        "source": "Alpha B Gamma",
+        "target": "甲 乙丁 丙",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 5,
+              "text": "Alpha"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          },
+          {
+            "source": {
+              "start": 6,
+              "end": 7,
+              "text": "B"
+            },
+            "target": {
+              "start": 2,
+              "end": 4,
+              "text": "乙丁"
+            }
+          },
+          {
+            "source": {
+              "start": 8,
+              "end": 13,
+              "text": "Gamma"
+            },
+            "target": {
+              "start": 5,
+              "end": 6,
+              "text": "丙"
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "op": "edit",
+          "at_ms": 0,
+          "side": "target",
+          "text": "甲 乙n丁 丙",
+          "composing": true,
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 100,
+          "side": "target",
+          "text": "甲 乙ni丁 丙",
+          "composing": true,
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 200,
+          "side": "target",
+          "text": "甲 乙你丁 丙",
+          "composing": true,
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 210,
+          "side": "target",
+          "text": "甲 乙你丁 丙",
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 0,
+            "session_invalidated": [],
+            "alignments": [
+              {
+                "source": {
+                  "start": 0,
+                  "end": 5,
+                  "text": "Alpha"
+                },
+                "target": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "甲"
+                }
+              },
+              {
+                "source": {
+                  "start": 6,
+                  "end": 7,
+                  "text": "B"
+                },
+                "target": {
+                  "start": 2,
+                  "end": 5,
+                  "text": "乙你丁"
+                }
+              },
+              {
+                "source": {
+                  "start": 8,
+                  "end": 13,
+                  "text": "Gamma"
+                },
+                "target": {
+                  "start": 6,
+                  "end": 7,
+                  "text": "丙"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "op": "edit",
+          "at_ms": 300,
+          "side": "target",
+          "text": "甲 乙你们丁 丙",
+          "expect": {
+            "undo_depth": 2,
+            "redo_depth": 0,
+            "alignments_count": 3,
+            "session_invalidated": []
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 1,
+            "redo_depth": 1,
+            "target": "甲 乙你丁 丙"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 0,
+            "redo_depth": 2,
+            "target": "甲 乙丁 丙",
+            "alignments": [
+              {
+                "source": {
+                  "start": 0,
+                  "end": 5,
+                  "text": "Alpha"
+                },
+                "target": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "甲"
+                }
+              },
+              {
+                "source": {
+                  "start": 6,
+                  "end": 7,
+                  "text": "B"
+                },
+                "target": {
+                  "start": 2,
+                  "end": 4,
+                  "text": "乙丁"
+                }
+              },
+              {
+                "source": {
+                  "start": 8,
+                  "end": 13,
+                  "text": "Gamma"
+                },
+                "target": {
+                  "start": 5,
+                  "end": 6,
+                  "text": "丙"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "undo-limit-fifty",
+      "rules": [
+        "R8"
+      ],
+      "initial": {
+        "source": "A",
+        "target": "甲",
+        "direction": "en",
+        "alignments": [
+          {
+            "source": {
+              "start": 0,
+              "end": 1,
+              "text": "A"
+            },
+            "target": {
+              "start": 0,
+              "end": 1,
+              "text": "甲"
+            }
+          }
+        ]
+      },
+      "steps": [
+        {
+          "op": "edit",
+          "at_ms": 0,
+          "side": "source",
+          "text": "Ax"
+        },
+        {
+          "op": "edit",
+          "at_ms": 2000,
+          "side": "source",
+          "text": "Axx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 4000,
+          "side": "source",
+          "text": "Axxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 6000,
+          "side": "source",
+          "text": "Axxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 8000,
+          "side": "source",
+          "text": "Axxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 10000,
+          "side": "source",
+          "text": "Axxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 12000,
+          "side": "source",
+          "text": "Axxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 14000,
+          "side": "source",
+          "text": "Axxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 16000,
+          "side": "source",
+          "text": "Axxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 18000,
+          "side": "source",
+          "text": "Axxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 20000,
+          "side": "source",
+          "text": "Axxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 22000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 24000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 26000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 28000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 30000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 32000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 34000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 36000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 38000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 40000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 42000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 44000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 46000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 48000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 50000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 52000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 54000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 56000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 58000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 60000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 62000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 64000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 66000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 68000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 70000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 72000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 74000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 76000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 78000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 80000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 82000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 84000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 86000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 88000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 90000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 92000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 94000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 96000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 98000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 100000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 102000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 104000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 106000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 108000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 110000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 112000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 114000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 116000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "edit",
+          "at_ms": 118000,
+          "side": "source",
+          "text": "Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+          "op": "check",
+          "expect": {
+            "undo_depth": 50,
+            "redo_depth": 0,
+            "alignments": [
+              {
+                "source": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "A"
+                },
+                "target": {
+                  "start": 0,
+                  "end": 1,
+                  "text": "甲"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo"
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 0,
+            "redo_depth": 50,
+            "source": "Axxxxxxxxxx"
+          }
+        },
+        {
+          "op": "undo",
+          "expect": {
+            "undo_depth": 0,
+            "redo_depth": 50,
+            "source": "Axxxxxxxxxx"
+          }
+        }
+      ]
+    }
+  ]
+}

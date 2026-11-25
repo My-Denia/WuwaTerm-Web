@@ -147,7 +147,13 @@ test('editing confirmed alignments keeps their separate reset notice', async ({ 
   await expect(page.locator('.alignment-row')).toHaveCount(1);
   await page.locator('#review-target').fill(A.target + ' Echo.');
   await expect(page.locator('.alignment-row')).toHaveCount(1);
+  // Edit transaction R4: clearing the translation keeps the alignment's source anchor, now untranslated.
   await page.locator('#review-target').fill('');
+  await expect(page.locator('.alignment-row')).toHaveCount(1);
+  await expect(page.locator('.alignment-row')).toContainText('此段不评估');
+  await expect(page.getByText('原分段对应已取消确认')).toHaveCount(0);
+  // R3: deleting the aligned source text invalidates the only alignment, with the separate reset notice.
+  await page.locator('#review-source').fill('');
   await expect(page.locator('.notice-state')).toContainText('原分段对应已取消确认');
   await expect(page.locator('.alignment-row')).toHaveCount(0);
   expect(reviews).toHaveLength(0);
@@ -487,9 +493,16 @@ test('plain-text import, clear-then-handoff, in-review translation, alignment re
   await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
   await page.locator('#review-target').fill(B.target + '!');
   await expect(page.locator('.alignment-row')).toHaveCount(1);
+  // Edit transaction R4: clearing the translation keeps the alignment's source anchor as untranslated, so no recovery prompt.
   await page.locator('#review-target').fill('');
-  await expect(page.locator('.alignment-recovery')).toBeVisible();
+  await expect(page.locator('.alignment-row')).toHaveCount(1);
+  await expect(page.locator('.alignment-row')).toContainText('此段不评估');
+  await expect(page.locator('.alignment-recovery')).toHaveCount(0);
   await page.locator('#review-target').fill(B.target + '!');
+  // R3: deleting the aligned source text leaves no alignment, which opens the recovery prompt.
+  await page.locator('#review-source').fill('');
+  await expect(page.locator('.alignment-recovery')).toBeVisible();
+  await page.locator('#review-source').fill(B.source);
   await page.getByRole('button', { name: '重新确认全文对应', exact: true }).click();
   await expect(page.locator('.alignment-recovery')).toHaveCount(0);
   await expect(page.locator('.alignment-row')).toHaveCount(1);
