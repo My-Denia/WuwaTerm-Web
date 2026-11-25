@@ -2,6 +2,7 @@
 // Kept beside lib/messages.ts so the large shared catalog stays readable; the
 // same rules apply: fixed copy, re-localized on every render, no raw errors.
 import type { UiLanguage } from './ui-language';
+import { isSelfHosted } from './ui-runtime.ts';
 
 const zh = {
   overviewAria: '问题总览',
@@ -505,4 +506,17 @@ const en: SemanticMessages = {
   historyRemove: 'Remove',
 };
 
-export function semanticMsg(lang: UiLanguage): SemanticMessages { return lang === 'en' ? en : zh; }
+const selfhostZh: SemanticMessages = {
+  ...zh,
+  phaseWaiting: '服务正在限流，请等待约 {s} 秒；到时自动继续。',
+};
+
+const selfhostEn: SemanticMessages = {
+  ...en,
+  phaseWaiting: 'The service is rate limiting. Waiting about {s} seconds, then continuing automatically.',
+};
+
+export function semanticMsg(lang: UiLanguage, selfHosted = isSelfHosted()): SemanticMessages {
+  if (selfHosted) return lang === 'en' ? selfhostEn : selfhostZh;
+  return lang === 'en' ? en : zh;
+}
