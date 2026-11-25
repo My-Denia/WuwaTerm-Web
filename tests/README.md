@@ -42,7 +42,9 @@ npm run test:browser
 The browser suite covers the one document workspace (quick translation and
 manuscript review on the same document, the in-place mode switch, request counts
 and empty browser storage), document replacement and undo, findings navigation,
-dictionary provenance, interface language and the Markdown export. API calls
+dictionary provenance, interface language, the Markdown export and the layered
+review (structure checks, semantic issues by confidence, the reserved style layer
+and folded ambiguous single characters). API calls
 are intercepted with synthetic responses and review requests are counted; the
 tests exercise the real client bundle in the browser. CI runs the independent
 artifact suite after build and client-secret scanning. CI also runs the whole
