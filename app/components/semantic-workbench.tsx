@@ -288,6 +288,10 @@ export function SemanticWorkbench(props: Props) {
     return code === 'upstream_timeout' ? `${s.stopRepeated} ${s.phaseTimeout}` : s.stopRepeated;
   };
   const translateBlankLong = !!source.trim() && !target.trim() && sourceChars.length > 2000;
+  const translateResumable = useMemo(
+    () => !translateBlankLong && doc.hasResumableTranslate(draft, semantic, basis),
+    [translateBlankLong, doc, draft, semantic, basis],
+  );
   const showSegments = pairs.length > 1 || long || semantic.results.length > 0 || pairs.some(p => p.status !== 'ready') || run.kind !== null;
   const translationClosed = !!poolData && (!poolData.translation_enabled || poolData.translations.remaining === 0 || poolData.characters.remaining === 0);
   const reviewsClosed = !!poolData && poolData.reviews.remaining === 0;
@@ -509,6 +513,12 @@ export function SemanticWorkbench(props: Props) {
           <button type="button" className="secondary-button" disabled={runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateLong}</button>
         </div>
       </div>}
+      {translateResumable && <div className="long-translate">
+        <p>{s.translateResumeHint}</p>
+        <div className="actions">
+          <button type="button" className="secondary-button" disabled={pairTranslating !== null || runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateResume}</button>
+        </div>
+      </div>}
       {!translateBlankLong && <div className="long-terms">
         <p>{s.runTermHint}</p>
         <div className="actions">
@@ -561,6 +571,7 @@ export function SemanticWorkbench(props: Props) {
             {semanticOn && view.pair.status === 'ready' && !runActive && (view.edited || (!view.result && item?.status !== 'failed')) && !translationClosed
               && <button type="button" className="text-button" onClick={() => startRun([view])}>{s.segReview}</button>}
             {view.pair.status === 'untranslated' && <button type="button" className="text-button" disabled={pairTranslating !== null || runActive || translationClosed || chars(view.sCore).length > SEGMENT_LIMIT} onClick={() => void doc.translatePair(view)}>{s.segTranslate}</button>}
+            {view.pair.status === 'ready' && !view.pair.hard_cut && chars(view.sCore).length <= SEGMENT_LIMIT && <button type="button" className="text-button" disabled={pairTranslating !== null || runActive || translationClosed} onClick={() => void doc.translatePair(view)}>{s.segRetranslate}</button>}
             {view.pair.status === 'needs_manual_split' && <button type="button" className="text-button" aria-expanded={splitOpen === view.pair.index} onClick={() => setSplitOpen(splitOpen === view.pair.index ? null : view.pair.index)}>{splitOpen === view.pair.index ? s.manualClose : s.manualOpen}</button>}
             {view.pair.hard_cut && <p className="segment-hint">{s.hardCutHint}</p>}
             {view.pair.status === 'untranslated' && <p className="segment-hint">{s.untranslatedHint}</p>}

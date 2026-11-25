@@ -185,12 +185,13 @@ user continues, a timeout or server error marks the segment failed for a manual
 retry, and two consecutive identical failures stop the run. A used-up daily quota
 pauses the run with finished segments kept. Segment translation assembles the text
 in order, so it stops at any failed segment instead of skipping it. Within the same
-session it can continue from the failed segment. After the manuscript is reopened,
-the whole-text translation cannot be continued, because it needs an empty
-translation; the remaining segments can only be translated one at a time, after the
-segment alignments mark the untranslated source paragraphs ("Leave selected source
-unevaluated"); each translated segment clears the alignments, so they are marked again
-before the next one. Every run keeps
+session it can continue from the failed segment. After a partially translated
+manuscript is reopened (either with explicit untranslated `alignments` or as an
+unaligned partial prefix where translated paragraphs are fewer than source paragraphs),
+batch translation can resume the remaining segments in sequence while keeping finished
+translations and remapping/filling explicit `alignments`, and individual `untranslated` or
+`ready` segments can also be translated/retranslated from the segment list with alignments
+preserved and localized target edits remapped cleanly. Every run keeps
 the direction it started with: a reply for another direction is not used.
 Edits during a run never abort a request that is already charged; a result whose segment
 text changed meanwhile is not used.
@@ -240,7 +241,8 @@ local revision dialog. The user enters an exact translation fragment, explicitly
 selects one occurrence and previews its replacement before confirming. This
 changes only that occurrence; adopting an official pair and requesting another
 service check remain separate actions. Choices and historical reports are kept,
-the report becomes stale, and confirmed alignment ranges need reconfirmation.
+the report becomes stale, and explicit non-overlapping alignment ranges are remapped
+in place (failing closed only when an edit crosses an aligned boundary).
 
 File reports are untrusted historical records, regardless of hashes or verdicts.
 The first explicit check after import obtains fresh authoritative candidates.
@@ -249,7 +251,7 @@ an imported `not_a_term` decision always needs user confirmation. A source edit
 can recover an occurrence only within an identical, unique whole source block;
 changed, deleted or duplicate blocks cannot be guessed into new positions.
 Direction, dictionary/rule basis or correspondence changes require confirmation.
-Text edits invalidate reports and clear previously explicit correspondences.
+Free-form text edits invalidate reports and clear previously explicit correspondences.
 Partial candidate/source display does not prevent reusing a visible specific
 candidate whose complete identity and fresh basis match. The next request still
 validates that identity against the server's full snapshot; globally truncated

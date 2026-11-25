@@ -190,7 +190,9 @@ test('an in-flight pair translation survives the first term-basis check and rema
     releaseTranslation();
     await expect(page.locator('#review-target')).toHaveValue(`${target}\n\nTranslated 1.`);
     await expect(page.locator('.notice-state')).toHaveText(S.notices.translated);
-    await expect(page.locator('.alignment-recovery')).toBeVisible();
+    await expect(page.locator('.alignment-recovery')).toHaveCount(0);
+    await expect(chips(page)).toHaveCount(2);
+    await expect(chips(page).nth(1)).not.toContainText(S.segUntranslated);
     await undo(page).click();
     await expect(page.locator('#review-target')).toHaveValue(target);
     await expect(chips(page).first()).toHaveAttribute('data-term-state', 'current');
@@ -223,7 +225,7 @@ test('the second pair translation still carries the previous pair as its before 
   expect(rec.translations).toEqual([{ text: '甲二。', to: 'en', context: { before: { source: '甲一。', target } } }]);
 });
 
-test('translating one untranslated pair clears the alignments, so the next untranslated paragraph has to be marked again', async ({ page }) => {
+test('translating one untranslated pair preserves alignments so remaining untranslated segments stay ready for the next translation', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: [] });
   // A partly translated manuscript reopened: the first paragraph is aligned, the other two are marked as having no translation.
   const source = '甲一。\n\n甲二。\n\n甲三。';
@@ -242,11 +244,55 @@ test('translating one untranslated pair clears the alignments, so the next untra
   await expect(untranslated).toHaveCount(2);
   await untranslated.first().getByRole('button', { name: S.segTranslate, exact: true }).click();
   await expect(page.locator('#review-target')).toContainText('Translated 1.', { timeout: 30_000 });
-  // The edit cleared the explicit alignments, as the stopped-translation hint tells the user: the third paragraph is no longer marked.
-  await expect(page.locator('.alignment-recovery')).toBeVisible();
-  await expect(untranslated).toHaveCount(0);
+  await expect(page.locator('.alignment-recovery')).toHaveCount(0);
+  await expect(untranslated).toHaveCount(1);
   expect(rec.translations).toHaveLength(1);
-  expect(S.translateStopped).toContain('每译完一段，分段对应会被清空，需重新标记');
+  expect(S.translateStopped).toContain('继续翻译剩余段落');
+});
+
+test('reopened partial manuscript batch-resumes, ready segment retranslate preserves alignments with undo, and zero browser storage is written', async ({ page }) => {
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'] });
+  // Each paragraph > 950 scalars so ready pairs stay distinct under segmentation's 1800-scalar merge cap.
+  const p1 = `甲一。${'文'.repeat(980)}`;
+  const p2 = `甲二。${'文'.repeat(980)}`;
+  const p3 = `甲三。${'文'.repeat(980)}`;
+  const source = `${p1}\n\n${p2}\n\n${p3}`;
+  const target = `Alpha one.${'x'.repeat(980)}`;
+  const s1End = Array.from(p1).length;
+  const s2Start = s1End + 2;
+  const s2End = s2Start + Array.from(p2).length;
+  const s3Start = s2End + 2;
+  const s3End = s3Start + Array.from(p3).length;
+  const file = serializeWorkfile({
+    source, target, direction: 'en', choices: [], history: [],
+    alignments: [
+      { source: { start: 0, end: s1End, text: p1 }, target: { start: 0, end: Array.from(target).length, text: target } },
+      { source: { start: s2Start, end: s2End, text: p2 }, target: null },
+      { source: { start: s3Start, end: s3End, text: p3 }, target: null },
+    ],
+  });
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'resume-partial.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+  await expect(page.locator('#review-source')).toHaveValue(source);
+  await page.getByRole('button', { name: S.translateResume, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue(`${target}\n\nTranslated 1.\n\nTranslated 2.`, { timeout: 30_000 });
+  await expect(page.locator('.alignment-recovery')).toHaveCount(0);
+  await expect(chips(page)).toHaveCount(3);
+  expect(rec.translations.map(t => t.text)).toEqual([p2, p3]);
+
+  // Single-segment retranslate of ready pair 0 keeps shifted alignments for pairs 1 and 2, and Undo restores target & alignments.
+  await chips(page).nth(0).getByRole('button', { name: S.segRetranslate, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Translated 3.\n\nTranslated 1.\n\nTranslated 2.', { timeout: 30_000 });
+  await expect(page.locator('.notice-state')).toHaveText(S.notices.retranslated);
+  await undo(page).click();
+  await expect(page.locator('#review-target')).toHaveValue(`${target}\n\nTranslated 1.\n\nTranslated 2.`);
+
+  const storage = await page.evaluate(async () => ({
+    local: localStorage.length,
+    session: sessionStorage.length,
+    idb: typeof indexedDB?.databases === 'function' ? (await indexedDB.databases()).length : 0,
+    caches: typeof caches?.keys === 'function' ? (await caches.keys()).length : 0,
+  }));
+  expect(storage).toEqual({ local: 0, session: 0, idb: 0, caches: 0 });
 });
 
 test('without the context capability the segment translation sends no context', async ({ page }) => {

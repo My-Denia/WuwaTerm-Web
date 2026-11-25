@@ -156,7 +156,10 @@ test('imported choices/provenance, explicit alignments and historical reports su
   const before = JSON.parse(await download(page, '保存稿件'));
   await start(page); await select(page, 'sound shell'); await dialog(page).getByRole('button', { name: confirmName }).click();
   const edited = JSON.parse(await download(page, '保存稿件'));
-  expect(edited.alignments).toEqual([]); expect(edited.choices).toEqual(before.choices); expect(edited.history).toEqual(before.history);
+  expect(edited.alignments).toEqual([
+    { source: alignments[0].source, target: { start: 0, end: Array.from(data.after_request.target).length, text: data.after_request.target } },
+  ]);
+  expect(edited.choices).toEqual(before.choices); expect(edited.history).toEqual(before.history);
   const result = JSON.parse(await download(page, '导出当前结果'));
   expect(result.choices[0].status).not.toBe('applicable');
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();

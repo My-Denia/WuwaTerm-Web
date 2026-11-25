@@ -1,7 +1,7 @@
 // Standalone, React-free document controller for the WuwaTerm review workbench.
 // Owns canonical manuscript state, request orchestration, abort/generation/epoch
 // guards, serial run scheduling, waiting timers, and persistence/export shaping.
-import { segmentText } from './segmentation.ts';
+import { SEGMENT_LIMIT, core, paragraphRanges, segmentText } from './segmentation.ts';
 import { contextBefore, fitRequestBody, initialRun, nextToSend, runReducer, selectPrecedents } from './semantic-run.js';
 import {
   applyResult, chooseTerm, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
@@ -24,6 +24,7 @@ import {
   MAX_V3_WORKFILE_BYTES, MAX_V4_CHOICES, MAX_WORKFILE_BYTES, REPORT_V4,
   canonicalManuscript, compareReports, leaveGuardActive, makeChoice, manuscriptSaveView,
   mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent, recoverSpan,
+  remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice,
   serializeWorkfile, validAlignments, validReport, validSpan,
   WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
 } from './manuscript.js';
@@ -59,6 +60,8 @@ export const PRECEDENTS_DEFAULT_ON = true;
 const chars = (text: string) => Array.from(text);
 const slice = (list: string[], start: number, end: number) => list.slice(start, end).join('');
 const sliceEquals = (text: string, span: Span | null) => !!span && slice(chars(text), span.start, span.end) === span.text;
+const alignmentsLost = (prev: Draft['alignments'], next: Draft['alignments']) =>
+  prev !== null && prev.length > 0 && next !== null && next.length === 0;
 const inputsOf = segmentInputs;
 const viewOf = recordView;
 const defaultUid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -117,12 +120,22 @@ export type WorkbenchSnapshot = {
   lastSemanticAction: SemanticActionRecord | null;
 };
 
+type TranslateRunStep =
+  | { kind: 'blank'; segment: { start: number; end: number; core_start: number; core_end: number } }
+  | { kind: 'pair'; sourceCoreStart: number; sourceCoreEnd: number }
+  | { kind: 'partial_tail'; segment: { start: number; end: number; core_start: number; core_end: number } };
+
 type TranslateRunPlan = {
+  kind: 'blank' | 'untranslated_pairs' | 'partial_prefix';
   source: string;
   direction: 'en' | 'zh';
-  segments: { start: number; end: number; core_start: number; core_end: number }[];
+  steps: TranslateRunStep[];
   pieces: string[];
   base: string;
+  expectedTarget: string;
+  appendPrefix: string;
+  tailStart: number;
+  initialBefore: { source: string; target: string } | null;
 };
 
 const defaultClock: WorkbenchClock = {
@@ -669,6 +682,8 @@ export class WorkbenchController {
     const startEpoch = this.documentEpoch;
     let nextTarget: string | null = null;
     let applied: string | null = null;
+    let spliceStart = 0;
+    let spliceEnd = 0;
 
     if (command.kind === 'accepted') {
       if (!placed.issue.suggestion || placed.issue.suggestion_withheld !== null || !placed.live.suggestion_span) {
@@ -687,6 +702,8 @@ export class WorkbenchController {
         this.commit({ semantic: x => x, notice: 'sem:needsReconfirm', remember: false });
         return { applied: false, reason: 'needs_reconfirm' };
       }
+      spliceStart = placed.live.suggestion_span.start;
+      spliceEnd = placed.live.suggestion_span.end;
       nextTarget = applied0.target;
       applied = replacement;
     } else if (command.kind === 'adjusted') {
@@ -696,6 +713,8 @@ export class WorkbenchController {
         return { applied: false, reason: 'needs_reconfirm' };
       }
       const tc = chars(startDraft.target);
+      spliceStart = range.start;
+      spliceEnd = range.end;
       nextTarget = slice(tc, 0, range.start) + command.text + slice(tc, range.end, tc.length);
       applied = command.text;
     }
@@ -722,12 +741,35 @@ export class WorkbenchController {
       return { applied: false, reason: 'decision_limit' };
     }
 
+    const appliedLen = applied === null ? 0 : chars(applied).length;
     const nextDraft = nextTarget === null
       ? undefined
-      : { ...startDraft, target: nextTarget, alignments: startDraft.alignments === null ? null : [] };
+      : {
+          ...startDraft,
+          target: nextTarget,
+          alignments: remapAlignmentsForTargetSplice(
+            startDraft.alignments,
+            startDraft.source,
+            nextTarget,
+            spliceStart,
+            spliceEnd,
+            appliedLen,
+          ),
+        };
     let allHandled = false;
     const serial = this.commit({
       draft: nextDraft,
+      ...(nextTarget === null
+        ? {}
+        : {
+            splices: {
+              target: {
+                start: scalarOffset(spliceStart),
+                oldEnd: scalarOffset(spliceEnd),
+                newEnd: scalarOffset(spliceStart + appliedLen),
+              },
+            },
+          }),
       semantic: state => (upsertDecision(state, decision, placed.id) as SemanticState) ?? state,
       extraPatch: (nextSemantic, committedSerial) => {
         allHandled = !nextSemantic.placed.some(p => !isHandled((issueStatus(nextSemantic, p) as { status: string }).status) && !p.stale);
@@ -799,7 +841,18 @@ export class WorkbenchController {
         }
         if (out.target === undefined) return false;
         this.commit({
-          draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] },
+          draft: {
+            ...d,
+            target: out.target,
+            alignments: remapAlignmentsForTargetSplice(
+              d.alignments,
+              d.source,
+              out.target,
+              action.docTarget.start,
+              action.docTarget.end,
+              chars(replacement).length,
+            ),
+          },
           splices: {
             target: {
               start: action.docTarget.start,
@@ -846,7 +899,18 @@ export class WorkbenchController {
       return { applied: false, error: out.error };
     }
     this.commit({
-      draft: { ...d, target: out.target, alignments: d.alignments === null ? null : [] },
+      draft: {
+        ...d,
+        target: out.target,
+        alignments: remapAlignmentsForTargetSplice(
+          d.alignments,
+          d.source,
+          out.target,
+          item.range.target_start,
+          item.range.target_end,
+          chars(nextText).length,
+        ),
+      },
       splices: {
         target: {
           start: item.range.target_start,
@@ -1036,6 +1100,45 @@ export class WorkbenchController {
       && latest.report.findings.includes(finding) && finding.candidates.includes(candidate);
   }
 
+  private commitTargetSplice(nextTarget: string, spliceStart: number, spliceEnd: number, replacementLength: number): void {
+    const { draft, reports } = this.state;
+    const latest = reports.at(-1) ?? null;
+    const remapped = remapAlignmentsForTargetSplice(
+      draft.alignments,
+      draft.source,
+      nextTarget,
+      spliceStart,
+      spliceEnd,
+      replacementLength,
+    );
+    const lostAlignments = alignmentsLost(draft.alignments, remapped);
+    const next: Draft = { ...draft, target: nextTarget, alignments: remapped };
+    const message = lostAlignments ? 'editedAlignments' : latest ? 'editedText' : '';
+    const { history } = this.pushUndo();
+    this.docAbort?.abort();
+    this.docAbort = null;
+    this.docGeneration += 1;
+    const nextSemantic = mapSemanticEdit(this.state.semantic, draft, next, {
+      target: {
+        start: scalarOffset(spliceStart),
+        oldEnd: scalarOffset(spliceEnd),
+        newEnd: scalarOffset(spliceStart + replacementLength),
+      },
+    }) as SemanticState;
+    this.setState({
+      history,
+      phase: 'idle',
+      translating: false,
+      error: null,
+      generation: this.docGeneration,
+      inFlight: false,
+      draft: next,
+      semantic: nextSemantic,
+      sourceDirtyForTranslation: false,
+      notice: message,
+    });
+  }
+
   applyTargetRevision(input: TargetRevisionCommand): TargetRevisionResult {
     const latest = this.state.reports.at(-1) ?? null;
     const isCurrent = this.state.generation === input.generation
@@ -1054,7 +1157,8 @@ export class WorkbenchController {
     if (result.error || result.target === undefined || !result.span) {
       return { status: 'invalid', error: result.error };
     }
-    this.editText('target', result.target);
+    const selected = input.selected!;
+    this.commitTargetSplice(result.target, selected.start, selected.end, chars(replacement).length);
     return { status: 'applied', target: result.target, span: result.span };
   }
 
@@ -1066,9 +1170,12 @@ export class WorkbenchController {
     const parts = highlightSegments(draft.target, finding.target_span);
     const forms = finding.candidates.flatMap(c => [c.zh, c.en]);
     if (!parts || !forms.includes(finding.target_span.text)) return;
-    const result = spliceOccurrence(draft.target, finding.target_span.text, finding.target_span, draft.direction === 'en' ? candidate.en : candidate.zh);
+    const replacement = draft.direction === 'en' ? candidate.en : candidate.zh;
+    const result = spliceOccurrence(draft.target, finding.target_span.text, finding.target_span, replacement);
     if (result.error === 'revisionTooLong') this.setState({ notice: 'revisionTooLong' });
-    if (result.target !== undefined) this.editText('target', result.target);
+    if (result.target !== undefined) {
+      this.commitTargetSplice(result.target, finding.target_span.start, finding.target_span.end, chars(replacement).length);
+    }
   }
 
   undo(): void {
@@ -1789,6 +1896,121 @@ export class WorkbenchController {
     }
   }
 
+  private resumablePartialPrefix(d: Draft) {
+    if (d.alignments !== null || !d.source.trim() || !d.target.trim()) return null;
+    if (segmentText(d.source).length < 2) return null;
+    const sc = chars(d.source);
+    const tc = chars(d.target);
+    const sParas = paragraphRanges(sc);
+    const tParas = paragraphRanges(tc);
+    if (!(1 <= tParas.length && tParas.length < sParas.length)) return null;
+    const prefixCount = tParas.length;
+    const tailStart = sParas[prefixCount][0];
+    const tailText = slice(sc, tailStart, sc.length);
+    const [sPrevCs, sPrevCe] = core(sc, sParas[prefixCount - 1][0], sParas[prefixCount - 1][1]);
+    const [tLastCs, tLastCe] = core(tc, tParas[prefixCount - 1][0], tParas[prefixCount - 1][1]);
+    const sep = slice(sc, sPrevCe, tailStart) || '\n\n';
+    const existingTrail = slice(tc, tLastCe, tc.length);
+    const base = existingTrail === sep ? d.target : slice(tc, 0, tLastCe);
+    const appendPrefix = existingTrail === sep ? '' : sep;
+    const tailSegments = segmentText(tailText);
+    if (!tailSegments.length) return null;
+    return {
+      base,
+      appendPrefix,
+      tailStart,
+      tailSegments,
+      initialBefore: {
+        source: chars(slice(sc, sPrevCs, sPrevCe)).slice(-400).join(''),
+        target: chars(slice(tc, tLastCs, tLastCe)).slice(-400).join(''),
+      },
+    };
+  }
+
+  private buildTranslatePlan(
+    d: Draft,
+    semanticState: SemanticState = this.state.semantic,
+    basis: SessionBasis = this.state.basis,
+  ): { plan: TranslateRunPlan; items: { key: string; index: number }[] } | null {
+    if (!d.source.trim()) return null;
+    if (!d.target.trim()) {
+      const segments = segmentText(d.source);
+      if (!segments.length) return null;
+      const steps: TranslateRunStep[] = segments.map(segment => ({ kind: 'blank', segment }));
+      return {
+        plan: {
+          kind: 'blank',
+          source: d.source,
+          direction: d.direction,
+          steps,
+          pieces: [],
+          base: '',
+          expectedTarget: '',
+          appendPrefix: '',
+          tailStart: 0,
+          initialBefore: null,
+        },
+        items: steps.map((_, index) => ({ key: `tr#${index}`, index })),
+      };
+    }
+    const views = semanticSegmentViews(d, semanticState, basis) as { items: PairView[] };
+    const untranslated = views.items.filter(
+      v => v.pair.status === 'untranslated' && !!v.sCore.trim() && chars(v.sCore).length <= SEGMENT_LIMIT,
+    );
+    if (untranslated.length > 0) {
+      const steps: TranslateRunStep[] = untranslated.map(v => ({
+        kind: 'pair',
+        sourceCoreStart: v.pair.source.core_start,
+        sourceCoreEnd: v.pair.source.core_end,
+      }));
+      return {
+        plan: {
+          kind: 'untranslated_pairs',
+          source: d.source,
+          direction: d.direction,
+          steps,
+          pieces: [],
+          base: d.target,
+          expectedTarget: d.target,
+          appendPrefix: '',
+          tailStart: 0,
+          initialBefore: null,
+        },
+        items: steps.map((s, index) => ({
+          key: `trp#${s.kind === 'pair' ? s.sourceCoreStart : index}:${index}`,
+          index,
+        })),
+      };
+    }
+    const partial = this.resumablePartialPrefix(d);
+    if (!partial) return null;
+    const steps: TranslateRunStep[] = partial.tailSegments.map(segment => ({ kind: 'partial_tail', segment }));
+    return {
+      plan: {
+        kind: 'partial_prefix',
+        source: d.source,
+        direction: d.direction,
+        steps,
+        pieces: [],
+        base: partial.base,
+        expectedTarget: d.target,
+        appendPrefix: partial.appendPrefix,
+        tailStart: partial.tailStart,
+        initialBefore: partial.initialBefore,
+      },
+      items: steps.map((_, index) => ({ key: `trpfx#${index}`, index })),
+    };
+  }
+
+  hasResumableTranslate(
+    d: Draft = this.state.draft,
+    semanticState: SemanticState = this.state.semantic,
+    basis: SessionBasis = this.state.basis,
+  ): boolean {
+    if (!d.source.trim() || !d.target.trim()) return false;
+    return this.buildTranslatePlan(d, semanticState, basis) !== null;
+  }
+
   private async sendTranslate(item: RunItem, signal: AbortSignal, generation: number, epoch: number): Promise<void> {
     const live = () => !this.disposed && this.runGeneration === generation && this.documentEpoch === epoch && !signal.aborted;
     const inOrder = (failure: ReturnType<typeof runFailure>) => (
@@ -1798,22 +2020,67 @@ export class WorkbenchController {
     );
     const plan = this.translateRun;
     const d = this.state.draft;
-    if (!plan || d.source !== plan.source || d.direction !== plan.direction || d.target !== plan.base + plan.pieces.join('')) {
+    if (!plan || d.source !== plan.source || d.direction !== plan.direction || d.target !== plan.expectedTarget) {
       this.failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: this.clock.now() });
       this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
       return;
     }
-    const segment = plan.segments[item.index];
+    const step = plan.steps[item.index];
+    if (!step) {
+      this.dispatchRun({ type: 'skip', key: item.key });
+      return;
+    }
     const sc = chars(d.source);
-    const core = slice(sc, segment.core_start, segment.core_end);
-    const prev = item.index > 0 ? plan.segments[item.index - 1] : null;
-    const previousPiece = item.index > 0 ? plan.pieces[item.index - 1] : '';
-    const before = prev ? {
-      source: chars(slice(sc, prev.core_start, prev.core_end)).slice(-400).join(''),
-      target: chars(previousPiece.trim()).slice(-400).join(''),
-    } : null;
     const contextOn = !!this.state.capabilities?.includes(CAPABILITY_TRANSLATION_CONTEXT);
-    const fitted = fitRequestBody({ text: core, to: plan.direction, ...(contextOn ? { context: before ? { before } : {} } : {}) });
+    let coreText = '';
+    let contextPayload: Record<string, unknown> = {};
+    if (step.kind === 'blank') {
+      coreText = slice(sc, step.segment.core_start, step.segment.core_end);
+      const prevStep = item.index > 0 ? plan.steps[item.index - 1] : null;
+      const prevSeg = prevStep?.kind === 'blank' ? prevStep.segment : null;
+      const previousPiece = item.index > 0 ? plan.pieces[item.index - 1] ?? '' : '';
+      const before = prevSeg ? {
+        source: chars(slice(sc, prevSeg.core_start, prevSeg.core_end)).slice(-400).join(''),
+        target: chars(previousPiece.trim()).slice(-400).join(''),
+      } : null;
+      if (contextOn) contextPayload = { context: before ? { before } : {} };
+    } else if (step.kind === 'partial_tail') {
+      const tailSc = chars(slice(sc, plan.tailStart, sc.length));
+      coreText = slice(tailSc, step.segment.core_start, step.segment.core_end);
+      const prevStep = item.index > 0 ? plan.steps[item.index - 1] : null;
+      const prevSeg = prevStep?.kind === 'partial_tail' ? prevStep.segment : null;
+      const previousPiece = item.index > 0 ? plan.pieces[item.index - 1] ?? '' : '';
+      const before = item.index === 0
+        ? plan.initialBefore
+        : prevSeg
+          ? {
+              source: chars(slice(tailSc, prevSeg.core_start, prevSeg.core_end)).slice(-400).join(''),
+              target: chars(previousPiece.trim()).slice(-400).join(''),
+            }
+          : null;
+      if (contextOn) contextPayload = { context: before ? { before } : {} };
+    } else {
+      const pairView = this.viewsFor().items.find(
+        v => v.pair.status === 'untranslated'
+          && v.pair.source.core_start === step.sourceCoreStart
+          && v.pair.source.core_end === step.sourceCoreEnd,
+      );
+      if (!pairView) {
+        this.failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: this.clock.now() });
+        this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
+        return;
+      }
+      coreText = pairView.sCore;
+      if (contextOn) {
+        const list = inputsOf(d).items.map(entry => entry.pair);
+        const before = contextBefore({ pairs: list, segmentIndex: pairView.pair.index, source: d.source, target: d.target });
+        const precedents = this.state.usePrecedents
+          ? selectPrecedents({ items: this.precedentItems(d, this.state.semantic), source: d.source, pairs: list, segmentIndex: pairView.pair.index })
+          : [];
+        contextPayload = { context: { ...(before ? { before } : {}), ...(precedents.length ? { precedents } : {}) } };
+      }
+    }
+    const fitted = fitRequestBody({ text: coreText, to: plan.direction, ...contextPayload });
     if (!fitted.fits) {
       this.failRun({ type: 'failed', key: item.key, code: 'bodyTooLarge', classification: { action: 'stop' }, now: this.clock.now() });
       return;
@@ -1833,18 +2100,76 @@ export class WorkbenchController {
         return;
       }
       const latest = this.state.draft;
-      if (latest.source !== plan.source || latest.direction !== plan.direction || latest.target !== plan.base + plan.pieces.join('')) {
+      if (latest.source !== plan.source || latest.direction !== plan.direction || latest.target !== plan.expectedTarget) {
         this.failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: this.clock.now() });
         this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
         return;
       }
-      const piece = slice(sc, segment.start, segment.core_start) + body.text + slice(sc, segment.core_end, segment.end);
-      plan.pieces[item.index] = piece;
-      const done = plan.pieces.filter(p => p !== undefined).length === plan.segments.length;
+      let nextTarget = '';
+      let nextAlignments: Draft['alignments'] = latest.alignments === null ? null : [];
+      let splices: DraftEditSplices | undefined;
+      if (step.kind === 'blank') {
+        const piece = slice(sc, step.segment.start, step.segment.core_start) + body.text + slice(sc, step.segment.core_end, step.segment.end);
+        plan.pieces[item.index] = piece;
+        nextTarget = plan.base + plan.pieces.join('');
+      } else if (step.kind === 'partial_tail') {
+        const tailSc = chars(slice(sc, plan.tailStart, sc.length));
+        const piece = slice(tailSc, step.segment.start, step.segment.core_start) + body.text + slice(tailSc, step.segment.core_end, step.segment.end);
+        plan.pieces[item.index] = piece;
+        const joined = plan.pieces.join('');
+        nextTarget = plan.base + (joined ? plan.appendPrefix + joined : '');
+        nextAlignments = null;
+      } else {
+        const currentView = this.viewsFor().items.find(
+          v => v.pair.status === 'untranslated'
+            && v.pair.source.core_start === step.sourceCoreStart
+            && v.pair.source.core_end === step.sourceCoreEnd,
+        );
+        if (!currentView) {
+          this.failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: this.clock.now() });
+          this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
+          return;
+        }
+        const tc = chars(latest.target);
+        const region = currentView.pair.target;
+        const head = slice(tc, 0, region.start);
+        const ws = slice(tc, region.start, region.end);
+        const tail = slice(tc, region.end, tc.length);
+        const lead = head && !/\n[ \t\r]*\n[ \t\r]*$/u.test(head + ws) ? '\n\n' : '';
+        const trail = tail && !/^[ \t\r]*\n[ \t\r]*\n/u.test(tail) ? '\n\n' : '';
+        nextTarget = head + ws + lead + body.text + trail + tail;
+        const insertAt = chars(head + ws).length;
+        const coreStart = insertAt + chars(lead).length;
+        const coreEnd = coreStart + chars(body.text).length;
+        const delta = chars(lead + body.text + trail).length;
+        nextAlignments = remapAlignmentsForTargetFill(
+          latest.alignments,
+          latest.source,
+          nextTarget,
+          currentView.pair.source.start,
+          currentView.pair.source.end,
+          insertAt,
+          coreStart,
+          coreEnd,
+          delta,
+        );
+        splices = {
+          target: {
+            start: scalarOffset(insertAt),
+            oldEnd: scalarOffset(insertAt),
+            newEnd: scalarOffset(insertAt + delta),
+          },
+        };
+        plan.pieces[item.index] = body.text;
+      }
+      plan.expectedTarget = nextTarget;
+      const done = plan.pieces.filter(p => p !== undefined).length === plan.steps.length;
+      const lostAlignments = alignmentsLost(latest.alignments, nextAlignments);
       this.commit({
-        draft: { ...latest, target: plan.base + plan.pieces.join(''), alignments: latest.alignments === null ? null : [] },
+        draft: { ...latest, target: nextTarget, alignments: nextAlignments },
+        ...(splices ? { splices } : {}),
         remember: false,
-        notice: done ? 'sem:translateRunDone' : null,
+        notice: lostAlignments ? 'editedAlignments' : done ? 'sem:translateRunDone' : null,
       });
       this.dispatchRun({ type: 'done', key: item.key });
     } catch {
@@ -1871,12 +2196,16 @@ export class WorkbenchController {
 
   startTranslateRun(): void {
     const d = this.state.draft;
-    if (!d.source.trim() || d.target.trim()) return;
-    const segments = segmentText(d.source);
-    this.translateRun = { source: d.source, direction: d.direction, segments, pieces: [], base: '' };
-    // One undo step for the whole generated translation: the blank target before it.
-    this.commit({ draft: { ...d, target: '' }, remember: true, notice: null });
-    this.startBatch('translate', segments.map((_, index) => ({ key: `tr#${index}`, index })));
+    const built = this.buildTranslatePlan(d);
+    if (!built) return;
+    this.translateRun = built.plan;
+    // One undo step for the whole generated translation: the state before the batch.
+    if (built.plan.kind === 'blank') {
+      this.commit({ draft: { ...d, target: '' }, remember: true, notice: null });
+    } else {
+      this.commit({ remember: true, notice: null });
+    }
+    this.startBatch('translate', built.items);
   }
 
   async translatePair(viewOrIndex: PairView | number): Promise<void> {
@@ -1884,7 +2213,9 @@ export class WorkbenchController {
     const view = typeof viewOrIndex === 'number'
       ? this.viewsFor().items.find(v => v.pair.index === viewOrIndex) ?? null
       : viewOrIndex;
-    if (!view || !view.sCore.trim()) return;
+    if (!view || !view.sCore.trim() || chars(view.sCore).length > SEGMENT_LIMIT) return;
+    const isRetranslate = view.pair.status === 'ready';
+    if (view.pair.status !== 'untranslated' && (!isRetranslate || view.pair.hard_cut)) return;
     const d = this.state.draft;
     const epoch = this.documentEpoch;
     const list = inputsOf(d).items.map(item => item.pair);
@@ -1919,14 +2250,61 @@ export class WorkbenchController {
         this.commit({ semantic: x => x, notice: 'sem:segmentChanged', remember: false });
         return;
       }
+      if (isRetranslate) {
+        const nextTarget = slice(tc, 0, region.core_start) + body.text + slice(tc, region.core_end, tc.length);
+        const replacementLen = chars(body.text).length;
+        const nextAlignments = remapAlignmentsForTargetSplice(
+          latest.alignments,
+          latest.source,
+          nextTarget,
+          region.core_start,
+          region.core_end,
+          replacementLen,
+        );
+        this.commit({
+          draft: { ...latest, target: nextTarget, alignments: nextAlignments },
+          splices: {
+            target: {
+              start: region.core_start,
+              oldEnd: region.core_end,
+              newEnd: scalarOffset(region.core_start + replacementLen),
+            },
+          },
+          notice: alignmentsLost(latest.alignments, nextAlignments) ? 'editedAlignments' : 'sem:retranslated',
+        });
+        return;
+      }
       const head = slice(tc, 0, region.start);
       const ws = slice(tc, region.start, region.end);
       const tail = slice(tc, region.end, tc.length);
       const lead = head && !/\n[ \t\r]*\n[ \t\r]*$/u.test(head + ws) ? '\n\n' : '';
       const trail = tail && !/^[ \t\r]*\n[ \t\r]*\n/u.test(tail) ? '\n\n' : '';
+      const nextTarget = head + ws + lead + body.text + trail + tail;
+      const insertAt = chars(head + ws).length;
+      const coreStart = insertAt + chars(lead).length;
+      const coreEnd = coreStart + chars(body.text).length;
+      const delta = chars(lead + body.text + trail).length;
+      const nextAlignments = remapAlignmentsForTargetFill(
+        latest.alignments,
+        latest.source,
+        nextTarget,
+        view.pair.source.start,
+        view.pair.source.end,
+        insertAt,
+        coreStart,
+        coreEnd,
+        delta,
+      );
       this.commit({
-        draft: { ...latest, target: head + ws + lead + body.text + trail + tail, alignments: latest.alignments === null ? null : [] },
-        notice: 'sem:translated',
+        draft: { ...latest, target: nextTarget, alignments: nextAlignments },
+        splices: {
+          target: {
+            start: scalarOffset(insertAt),
+            oldEnd: scalarOffset(insertAt),
+            newEnd: scalarOffset(insertAt + delta),
+          },
+        },
+        notice: alignmentsLost(latest.alignments, nextAlignments) ? 'editedAlignments' : 'sem:translated',
       });
     } catch {
       if (!this.disposed && this.documentEpoch === epoch && !abort.signal.aborted) {

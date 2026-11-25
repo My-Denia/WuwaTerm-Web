@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { canonicalOf, createWorkbenchController, isRunActive } from '../lib/workbench-controller.ts';
 import { recordView } from '../lib/long-review.ts';
+import { remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, serializeWorkfile } from '../lib/manuscript.js';
 import { issueStatus } from '../lib/semantic-state.js';
 import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from './fixtures/manuscript.mjs';
 import { defaultSemanticResponse, semanticResponse } from './helpers/semantic-fixture.mjs';
@@ -827,6 +828,253 @@ test('manual paragraph repair commands and document-level target revision / choi
   assert.equal(doc.canConfirmChoice(0), true);
   assert.equal(doc.confirmChoice(0), true);
   assert.equal(doc.getSnapshot().notice, 'choiceStaged');
+
+  doc.dispose();
+});
+
+test('remapAlignmentsForTargetSplice and remapAlignmentsForTargetFill preserve valid spans and fail closed on boundary cross', () => {
+  const source = '甲一。\n\n甲二。\n\n甲三。';
+  const target = 'Alpha one.\n\nBeta two.\n\nGamma three.';
+  const alignments = [
+    { source: { start: 0, end: 3, text: '甲一。' }, target: { start: 0, end: 10, text: 'Alpha one.' } },
+    { source: { start: 5, end: 8, text: '甲二。' }, target: { start: 12, end: 21, text: 'Beta two.' } },
+    { source: { start: 10, end: 13, text: '甲三。' }, target: { start: 23, end: 35, text: 'Gamma three.' } },
+  ];
+  assert.equal(remapAlignmentsForTargetSplice(null, source, target, 0, 5, 2), null);
+
+  // Localized splice inside span 0 resizes span 0 and shifts spans 1 & 2.
+  const next1 = 'Alpha ONE.\n\nBeta two.\n\nGamma three.';
+  assert.deepEqual(remapAlignmentsForTargetSplice(alignments, source, next1, 6, 9, 3), alignments.map((a, i) => (
+    i === 0 ? { ...a, target: { start: 0, end: 10, text: 'Alpha ONE.' } } : a
+  )));
+  const next2 = 'A1.\n\nBeta two.\n\nGamma three.';
+  const remapped = remapAlignmentsForTargetSplice(alignments, source, next2, 0, 10, 3);
+  assert.equal(remapped?.[0].target?.text, 'A1.');
+  assert.equal(remapped?.[1].target?.text, 'Beta two.');
+  assert.equal(remapped?.[1].target?.start, 5);
+  assert.equal(remapped?.[2].target?.text, 'Gamma three.');
+  assert.equal(remapped?.[2].target?.start, 16);
+
+  // Boundary-crossing splice fails closed to [].
+  assert.deepEqual(remapAlignmentsForTargetSplice(alignments, source, 'crossed', 8, 15, 7), []);
+
+  // Filling an untranslated span populates target:null and preserves surrounding spans.
+  const partialAlign = [
+    { source: { start: 0, end: 3, text: '甲一。' }, target: { start: 0, end: 10, text: 'Alpha one.' } },
+    { source: { start: 5, end: 8, text: '甲二。' }, target: null },
+    { source: { start: 10, end: 13, text: '甲三。' }, target: { start: 12, end: 24, text: 'Gamma three.' } },
+  ];
+  const filledTarget = 'Alpha one.\n\nInserted two.\n\nGamma three.';
+  const filled = remapAlignmentsForTargetFill(partialAlign, source, filledTarget, 5, 8, 12, 12, 25, 15);
+  assert.equal(filled?.[0].target?.text, 'Alpha one.');
+  assert.equal(filled?.[1].target?.text, 'Inserted two.');
+  assert.equal(filled?.[2].target?.text, 'Gamma three.');
+  assert.equal(filled?.[2].target?.start, 27);
+
+  // remapAlignmentsForTargetFill preserves null and fails closed on 0 or >1 matching target:null entries.
+  assert.equal(remapAlignmentsForTargetFill(null, source, filledTarget, 5, 8, 12, 12, 25, 15), null);
+  assert.deepEqual(
+    remapAlignmentsForTargetFill([alignments[0]], source, filledTarget, 5, 8, 12, 12, 25, 15),
+    [],
+  );
+  const twoNull = [
+    { source: { start: 0, end: 3, text: '甲一。' }, target: null },
+    { source: { start: 5, end: 8, text: '甲二。' }, target: null },
+  ];
+  assert.deepEqual(remapAlignmentsForTargetFill(twoNull, '甲一。\n\n甲二。', 'One.\n\nTwo.', 0, 8, 0, 0, 4, 4), []);
+});
+
+test('localized target edits, reopened batch resume, ready retranslate and undo preserve explicit alignments', async () => {
+  const clock = makeClock();
+  const translateCalls = [];
+  const doc = createWorkbenchController({
+    clock,
+    onPoolRefresh: () => {},
+    initialCapabilities: ['translation-context-v1', 'review-v2'],
+    post: async (path, body) => {
+      if (path === '/api/translations') {
+        translateCalls.push(body);
+        return jsonResponse({ text: `[${body.text.slice(0, 6)}]` });
+      }
+      if (path === '/api/semantic-reviews') {
+        return jsonResponse(await semanticResponse(body, [
+          {
+            category: 'meaning_shift',
+            source: [0, 2],
+            target: [0, 5],
+            confidence: 'high',
+            suggestion: { target: [0, 5], replacement: 'Dawn!', term_effect: 'none' },
+          },
+        ]));
+      }
+      if (path === '/api/reviews') {
+        return jsonResponse(reviewReportFor(body));
+      }
+      throw new Error(`unexpected path ${path}`);
+    },
+  });
+
+  // 1. Reopened explicit untranslated manuscript: batch resume fills regions & keeps alignments, 1 undo reverts all.
+  const p1 = `甲一。${'文'.repeat(980)}`;
+  const p2 = `甲二。${'文'.repeat(980)}`;
+  const p3 = `甲三。${'文'.repeat(980)}`;
+  const src3 = `${p1}\n\n${p2}\n\n${p3}`;
+  const t1Init = `Alpha one.${'x'.repeat(980)}`;
+  const s1End = Array.from(p1).length;
+  const s2Start = s1End + 2;
+  const s2End = s2Start + Array.from(p2).length;
+  const s3Start = s2End + 2;
+  const s3End = s3Start + Array.from(p3).length;
+  const resumedFile = serializeWorkfile({
+    source: src3,
+    target: t1Init,
+    direction: 'en',
+    alignments: [
+      { source: { start: 0, end: s1End, text: p1 }, target: { start: 0, end: Array.from(t1Init).length, text: t1Init } },
+      { source: { start: s2Start, end: s2End, text: p2 }, target: null },
+      { source: { start: s3Start, end: s3End, text: p3 }, target: null },
+    ],
+    choices: [],
+    history: [],
+  });
+  await doc.importFile(fileFromText('resume.json', resumedFile));
+  assert.equal(doc.hasResumableTranslate(), true);
+  doc.startTranslateRun();
+  await waitUntil(() => doc.getSnapshot().run.phase === 'done');
+  assert.equal(translateCalls.length, 2);
+  const afterBatch = doc.getSnapshot().draft;
+  assert.equal(afterBatch.target, `${t1Init}\n\n[甲二。文文文]\n\n[甲三。文文文]`);
+  assert.equal(afterBatch.alignments?.length, 3);
+  assert.equal(afterBatch.alignments?.[0].target?.text, t1Init);
+  assert.equal(afterBatch.alignments?.[1].target?.text, '[甲二。文文文]');
+  assert.equal(afterBatch.alignments?.[2].target?.text, '[甲三。文文文]');
+
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.target, t1Init);
+  assert.equal(doc.getSnapshot().draft.alignments?.[1].target, null);
+
+  // Re-run batch then test single-segment retranslate of ready pair 0 + Undo.
+  doc.startTranslateRun();
+  await waitUntil(() => doc.getSnapshot().run.phase === 'done');
+  await doc.translatePair(0);
+  const afterRetrans = doc.getSnapshot().draft;
+  assert.equal(doc.getSnapshot().notice, 'sem:retranslated');
+  assert.equal(afterRetrans.target, '[甲一。文文文]\n\n[甲二。文文文]\n\n[甲三。文文文]');
+  assert.equal(afterRetrans.alignments?.[0].target?.text, '[甲一。文文文]');
+  assert.equal(afterRetrans.alignments?.[1].target?.text, '[甲二。文文文]');
+  assert.equal(afterRetrans.alignments?.[2].target?.text, '[甲三。文文文]');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.target, `${t1Init}\n\n[甲二。文文文]\n\n[甲三。文文文]`);
+  assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, t1Init);
+
+  // 2. Short unaligned manuscript with existing translation must NOT offer partial-prefix resume;
+  // multi-segment unaligned partial-prefix DOES offer resume and keeps prefix + context.
+  doc.receiveDraft({ source: '第一段。\n\n第二段。', target: '已有译文', direction: 'en', alignments: null });
+  assert.equal(doc.hasResumableTranslate(), false);
+
+  translateCalls.length = 0;
+  doc.receiveDraft({ source: src3, target: 'Prefix one.', direction: 'en', alignments: null });
+  assert.equal(doc.hasResumableTranslate(), true);
+  doc.startTranslateRun();
+  await waitUntil(() => doc.getSnapshot().run.phase === 'done');
+  assert.equal(translateCalls.length, 2);
+  assert.deepEqual(translateCalls[0].context, { before: { source: p1.slice(-400), target: 'Prefix one.' } });
+  assert.equal(doc.getSnapshot().draft.target, 'Prefix one.\n\n[甲二。文文文]\n\n[甲三。文文文]');
+
+  // 3. Localized semantic decision, reviseSegmentText, term occurrence replace, and applyTargetRevision preserve shifted alignments.
+  const sA = `今汐在今州。${'文'.repeat(980)}`;
+  const sB = `声骸。${'文'.repeat(980)}`;
+  const tA = `Night is in Jinzhou.${'x'.repeat(980)}`;
+  const tB = `Echo.${'x'.repeat(980)}`;
+  const tBOrigStart = Array.from(tA).length + 2;
+  doc.receiveDraft({
+    source: `${sA}\n\n${sB}`,
+    target: `${tA}\n\n${tB}`,
+    direction: 'en',
+    alignments: [
+      { source: { start: 0, end: Array.from(sA).length, text: sA }, target: { start: 0, end: Array.from(tA).length, text: tA } },
+      {
+        source: { start: Array.from(sA).length + 2, end: Array.from(sA).length + 2 + Array.from(sB).length, text: sB },
+        target: { start: tBOrigStart, end: tBOrigStart + Array.from(tB).length, text: tB },
+      },
+    ],
+  });
+  doc.startSemanticRun();
+  await waitUntil(() => doc.getSnapshot().run.phase === 'done');
+  const placedId = doc.getSnapshot().semantic.placed[0].id;
+  await doc.applySemanticDecision({ placedId, kind: 'accepted' });
+  const tADawn = `Dawn! is in Jinzhou.${'x'.repeat(980)}`;
+  assert.equal(doc.getSnapshot().draft.target, `${tADawn}\n\n${tB}`);
+  assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, tADawn);
+  assert.equal(doc.getSnapshot().draft.alignments?.[1].target?.text, tB);
+
+  doc.reviseSegmentText(0, tADawn, tA);
+  assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, tA);
+  assert.equal(doc.getSnapshot().draft.alignments?.[1].target?.text, tB);
+  assert.equal(doc.getSnapshot().draft.alignments?.[1].target?.start, tBOrigStart);
+
+  doc.startTermRun();
+  await waitUntil(() => doc.getSnapshot().run.phase === 'done');
+  const jinhsiFinding = fixture(sA, tA, 'en').report.findings[0].candidates[0];
+  assert.equal(doc.applyTermOccurrenceAction({
+    type: 'replace',
+    segmentIndex: 0,
+    docTarget: { start: 0, end: 5, text: 'Night' },
+    candidate: jinhsiFinding,
+  }), true);
+  const tAJinhsi = `Jinhsi is in Jinzhou.${'x'.repeat(980)}`;
+  assert.equal(doc.getSnapshot().draft.target, `${tAJinhsi}\n\n${tB}`);
+  assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, tAJinhsi);
+  assert.equal(doc.getSnapshot().draft.alignments?.[1].target?.text, tB);
+  assert.equal(doc.getSnapshot().draft.alignments?.[1].target?.start, tBOrigStart + 1);
+
+  // Short-doc applyTargetRevision preserves explicit alignments too.
+  doc.receiveDraft({
+    source: '今汐在今州。',
+    target: 'Someone is in Jinzhou.',
+    direction: 'en',
+    alignments: [{ source: { start: 0, end: 6, text: '今汐在今州。' }, target: { start: 0, end: 22, text: 'Someone is in Jinzhou.' } }],
+  });
+  await doc.check();
+  const revSnap = doc.getSnapshot();
+  const revReport = revSnap.reports.at(-1);
+  const revFinding = revReport.report.findings.find(f => f.source_span.text === '今汐' && f.target_span === null);
+  const revOut = doc.applyTargetRevision({
+    snapshot: revReport,
+    generation: revSnap.generation,
+    draft: revSnap.draft,
+    choices: revSnap.choices,
+    imported: revSnap.imported,
+    finding: revFinding,
+    candidate: revFinding.candidates[0],
+    fragment: 'Someone',
+    selected: { start: 0, end: 7, text: 'Someone' },
+  });
+  assert.equal(revOut.status, 'applied');
+  assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, 'Jinhsi is in Jinzhou.');
+
+  // replaceTerm preserves explicit alignments cleanly.
+  await doc.check();
+  const repSnap = doc.getSnapshot();
+  const repFinding = repSnap.reports.at(-1).report.findings.find(f => f.source_span.text === '今汐' && f.target_span);
+  assert.ok(repFinding);
+  doc.replaceTerm(repFinding, { ...repFinding.candidates[0], en: 'Jinhsi!' });
+  assert.equal(doc.getSnapshot().draft.target, 'Jinhsi! is in Jinzhou.');
+  assert.equal(doc.getSnapshot().draft.alignments?.[0].target?.text, 'Jinhsi! is in Jinzhou.');
+
+  // Merged short aligned pairs fail closed to [] on retranslate and emit editedAlignments notice (never misleading sem:retranslated).
+  doc.receiveDraft({
+    source: '甲一。\n\n甲二。',
+    target: 'One.\n\nTwo.',
+    direction: 'en',
+    alignments: [
+      { source: { start: 0, end: 3, text: '甲一。' }, target: { start: 0, end: 4, text: 'One.' } },
+      { source: { start: 5, end: 8, text: '甲二。' }, target: { start: 6, end: 10, text: 'Two.' } },
+    ],
+  });
+  await doc.translatePair(0);
+  assert.equal(doc.getSnapshot().draft.alignments?.length, 0);
+  assert.equal(doc.getSnapshot().notice, 'editedAlignments');
 
   doc.dispose();
 });
