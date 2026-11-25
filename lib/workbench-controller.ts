@@ -24,9 +24,10 @@ import {
   MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, MAX_V4_CHOICES, REPORT_V4,
   canonicalManuscript, compareReports, leaveGuardActive, makeChoice, manuscriptSaveView,
   mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent, recoverSpan,
-  remapAlignmentsForFreeEdit, remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices,
+  remapForFreeEdit, remapForSplice, remapForTargetFill, sanitizeDuplicateChoices,
   serializeWorkfile, validAlignments, validReport, validSpan,
   WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
+  type AlignmentRemap, type InvalidatedAlignment,
 } from './manuscript.js';
 import { highlightSegments, revisionOf } from './review-report.js';
 import { spliceOccurrence } from './target-revision.js';
@@ -62,8 +63,25 @@ export const PRECEDENTS_DEFAULT_ON = true;
 const chars = (text: string) => Array.from(text);
 const slice = (list: string[], start: number, end: number) => list.slice(start, end).join('');
 const sliceEquals = (text: string, span: Span | null) => !!span && slice(chars(text), span.start, span.end) === span.text;
-const alignmentsLost = (prev: Draft['alignments'], next: Draft['alignments']) =>
-  prev !== null && prev.length > 0 && next !== null && next.length === 0;
+/**
+ * The notice of an edit transaction that touched explicit alignments: `editedAlignments` when it left none of them,
+ * `editedAlignmentsPartial` when it invalidated only some, else null (kept, shifted, resized or emptied-target entries only).
+ */
+const alignmentNotice = (prev: Draft['alignments'], remap: AlignmentRemap): 'editedAlignments' | 'editedAlignmentsPartial' | null =>
+  prev === null || prev.length === 0 ? null
+    : remap.alignments !== null && remap.alignments.length === 0 ? 'editedAlignments'
+      : remap.invalidated.length > 0 ? 'editedAlignmentsPartial' : null;
+/** The session list of invalidated alignments keeps the latest entries, at most the 64 an alignment list can hold. */
+const MAX_SESSION_INVALIDATIONS = 64;
+const appendInvalidations = (list: readonly InvalidatedAlignment[], added: readonly InvalidatedAlignment[]): InvalidatedAlignment[] =>
+  (added.length ? [...list, ...added].slice(-MAX_SESSION_INVALIDATIONS) : [...list]);
+/**
+ * One undo or redo step: the workbench state before (undo) or after (redo) one edit transaction, with the session list of
+ * alignments that edits invalidated, so stepping back restores every entry a transaction took out. `checkpoint` is the protected
+ * document checkpoint an undo of a document replacement cleared, restored when that replacement is redone.
+ */
+type UndoEntry = Undo & { invalidations?: InvalidatedAlignment[]; checkpoint?: DocumentCheckpoint };
+const invalidationsOf = (entry: Undo): InvalidatedAlignment[] => (entry as UndoEntry).invalidations ?? [];
 const inputsOf = segmentInputs;
 const viewOf = recordView;
 const defaultUid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -99,8 +117,13 @@ export type WorkbenchSnapshot = {
   choices: Choice[];
   imported: Choice[];
   reports: Snapshot[];
-  history: Undo[];
+  history: UndoEntry[];
   documentCheckpoint: DocumentCheckpoint | null;
+  /**
+   * Alignments that edit transactions took out of the list this session (reason and the entry before the edit). Session state
+   * only: undo entries and the document checkpoint carry it, a saved manuscript never does, and nothing writes it to browser storage.
+   */
+  alignmentInvalidations: InvalidatedAlignment[];
   semantic: SemanticState;
   basis: SessionBasis;
   capabilities: string[] | null;
@@ -245,7 +268,12 @@ export class WorkbenchController {
   private docGeneration = 0;
   private importAttempt = 0;
   private historySerial = 0;
-  private activeTypingTx: { side: 'source' | 'target'; at: number } | null = null;
+  /** The typing step a one-scalar edit on the same side within TYPING_COALESCE_MS may join: its side, time and undo serial. */
+  private activeTypingTx: { side: 'source' | 'target'; at: number; serial: number } | null = null;
+  /** Redo steps, newest last; any new edit clears them. */
+  private future: UndoEntry[] = [];
+  /** An IME composition in progress: its side, the draft before it and the session invalidations then (one undo step). */
+  private composition: { side: 'source' | 'target'; base: Draft; invalidations: InvalidatedAlignment[] } | null = null;
   private documentEpoch = 0;
   private reconcileGeneration = 0;
 
@@ -275,6 +303,7 @@ export class WorkbenchController {
       reports: [],
       history: [],
       documentCheckpoint: null,
+      alignmentInvalidations: [],
       semantic: emptySemantic() as SemanticState,
       basis: null,
       capabilities: options.initialCapabilities ?? null,
@@ -457,12 +486,14 @@ export class WorkbenchController {
 
   private replaceDocumentState(nextPatch: Partial<WorkbenchSnapshot>, nextSemantic: SemanticState): void {
     this.activeTypingTx = null;
+    this.composition = null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
     this.abortRunInternal();
     this.documentEpoch += 1;
     this.setState({
+      alignmentInvalidations: [],
       ...nextPatch,
       phase: 'idle',
       translating: false,
@@ -479,21 +510,26 @@ export class WorkbenchController {
     });
   }
 
-  private pushUndo(): { history: Undo[]; serial: number } {
+  // Every new undo step starts a new transaction: it ends typing coalescing and an IME composition, and clears the redo steps.
+  private pushUndo(): { history: UndoEntry[]; serial: number } {
     this.activeTypingTx = null;
+    this.composition = null;
+    this.future = [];
     const serial = ++this.historySerial;
-    const { draft, choices, imported, semantic, history } = this.state;
+    const { draft, choices, imported, semantic, history, alignmentInvalidations: invalidations } = this.state;
     return {
       serial,
-      history: [...history.slice(-(MAX_UNDO - 1)), { draft, choices, imported, semantic, serial }],
+      history: [...history.slice(-(MAX_UNDO - 1)), { draft, choices, imported, semantic, serial, invalidations }],
     };
   }
 
-  private pushDocumentUndo(kind?: DocumentCheckpoint['kind']): { history: Undo[]; checkpoint: DocumentCheckpoint | null } {
+  private pushDocumentUndo(kind?: DocumentCheckpoint['kind']): { history: UndoEntry[]; checkpoint: DocumentCheckpoint | null } {
     this.activeTypingTx = null;
+    this.composition = null;
+    this.future = [];
     const serial = ++this.historySerial;
-    const { draft, choices, imported, reports, semantic, history, documentCheckpoint } = this.state;
-    const saved: Undo = { draft, choices, imported, reports, semantic, serial, replacedDocument: true };
+    const { draft, choices, imported, reports, semantic, history, documentCheckpoint, alignmentInvalidations: invalidations } = this.state;
+    const saved: UndoEntry = { draft, choices, imported, reports, semantic, serial, replacedDocument: true, invalidations };
     const nextHistory = [...history.slice(-(MAX_UNDO - 1)), saved];
     const checkpoint = kind && workPresent(draft, choices, reports, semantic)
       ? { entry: saved, kind, createdAt: this.clock.now() }
@@ -505,6 +541,16 @@ export class WorkbenchController {
     return this.state.history.at(-1)?.serial === serial;
   }
 
+  /** Whether an undone step can be redone (any new edit clears the redo steps). */
+  canRedo(): boolean {
+    return this.future.length > 0;
+  }
+
+  /** How many undone steps can be redone (at most MAX_UNDO). */
+  redoDepth(): number {
+    return this.future.length;
+  }
+
   // ---- Document edits & choices ----
 
   private applySemantic(update: (state: SemanticState) => SemanticState): void {
@@ -512,6 +558,7 @@ export class WorkbenchController {
     this.setState({ semantic: next });
   }
 
+  // An explicit alignment or direction change: the session list of invalidated alignments starts over (undo restores it).
   edit(next: Draft, message: NoticeState = ''): void {
     const before = this.state.draft;
     const { history } = this.pushUndo();
@@ -528,33 +575,64 @@ export class WorkbenchController {
       inFlight: false,
       draft: next,
       semantic: nextSemantic,
+      alignmentInvalidations: [],
       notice: message,
     });
   }
 
-  editText(side: 'source' | 'target', value: string): void {
+  /**
+   * One free edit of `side` as an edit transaction (contracts/workbench-state/edit-transactions.json): alignments outside the
+   * edit are kept or shifted, one holding it is resized, and only the entries it crosses or empties leave the list; an emptied
+   * target keeps its source anchor as `target: null`. Undo: a one-scalar edit on the same side within TYPING_COALESCE_MS joins
+   * the typing step, unless it invalidates or empties an alignment, which is a step of its own so one undo restores the entries.
+   * `composing`: an IME composition update. The first one opens the step, later ones join it, and alignments are judged against
+   * the text before the composition; the next edit of that side without `composing` (the composition end, even with the same
+   * text) closes it.
+   */
+  editText(side: 'source' | 'target', value: string, options: { composing?: boolean } = {}): void {
+    const composing = options.composing === true;
+    if (this.composition && this.composition.side !== side) this.composition = null;
+    const open = this.composition;
+    if (open && !composing && value === this.state.draft[side]) {
+      this.composition = null;
+      this.activeTypingTx = null;
+      return;
+    }
     const { draft, reports } = this.state;
     const latest = reports.at(-1) ?? null;
     const sourceDirtyForTranslation = side === 'source' ? Boolean(value.trim() && draft.target.trim()) : false;
     const before = this.state.draft;
+    const base = open ? open.base : before;
+    const baseInvalidations = open ? open.invalidations : this.state.alignmentInvalidations;
     const nextSource = side === 'source' ? value : draft.source;
     const nextTarget = side === 'target' ? value : draft.target;
-    const remapped = remapAlignmentsForFreeEdit(draft.alignments, side, draft.source, draft.target, nextSource, nextTarget);
-    const lostAlignments = alignmentsLost(draft.alignments, remapped);
-    const next: Draft = { ...draft, [side]: value, alignments: remapped };
-    const message = lostAlignments ? 'editedAlignments' : latest ? 'editedText' : '';
+    const remap = remapForFreeEdit(base.alignments, side, base.source, base.target, nextSource, nextTarget);
+    const next: Draft = { ...draft, [side]: value, alignments: remap.alignments };
+    const touched = remap.invalidated.length > 0 || remap.emptiedTargets.length > 0 || remap.fallbackAll;
+    const message = alignmentNotice(base.alignments, remap) ?? (latest ? 'editedText' : '');
     const now = this.clock.now();
     const splice = diffSplice(before[side], value);
     const deltaLen = splice ? Math.max(splice.oldEnd - splice.start, splice.newEnd - splice.start) : 0;
     const top = this.state.history.at(-1);
-    const canCoalesce = this.activeTypingTx !== null
-      && this.activeTypingTx.side === side
-      && now - this.activeTypingTx.at <= TYPING_COALESCE_MS
+    const typing = this.activeTypingTx;
+    const canCoalesce = !open && !composing && !touched
+      && typing !== null
+      && typing.side === side
+      && now - typing.at <= TYPING_COALESCE_MS
       && deltaLen <= 1
-      && this.state.history.length > 0
-      && !top?.replacedDocument;
-    const history = canCoalesce ? this.state.history : this.pushUndo().history;
-    this.activeTypingTx = deltaLen <= 1 ? { side, at: now } : null;
+      && top !== undefined
+      && top.serial === typing.serial
+      && !top.replacedDocument;
+    let history = this.state.history;
+    let serial = typing?.serial ?? 0;
+    if (!open && !canCoalesce) {
+      const pushed = this.pushUndo();
+      history = pushed.history;
+      serial = pushed.serial;
+    }
+    this.future = [];
+    this.composition = composing ? (open ?? { side, base: before, invalidations: baseInvalidations }) : null;
+    this.activeTypingTx = !composing && !open && !touched && deltaLen <= 1 ? { side, at: now, serial } : null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;
@@ -572,6 +650,7 @@ export class WorkbenchController {
       inFlight: false,
       draft: next,
       semantic: nextSemantic,
+      alignmentInvalidations: appendInvalidations(baseInvalidations, remap.invalidated),
       sourceDirtyForTranslation,
       notice: message,
     });
@@ -620,6 +699,7 @@ export class WorkbenchController {
     semantic: update,
     notice: code,
     remember: push = true,
+    invalidated,
     extraPatch,
   }: {
     draft?: Draft;
@@ -627,6 +707,8 @@ export class WorkbenchController {
     semantic?: (state: SemanticState) => SemanticState;
     notice?: string | null;
     remember?: boolean;
+    /** Alignments the draft's edit transaction invalidated, added to the session list. */
+    invalidated?: readonly InvalidatedAlignment[];
     extraPatch?: (nextSemantic: SemanticState, serial: number | null) => Partial<WorkbenchSnapshot>;
   }): number | null {
     const before = this.state;
@@ -647,6 +729,10 @@ export class WorkbenchController {
     let inFlight = before.inFlight;
 
     if (next && next !== before.draft) {
+      // Any other draft change ends typing coalescing and a composition, and makes the redo steps stale.
+      this.activeTypingTx = null;
+      this.composition = null;
+      this.future = [];
       if (push) {
         this.docAbort?.abort();
         this.docAbort = null;
@@ -669,6 +755,7 @@ export class WorkbenchController {
       history,
       draft: nextDraft,
       semantic: nextSemantic,
+      ...(invalidated && invalidated.length ? { alignmentInvalidations: appendInvalidations(before.alignmentInvalidations, invalidated) } : {}),
       sourceDirtyForTranslation,
       phase,
       translating,
@@ -775,23 +862,16 @@ export class WorkbenchController {
     }
 
     const appliedLen = applied === null ? 0 : chars(applied).length;
-    const nextDraft = nextTarget === null
+    const remap = nextTarget === null
+      ? null
+      : remapForSplice(startDraft.alignments, 'target', startDraft.source, nextTarget, spliceStart, spliceEnd, appliedLen);
+    const nextDraft = nextTarget === null || remap === null
       ? undefined
-      : {
-          ...startDraft,
-          target: nextTarget,
-          alignments: remapAlignmentsForTargetSplice(
-            startDraft.alignments,
-            startDraft.source,
-            nextTarget,
-            spliceStart,
-            spliceEnd,
-            appliedLen,
-          ),
-        };
+      : { ...startDraft, target: nextTarget, alignments: remap.alignments };
     let allHandled = false;
     const serial = this.commit({
       draft: nextDraft,
+      invalidated: remap?.invalidated,
       ...(nextTarget === null
         ? {}
         : {
@@ -873,19 +953,11 @@ export class WorkbenchController {
           return false;
         }
         if (out.target === undefined) return false;
+        const remap = remapForSplice(d.alignments, 'target', d.source, out.target, action.docTarget.start, action.docTarget.end,
+          chars(replacement).length);
         this.commit({
-          draft: {
-            ...d,
-            target: out.target,
-            alignments: remapAlignmentsForTargetSplice(
-              d.alignments,
-              d.source,
-              out.target,
-              action.docTarget.start,
-              action.docTarget.end,
-              chars(replacement).length,
-            ),
-          },
+          draft: { ...d, target: out.target, alignments: remap.alignments },
+          invalidated: remap.invalidated,
           splices: {
             target: {
               start: action.docTarget.start,
@@ -931,19 +1003,11 @@ export class WorkbenchController {
       if (out.error !== 'noop') this.commit({ semantic: x => x, notice: 'sem:longReviseInvalid', remember: false });
       return { applied: false, error: out.error };
     }
+    const remap = remapForSplice(d.alignments, 'target', d.source, out.target, item.range.target_start, item.range.target_end,
+      chars(nextText).length);
     this.commit({
-      draft: {
-        ...d,
-        target: out.target,
-        alignments: remapAlignmentsForTargetSplice(
-          d.alignments,
-          d.source,
-          out.target,
-          item.range.target_start,
-          item.range.target_end,
-          chars(nextText).length,
-        ),
-      },
+      draft: { ...d, target: out.target, alignments: remap.alignments },
+      invalidated: remap.invalidated,
       splices: {
         target: {
           start: item.range.target_start,
@@ -1136,17 +1200,9 @@ export class WorkbenchController {
   private commitTargetSplice(nextTarget: string, spliceStart: number, spliceEnd: number, replacementLength: number): void {
     const { draft, reports } = this.state;
     const latest = reports.at(-1) ?? null;
-    const remapped = remapAlignmentsForTargetSplice(
-      draft.alignments,
-      draft.source,
-      nextTarget,
-      spliceStart,
-      spliceEnd,
-      replacementLength,
-    );
-    const lostAlignments = alignmentsLost(draft.alignments, remapped);
-    const next: Draft = { ...draft, target: nextTarget, alignments: remapped };
-    const message = lostAlignments ? 'editedAlignments' : latest ? 'editedText' : '';
+    const remap = remapForSplice(draft.alignments, 'target', draft.source, nextTarget, spliceStart, spliceEnd, replacementLength);
+    const next: Draft = { ...draft, target: nextTarget, alignments: remap.alignments };
+    const message = alignmentNotice(draft.alignments, remap) ?? (latest ? 'editedText' : '');
     const { history } = this.pushUndo();
     this.docAbort?.abort();
     this.docAbort = null;
@@ -1167,6 +1223,7 @@ export class WorkbenchController {
       inFlight: false,
       draft: next,
       semantic: nextSemantic,
+      alignmentInvalidations: appendInvalidations(this.state.alignmentInvalidations, remap.invalidated),
       sourceDirtyForTranslation: false,
       notice: message,
     });
@@ -1211,42 +1268,85 @@ export class WorkbenchController {
     }
   }
 
+  /**
+   * Step back one transaction: the draft, choices, semantic state and the session list of invalidated alignments as they were
+   * before it, so every alignment it invalidated comes back. The state it leaves becomes a redo step.
+   */
   undo(): void {
     this.activeTypingTx = null;
-    const last = this.state.history.at(-1);
+    this.composition = null;
+    const last = this.state.history.at(-1) as UndoEntry | undefined;
     if (!last) return;
     const nextHistory = this.state.history.slice(0, -1);
     const notice = last.reports ? 'undoWithReports' : 'undoLocal';
     const clearLastSemantic = this.state.lastSemanticAction?.marker === last.serial;
     const cp = this.state.documentCheckpoint;
     const clearCheckpoint = !!(last.replacedDocument && cp && cp.entry.serial !== undefined && cp.entry.serial === last.serial);
+    const { draft, choices, imported, reports, semantic, alignmentInvalidations } = this.state;
+    const redoStep: UndoEntry = {
+      draft, choices, imported, semantic, serial: last.serial, invalidations: alignmentInvalidations,
+      ...(last.replacedDocument ? { reports, replacedDocument: true } : {}),
+      ...(clearCheckpoint && cp ? { checkpoint: cp } : {}),
+    };
+    this.future = [...this.future.slice(-(MAX_UNDO - 1)), redoStep];
     const basePatch: Partial<WorkbenchSnapshot> = {
       draft: last.draft,
       choices: last.choices,
       imported: last.imported,
       history: nextHistory,
+      alignmentInvalidations: invalidationsOf(last),
       sourceDirtyForTranslation: false,
       ...(clearCheckpoint ? { documentCheckpoint: null } : {}),
       ...(last.reports ? { reports: last.reports } : {}),
       ...(clearLastSemantic ? { lastSemanticAction: null } : {}),
       notice,
     };
-    if (last.replacedDocument) {
-      this.replaceDocumentState(basePatch, last.semantic);
-    } else {
-      this.docAbort?.abort();
-      this.docAbort = null;
-      this.docGeneration += 1;
-      this.setState({
-        ...basePatch,
-        phase: 'idle',
-        translating: false,
-        error: null,
-        generation: this.docGeneration,
-        inFlight: false,
-        semantic: last.semantic,
-      });
+    this.applyStep(basePatch, last);
+  }
+
+  /** Redo the last undone step; the state before it goes back on the undo history with the same serial. */
+  redo(): boolean {
+    this.activeTypingTx = null;
+    this.composition = null;
+    const step = this.future.at(-1);
+    if (!step) return false;
+    this.future = this.future.slice(0, -1);
+    const { draft, choices, imported, reports, semantic, history, alignmentInvalidations } = this.state;
+    const back: UndoEntry = {
+      draft, choices, imported, semantic, serial: step.serial, invalidations: alignmentInvalidations,
+      ...(step.replacedDocument ? { reports, replacedDocument: true } : {}),
+    };
+    this.applyStep({
+      draft: step.draft,
+      choices: step.choices,
+      imported: step.imported,
+      history: [...history.slice(-(MAX_UNDO - 1)), back],
+      alignmentInvalidations: invalidationsOf(step),
+      sourceDirtyForTranslation: false,
+      ...(step.reports ? { reports: step.reports } : {}),
+      ...(step.checkpoint ? { documentCheckpoint: { ...step.checkpoint, entry: back } } : {}),
+      notice: 'redoLocal',
+    }, step);
+    return true;
+  }
+
+  private applyStep(patch: Partial<WorkbenchSnapshot>, step: UndoEntry): void {
+    if (step.replacedDocument) {
+      this.replaceDocumentState(patch, step.semantic);
+      return;
     }
+    this.docAbort?.abort();
+    this.docAbort = null;
+    this.docGeneration += 1;
+    this.setState({
+      ...patch,
+      phase: 'idle',
+      translating: false,
+      error: null,
+      generation: this.docGeneration,
+      inFlight: false,
+      semantic: step.semantic,
+    });
   }
 
   restoreDocumentCheckpoint(): boolean {
@@ -1259,6 +1359,7 @@ export class WorkbenchController {
       choices: restored.choices,
       imported: restored.imported,
       ...(restored.reports ? { reports: restored.reports } : {}),
+      alignmentInvalidations: invalidationsOf(restored),
       history,
       documentCheckpoint: null,
       importedCanonical: null,
@@ -2246,6 +2347,7 @@ export class WorkbenchController {
       }
       let nextTarget = '';
       let nextAlignments: Draft['alignments'] = latest.alignments === null ? null : [];
+      let fillRemap: AlignmentRemap | null = null;
       let splices: DraftEditSplices | undefined;
       if (step.kind === 'blank') {
         const piece = slice(sc, step.segment.start, step.segment.core_start) + body.text + slice(sc, step.segment.core_end, step.segment.end);
@@ -2281,7 +2383,7 @@ export class WorkbenchController {
         const coreStart = insertAt + chars(lead).length;
         const coreEnd = coreStart + chars(body.text).length;
         const delta = chars(lead + body.text + trail).length;
-        nextAlignments = remapAlignmentsForTargetFill(
+        fillRemap = remapForTargetFill(
           latest.alignments,
           latest.source,
           nextTarget,
@@ -2292,6 +2394,7 @@ export class WorkbenchController {
           coreEnd,
           delta,
         );
+        nextAlignments = fillRemap.alignments;
         splices = {
           target: {
             start: scalarOffset(insertAt),
@@ -2303,12 +2406,13 @@ export class WorkbenchController {
       }
       plan.expectedTarget = nextTarget;
       const done = plan.pieces.filter(p => p !== undefined).length === plan.steps.length;
-      const lostAlignments = alignmentsLost(latest.alignments, nextAlignments);
+      const lostAlignments = fillRemap ? alignmentNotice(latest.alignments, fillRemap) : null;
       this.commit({
         draft: { ...latest, target: nextTarget, alignments: nextAlignments },
         ...(splices ? { splices } : {}),
+        ...(fillRemap ? { invalidated: fillRemap.invalidated } : {}),
         remember: false,
-        notice: lostAlignments ? 'editedAlignments' : done ? 'sem:translateRunDone' : null,
+        notice: lostAlignments ?? (done ? 'sem:translateRunDone' : null),
       });
       this.dispatchRun({ type: 'done', key: item.key });
     } catch {
@@ -2392,16 +2496,10 @@ export class WorkbenchController {
       if (isRetranslate) {
         const nextTarget = slice(tc, 0, region.core_start) + body.text + slice(tc, region.core_end, tc.length);
         const replacementLen = chars(body.text).length;
-        const nextAlignments = remapAlignmentsForTargetSplice(
-          latest.alignments,
-          latest.source,
-          nextTarget,
-          region.core_start,
-          region.core_end,
-          replacementLen,
-        );
+        const remap = remapForSplice(latest.alignments, 'target', latest.source, nextTarget, region.core_start, region.core_end, replacementLen);
         this.commit({
-          draft: { ...latest, target: nextTarget, alignments: nextAlignments },
+          draft: { ...latest, target: nextTarget, alignments: remap.alignments },
+          invalidated: remap.invalidated,
           splices: {
             target: {
               start: region.core_start,
@@ -2409,7 +2507,7 @@ export class WorkbenchController {
               newEnd: scalarOffset(region.core_start + replacementLen),
             },
           },
-          notice: alignmentsLost(latest.alignments, nextAlignments) ? 'editedAlignments' : 'sem:retranslated',
+          notice: alignmentNotice(latest.alignments, remap) ?? 'sem:retranslated',
         });
         return;
       }
@@ -2423,7 +2521,7 @@ export class WorkbenchController {
       const coreStart = insertAt + chars(lead).length;
       const coreEnd = coreStart + chars(body.text).length;
       const delta = chars(lead + body.text + trail).length;
-      const nextAlignments = remapAlignmentsForTargetFill(
+      const remap = remapForTargetFill(
         latest.alignments,
         latest.source,
         nextTarget,
@@ -2435,7 +2533,8 @@ export class WorkbenchController {
         delta,
       );
       this.commit({
-        draft: { ...latest, target: nextTarget, alignments: nextAlignments },
+        draft: { ...latest, target: nextTarget, alignments: remap.alignments },
+        invalidated: remap.invalidated,
         splices: {
           target: {
             start: scalarOffset(insertAt),
@@ -2443,7 +2542,7 @@ export class WorkbenchController {
             newEnd: scalarOffset(insertAt + delta),
           },
         },
-        notice: alignmentsLost(latest.alignments, nextAlignments) ? 'editedAlignments' : 'sem:translated',
+        notice: alignmentNotice(latest.alignments, remap) ?? 'sem:translated',
       });
     } catch {
       if (!this.disposed && this.documentEpoch === epoch && !abort.signal.aborted) {
