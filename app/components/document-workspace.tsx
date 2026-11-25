@@ -13,7 +13,8 @@ import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
 import { downloadFile } from '../../lib/download-file';
-import { isLong } from '../../lib/long-review';
+import { isAmbiguousMention, isLong } from '../../lib/long-review';
+import { judgedReport } from '../../lib/structure-layer';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
 import { semanticCounts } from '../../lib/semantic-state.js';
@@ -30,6 +31,7 @@ import { RequestId } from './request-feedback';
 import { RuntimeStatus } from './runtime-status';
 import { useUiLanguage } from './ui-language-context';
 import { SemanticWorkbench } from './semantic-workbench';
+import { StructureLayer, StyleLayer } from './review-layers';
 
 type RevisionIntent = {
   snapshot: Snapshot;
@@ -121,8 +123,10 @@ export function DocumentWorkspace() {
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
-  const visibleFindings = latest ? filterFindings(latest.report.findings, verdictFilter) : [];
-  const findingCounts = findingVerdictCounts(latest?.report.findings ?? []);
+  // Ambiguous one-character names (ambiguous-mention-v1) are listed apart, folded, and never counted with the judged findings.
+  const judged = useMemo(() => (latest ? judgedReport(latest.report) : null), [latest]);
+  const visibleFindings = judged ? filterFindings(judged.report.findings, verdictFilter) : [];
+  const findingCounts = findingVerdictCounts(judged?.report.findings ?? []);
   const activeFindingId = reconcileActiveId(canonicalFindingId, visibleFindings);
   if (activeFindingId !== null && activeFindingId !== canonicalFindingId) {
     setCanonicalFindingId(activeFindingId);
@@ -356,11 +360,12 @@ export function DocumentWorkspace() {
     downloadFile(out.filename, out.content, out.mimeType);
   }
 
-  const summaryParts = latest ? summarizeReviewParts(latest.report) : null;
+  const summaryParts = judged ? summarizeReviewParts(judged.report) : null;
   const comparisonGroups = ([['new', m.review.comparisonNew], ['resolved', m.review.comparisonResolved], ['pending', m.review.comparisonPending], ['incomparable', m.review.comparisonIncomparable]] as const)
     .map(([key, label]) => ({ key, label, items: comparison ? comparison[key] : [] }));
   const semanticSummary = semanticCounts(semantic) as { total: number; pending: number; handled: number; reconfirm: number; stale: number };
-  const termTotal = (latest?.report.findings.length ?? 0) + semantic.long.records.reduce((n, r) => n + (r.result?.findings.length ?? 0), 0);
+  const termTotal = (judged?.report.findings.length ?? 0)
+    + semantic.long.records.reduce((n, r) => n + (r.result?.findings.filter(f => !isAmbiguousMention(f)).length ?? 0), 0);
   const translatePrimary = !!source.trim() && !target.trim();
 
   const termTrack = (longTerms: ReactNode): ReactNode => <section className="term-track" aria-labelledby="term-track-title">
@@ -385,8 +390,8 @@ export function DocumentWorkspace() {
         <button type="button" className="secondary-button" disabled={activeVisibleIndex < 0 || activeVisibleIndex >= visibleFindings.length - 1} onClick={() => { const nextFinding = visibleFindings[activeVisibleIndex + 1]; if (nextFinding) setCanonicalFindingId(nextFinding.id); }}>{m.review.navNext}</button>
         <p className="finding-position">{fill(m.review.position, { i: activeVisibleIndex < 0 ? 0 : activeVisibleIndex + 1, n: visibleFindings.length })}</p>
       </div>
-      <div className="review-findings">{latest.report.findings.length === 0 && <p>{m.review.noFindings}</p>}
-        {visibleFindings.length === 0 && latest.report.findings.length > 0 && <p>{m.review.noFindingsFiltered}</p>}
+      <div className="review-findings">{judged!.report.findings.length === 0 && <p>{m.review.noFindings}</p>}
+        {visibleFindings.length === 0 && judged!.report.findings.length > 0 && <p>{m.review.noFindingsFiltered}</p>}
         {visibleFindings.map((finding: Finding) => {
           const active = finding.id === activeFindingId;
           const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
@@ -420,6 +425,25 @@ export function DocumentWorkspace() {
           </article>;
         })}
       </div>
+      {judged && judged.ambiguous.length > 0 && <details className="ambiguous-mentions" data-count={judged.ambiguous.length}>
+        <summary>{fill(sm.ambiguous.title, { n: judged.ambiguous.length })}</summary>
+        <p className="track-note">{sm.ambiguous.note}</p>
+        {judged.ambiguous.map((finding: Finding) => {
+          const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
+          return <article className="term-result ambiguous-mention" key={finding.id} data-mention-id={finding.id}>
+            <p className="result-summary"><span className="verdict-badge verdict-not_evaluated">{(m.review.verdicts as Record<string, string>).not_evaluated}</span> · {fill(sm.ambiguous.itemDocument, { text: finding.source_span.text, start: finding.source_span.start + 1, end: finding.source_span.end })}</p>
+            <div className="excerpt-labeled">
+              <span className="excerpt-tag">{m.review.excerptSourceLabel}</span>
+              <Excerpt text={source} span={sourceLocated ? finding.source_span : null} missing={fill(m.review.excerptMissingSource, { text: finding.source_span.text })} />
+            </div>
+            <div className="finding-actions">
+              {finding.candidates.map((candidate: Candidate) => <button key={candidate.candidate_id} className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{fill(sm.ambiguous.adopt, { zh: candidate.zh, en: candidate.en })}</button>)}
+              <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.choose(finding, null)}>{sm.ambiguous.ignore}</button>
+              <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo('source', finding.source_span)}>{m.review.jumpSource}</button>
+            </div>
+          </article>;
+        })}
+      </details>}
     </> : sourceLength > 2000 || targetLength > 2000 ? null : <p className="translation-placeholder">{m.review.placeholder}</p>}
     {longTerms}
   </section>;
@@ -617,6 +641,7 @@ export function DocumentWorkspace() {
             <button type="button" className="secondary-button" onClick={() => document.getElementById('term-track-title')?.scrollIntoView({ block: 'start' })}>{fill(sm.overviewTerms, { n: termTotal })}</button>
             <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
           </div>}
+          <StructureLayer doc={doc} snapshot={snapshot} lang={lang} pool={pool} locate={(side, span) => jumpTo(side, span)} />
           <SemanticWorkbench
             doc={doc}
             snapshot={snapshot}
@@ -625,6 +650,7 @@ export function DocumentWorkspace() {
             locate={(side, span) => jumpTo(side, span)}
             termTrack={termTrack}
           />
+          <StyleLayer lang={lang} />
         </div>}
       </div>
     </div>

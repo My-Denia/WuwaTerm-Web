@@ -36,13 +36,14 @@ export const busy = () => failure(429, 'shared_pool_busy', { retry_after_seconds
  *  matcherRevision: the review-v2 matcher_revision the term reviews return (rec.matcherRevision can change it later)
  *  reviewTruncated: (body, callNumber) => boolean; true marks that term review response truncated (Core's finding cap)
  *  reviewReport: (body, callNumber) => report | undefined   replaces the default term review answer
- * Returned recorder: semantic / translations / reviews (request bodies), maxInflight,
+ *  structure: (body, callNumber) => response body | undefined   the /api/structure-checks answer (default: no finding)
+ * Returned recorder: semantic / translations / reviews / structure (request bodies), maxInflight,
  * gate(n) -> {release} holding semantic call n open until released.
  */
 export async function installRoutes(page, options = {}) {
   const { capabilities = FULL, pool = {}, failures = {}, respond, delayMs = 0, translate, translateFailures = {}, translateHold = {}, reviewFailures = {}, reviewHold = {},
-    matcherRevision = FRESH_MATCHER_REVISION, reviewTruncated = () => false, reviewReport } = options;
-  const rec = { semantic: [], translations: [], reviews: [], reviewHeaders: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map(), matcherRevision };
+    matcherRevision = FRESH_MATCHER_REVISION, reviewTruncated = () => false, reviewReport, structure } = options;
+  const rec = { semantic: [], translations: [], reviews: [], reviewHeaders: [], structure: [], capabilityCalls: 0, inflight: 0, maxInflight: 0, gates: new Map(), matcherRevision };
   rec.gate = n => {
     let release;
     const held = new Promise(resolve => { release = resolve; });
@@ -84,6 +85,16 @@ export async function installRoutes(page, options = {}) {
       if (custom) return route.fulfill({ json: custom });
       const report = { ...freshApiReport(fixture(body.source, body.target, body.direction).report), matcher_revision: rec.matcherRevision };
       return route.fulfill({ json: reviewTruncated(body, n) ? { ...report, truncated: true } : report });
+    }
+    if (path === '/api/structure-checks') {
+      const body = route.request().postDataJSON();
+      rec.structure.push(body);
+      const custom = structure ? await structure(body, rec.structure.length) : undefined;
+      return route.fulfill({ json: custom ?? {
+        request_id: `synthetic-structure-${rec.structure.length}`, check_version: 'structure-check-v1', checks: ['empty_target', 'numbers', 'placeholders', 'paragraphs'],
+        segments: body.segments.map((segment, index) => ({ index, segment_id: segment.segment_id ?? null, findings: [], omitted_findings: 0,
+          layout: { source_paragraphs: 1, target_paragraphs: 1, source_lines: 1, target_lines: 1 } })),
+      } });
     }
     if (path === '/api/translations') {
       const body = route.request().postDataJSON();

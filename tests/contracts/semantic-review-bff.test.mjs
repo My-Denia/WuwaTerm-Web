@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { parseSemanticReviewRequest, proxySemanticReviewRequest } from '../../lib/wuwaterm-proxy.js';
 import { SEMANTIC_WIRE_KEYS } from '../../lib/semantic-review.js';
+import { STRUCTURE_RULES, STRUCTURE_CHECKS, STRUCTURE_WIRE_KEYS } from '../../lib/structure-check.js';
 import { createPool, fixtureEnvironment } from '../helpers/pool-fixture.mjs';
 import { requireBackendCheckout } from './backend-source.mjs';
 
@@ -64,8 +65,11 @@ test('the fixtures include the 56,651-byte max response and the byte-limit respo
 
 test('Web wire key sets equal Core OpenAPI schemas', { skip: !existsSync(join(root, 'docs/api/openapi.json')) && 'no OpenAPI snapshot in the pinned backend' }, () => {
   const schemas = JSON.parse(readFileSync(join(root, 'docs/api/openapi.json'), 'utf8')).components.schemas;
-  for (const [name, keys] of Object.entries(SEMANTIC_WIRE_KEYS)) {
+  for (const [name, keys] of Object.entries({ ...SEMANTIC_WIRE_KEYS, ...STRUCTURE_WIRE_KEYS })) {
     assert.ok(schemas[name], `${name} missing from Core OpenAPI`);
     assert.deepEqual([...keys].sort(), Object.keys(schemas[name].properties).sort(), name);
   }
+  // structure-check-v1: the rule ids and check names the BFF accepts are exactly the published enums.
+  assert.deepEqual([...STRUCTURE_RULES], schemas.StructureFindingBody.properties.rule_id.enum);
+  assert.deepEqual([...STRUCTURE_CHECKS], schemas.StructureCheckResponseBody.properties.checks.items.enum);
 });
