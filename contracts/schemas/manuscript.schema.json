@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wuwaterm.local/contracts/manuscript.schema.json",
-  "title": "WuwaTerm Manuscript Contract (v1–v4)",
+  "title": "WuwaTerm Manuscript Contract (v1–v5)",
   "oneOf": [
     { "$ref": "#/$defs/ManuscriptV1" },
     { "$ref": "#/$defs/ManuscriptV2" },
     { "$ref": "#/$defs/ManuscriptV3" },
-    { "$ref": "#/$defs/ManuscriptV4" }
+    { "$ref": "#/$defs/ManuscriptV4" },
+    { "$ref": "#/$defs/ManuscriptV5" }
   ],
   "$defs": {
     "Direction": {
@@ -79,7 +80,8 @@
         "wuwaterm-manuscript-v1",
         "wuwaterm-manuscript-v2",
         "wuwaterm-manuscript-v3",
-        "wuwaterm-manuscript-v4"
+        "wuwaterm-manuscript-v4",
+        "wuwaterm-manuscript-v5"
       ]
     },
     "Hex64": {
@@ -1014,6 +1016,621 @@
         "segments": { "type": "array", "maxItems": 512, "items": { "$ref": "#/$defs/SegmentRecordV4" } },
         "segment_choice_history": { "type": "array", "maxItems": 512, "items": { "$ref": "#/$defs/SegmentHistoryEntry" } },
         "progress": { "$ref": "#/$defs/Progress" }
+      }
+    },
+    "ReasonValueV5": {
+      "type": "string",
+      "enum": [
+        "not_a_term",
+        "ordinary_word",
+        "no_target_region",
+        "found_outside_region",
+        "ambiguous_repeat",
+        "ambiguous_mention"
+      ]
+    },
+    "ReviewFeature": {
+      "type": "string",
+      "enum": [
+        "ambiguous-mention-v1"
+      ]
+    },
+    "SegmentationVersionV5": {
+      "type": "string",
+      "enum": [
+        "segmentation-v1",
+        "segmentation-v1-gaps"
+      ]
+    },
+    "FindingV5": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "rule_id",
+            "verdict",
+            "source_span",
+            "target_span",
+            "candidates",
+            "candidates_truncated"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verdict": {
+              "$ref": "#/$defs/Verdict"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "target_span": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Span"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CandidateV2"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "rule_id",
+            "verdict",
+            "source_span",
+            "target_span",
+            "candidates",
+            "candidates_truncated",
+            "reason"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verdict": {
+              "const": "not_evaluated"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "target_span": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Span"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CandidateV2"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            },
+            "reason": {
+              "$ref": "#/$defs/ReasonValueV5"
+            }
+          }
+        }
+      ]
+    },
+    "ReportV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "source_revision",
+        "target_revision",
+        "rule_version",
+        "dictionary",
+        "coverage",
+        "findings",
+        "truncated"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "target_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "rule_version": {
+          "const": "review-v2"
+        },
+        "matcher_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "dictionary": {
+          "$ref": "#/$defs/DictionaryV2"
+        },
+        "coverage": {
+          "$ref": "#/$defs/ReviewCoverage"
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/FindingV5"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "HistorySnapshotV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target",
+        "direction",
+        "alignments",
+        "report"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "alignments": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/Alignment"
+              }
+            }
+          ]
+        },
+        "report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReportV1"
+            },
+            {
+              "$ref": "#/$defs/ReportV5"
+            }
+          ]
+        },
+        "resolutions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Resolution"
+          }
+        }
+      }
+    },
+    "CompactFindingV5": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verdict",
+            "source",
+            "target",
+            "candidates",
+            "candidates_truncated"
+          ],
+          "properties": {
+            "verdict": {
+              "$ref": "#/$defs/Verdict"
+            },
+            "source": {
+              "$ref": "#/$defs/CompactSpanTuple"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/CompactSpanTuple"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CompactCandidate"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verdict",
+            "source",
+            "target",
+            "candidates",
+            "candidates_truncated",
+            "reason"
+          ],
+          "properties": {
+            "verdict": {
+              "const": "not_evaluated"
+            },
+            "source": {
+              "$ref": "#/$defs/CompactSpanTuple"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/CompactSpanTuple"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CompactCandidate"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            },
+            "reason": {
+              "$ref": "#/$defs/ReasonValueV5"
+            }
+          }
+        }
+      ]
+    },
+    "CompactResultV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "truncated",
+        "evaluated",
+        "not_evaluated",
+        "findings"
+      ],
+      "properties": {
+        "truncated": {
+          "type": "boolean"
+        },
+        "evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/CompactFindingV5"
+          }
+        }
+      }
+    },
+    "SegmentRecordV5": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "segmentation_version",
+            "source_start",
+            "source_end",
+            "target_start",
+            "target_end",
+            "source_hash",
+            "target_hash",
+            "status",
+            "direction",
+            "alignment_input",
+            "basis",
+            "result",
+            "choices"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "segmentation_version": {
+              "$ref": "#/$defs/SegmentationVersionV5"
+            },
+            "source_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "target_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "status": {
+              "const": "pending"
+            },
+            "direction": {
+              "type": "null"
+            },
+            "alignment_input": {
+              "type": "null"
+            },
+            "basis": {
+              "type": "null"
+            },
+            "result": {
+              "type": "null"
+            },
+            "choices": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/PendingSegmentChoice"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "segmentation_version",
+            "source_start",
+            "source_end",
+            "target_start",
+            "target_end",
+            "source_hash",
+            "target_hash",
+            "status",
+            "direction",
+            "alignment_input",
+            "basis",
+            "result",
+            "choices"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "segmentation_version": {
+              "$ref": "#/$defs/SegmentationVersionV5"
+            },
+            "source_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "target_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "status": {
+              "enum": [
+                "done",
+                "stale"
+              ]
+            },
+            "direction": {
+              "$ref": "#/$defs/Direction"
+            },
+            "alignment_input": {
+              "oneOf": [
+                {
+                  "const": "automatic"
+                },
+                {
+                  "$ref": "#/$defs/Hex64"
+                }
+              ]
+            },
+            "basis": {
+              "$ref": "#/$defs/V3Basis"
+            },
+            "result": {
+              "$ref": "#/$defs/CompactResultV5"
+            },
+            "choices": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/SegmentChoice"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ManuscriptV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "source",
+        "target",
+        "direction",
+        "alignments",
+        "choices",
+        "history",
+        "semantic_decisions",
+        "semantic_texts",
+        "semantic_history",
+        "segments",
+        "segment_choice_history",
+        "progress",
+        "review_features"
+      ],
+      "properties": {
+        "format": {
+          "const": "wuwaterm-manuscript-v5"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "alignments": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/Alignment"
+              }
+            }
+          ]
+        },
+        "choices": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/DocumentChoice"
+          }
+        },
+        "history": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/HistorySnapshotV5"
+          }
+        },
+        "semantic_decisions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/SemanticDecision"
+          }
+        },
+        "semantic_texts": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/SemanticText"
+          }
+        },
+        "semantic_history": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/SemanticHistorySnapshot"
+          }
+        },
+        "segments": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/SegmentRecordV5"
+          }
+        },
+        "segment_choice_history": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/SegmentHistoryEntry"
+          }
+        },
+        "progress": {
+          "$ref": "#/$defs/Progress"
+        },
+        "review_features": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ReviewFeature"
+          }
+        }
       }
     }
   }

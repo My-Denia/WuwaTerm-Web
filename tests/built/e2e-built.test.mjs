@@ -147,6 +147,9 @@ test('built artifact routes capabilities and semantic review; an old service lis
   assert.deepEqual(await json(await server.fetch('/api/capabilities'), 200), { capabilities: [], request_id: null });
   const semantic = { source: '今汐', target: 'Jinhsi', direction: 'en', review_version: 'semantic-review-v1', explain_language: 'zh' };
   assert.equal((await json(await server.fetch('/api/semantic-reviews', post(semantic)), 503)).reason, 'semantic_review_unavailable');
+  const structure = { check_version: 'structure-check-v1', segments: [{ segment_id: 's0', source: '获得 3 个声骸。', target: 'Obtain Echoes.' }] };
+  assert.equal((await json(await server.fetch('/api/structure-checks', post(structure)), 503)).reason, 'structure_check_unavailable');
+  assert.equal((await json(await server.fetch('/api/structure-checks', post({ ...structure, extra: 1 })), 400)).reason, 'site_invalid_request');
   assert.equal(upstream.calls.every(call => call.path === '/wuwaterm-api/v1/capabilities'), true);
   assert.equal(await counters(db), null);
 });

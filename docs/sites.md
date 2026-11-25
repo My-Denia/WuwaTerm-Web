@@ -13,8 +13,8 @@ and there is no SLA.
 
 - **Repository fact:** This repository is a separately built Hosted / Cloudflare Worker
   BFF. The browser calls only same-origin `/api/pool`, `/api/terms`,
-  `/api/translations`, `/api/reviews`, `/api/capabilities`, `/api/semantic-reviews`
-  and the on-demand `/api/meta`; the server-side proxy holds the device credential and
+  `/api/translations`, `/api/reviews`, `/api/capabilities`, `/api/semantic-reviews`,
+  `/api/structure-checks` and the on-demand `/api/meta`; the server-side proxy holds the device credential and
   calls the published `/v1` contract. There is no visitor account system in
   this application code.
 - **Hosted platform control:** the hosting platform owns deployment versions,
@@ -39,7 +39,8 @@ and there is no SLA.
   promise.
 
 `/api/capabilities` reports which optional features the service lists
-(`semantic-review-v1`, `translation-context-v1`). The probe is not charged to
+(`ambiguous-mention-v1`, `semantic-review-v1`, `structure-check-v1`,
+`translation-context-v1`); any other name is dropped. The probe is not charged to
 the shared pool and its result is cached for a few minutes. An old service that
 answers 404 is treated as listing nothing. `/api/semantic-reviews` sends one
 paired segment to the service's model only when the service lists
@@ -49,6 +50,15 @@ the service does not list it, the Site answers 503 `semantic_review_unavailable`
 without charging anything. The public Site's Core does not list
 `semantic-review-v1` (the feature is experimental and off by default), so on the
 public Site this path is idle.
+
+`/api/structure-checks` forwards a Layer 1 deterministic structure check (Core
+`POST /v1/structure-checks`, `structure-check-v1`, Core ADR 0022) only when the
+service lists `structure-check-v1`; otherwise it answers 503
+`structure_check_unavailable` and charges nothing. Each call is charged as one review.
+The request is 1 to 64 paired segments of at most 2,000 characters per side and
+20,000 in all, at most 64 KiB; the answer, which can be larger than the 64 KiB every
+other endpoint allows, is read up to 256 KiB and validated against the request (spans,
+rule ids, segment ids and layout counts). No model is called and nothing is stored.
 
 Optional `/api/meta` is not requested when the page loads. In 「运行详情」,
 「查看词典版本」 asks once for the dictionary the running service reports: database schema
@@ -89,8 +99,10 @@ browser storage.
 The review workbench saves a user-initiated JSON file in the lowest manuscript
 format that holds the work: `wuwaterm-manuscript-v1`, `wuwaterm-manuscript-v2`
 once it holds semantic decisions or history, `wuwaterm-manuscript-v3` once it
-holds long-manuscript segment state (below), or `wuwaterm-manuscript-v4` once a
-list is over 32 items or a finding carries a `reason` (below). It reads all four.
+holds long-manuscript segment state (below), `wuwaterm-manuscript-v4` once a
+list is over 32 items or a finding carries a `reason` (below), or
+`wuwaterm-manuscript-v5` once it records results made with a review feature or
+gap-tolerant segment records (below). It reads all five.
 It contains source, target, direction, up to 32 occurrence-specific decisions (128
 in v4), their dictionary/rule/candidate basis, explicit scalar correspondences and
 the last two reports. Import is local and bounded to 1 MiB (44 MiB for v3 and v4);
@@ -116,7 +128,7 @@ dictionary; it takes no part in translation, term locking or review.
 
 The 2,000-character review request limit does not restrict manuscript storage:
 long translations can be saved and reopened intact within the file size cap
-(1 MiB for v1 and v2, 44 MiB for v3 and v4).
+(1 MiB for v1 and v2, 44 MiB for v3, v4 and v5).
 A manuscript with either side over 2,000 scalars is in long mode: it is paired
 into segments with `segmentation-v1` (Core's rules and fixtures; at most 1,800
 scalars per side) and checked one segment at a time. The user's term choices are
@@ -168,6 +180,38 @@ A manuscript that holds more than that, or a reason, is written as
 `wuwaterm-manuscript-v4` ([specification](../contracts/manuscript-v4/SPEC.md)); one
 that does not keeps v1, v2 or v3. Web 0.3.1 and Windows 0.5.1 reject v4 files with
 an explicit error and keep the manuscript they already have open.
+
+### Layered review and v5
+
+The manuscript review pane has three layers. Layer 1, deterministic structure checks,
+runs when the user starts it (`/api/structure-checks`, above): empty translations,
+numbers, placeholders and tags, and paragraph and line layout, segment by segment.
+Its findings are shown for the texts they were made for and dropped when a segment
+changes; they are never written to a manuscript file, an export or browser storage.
+Layer 2 is the experimental semantic review: high- and medium-confidence findings are
+listed, low-confidence ones are folded at the end, and an unhandled issue that a
+Layer 1 finding of its segment already describes (a missing number, placeholder or
+translation) is not raised again; the list says how many it left out. Layer 3 is a
+reserved place for style suggestions: off by default, it sends nothing.
+
+When the service lists `ambiguous-mention-v1`, every review-v2 request also asks for it
+(`X-WuwaTerm-Review-Features: dense-128,reason-v1,ambiguous-mention-v1`; the BFF
+refuses it without `reason-v1`, as Core does, and accepts an `ambiguous_mention`
+finding only on a request that asked for it). Core then reports a one-character
+resonator name it could not settle as `not_evaluated` with the reason
+`ambiguous_mention`. The workbench lists these after the judged findings, folded, and
+does not count them as conflicts or problems; the user adopts a candidate pair (the
+next check judges it) or ignores it as an ordinary word.
+
+A manuscript whose results were made with that feature saves as
+`wuwaterm-manuscript-v5` ([specification](../contracts/manuscript-v5/SPEC.md)), which
+records the feature in `review_features`, so a result is reused only under the same
+features. v5 also holds gap-tolerant segment records: when explicit alignments leave
+text outside every span (an edit invalidated one alignment of many), the aligned
+segments keep their results and only the gap becomes a segment that needs a manual
+split, instead of the whole manuscript. Web 0.4.5 and the Windows client pinned in
+`contracts/windows-ref.txt` reject v5 files with an explicit error and keep the
+manuscript they already have open.
 
 ### Term groups
 

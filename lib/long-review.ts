@@ -1,13 +1,14 @@
-// Long-manuscript term review runtime (contracts/manuscript-v3/SPEC.md, limits of contracts/manuscript-v4/SPEC.md): segment
+// Long-manuscript term review runtime (contracts/manuscript-v3/SPEC.md, limits of contracts/manuscript-v4/SPEC.md, review features
+// and gap-tolerant records of contracts/manuscript-v5/SPEC.md): segment
 // records, choices, choice history and progress; matching on import, re-check
 // planning, realignment, edit reconciliation and the writer's v3/v4 parts. Also the
 // per-term grouping of every segment's findings and the single-span edits the term
 // view offers. Pure and browser-safe (no fetch, no React). Offsets are Unicode scalar
 // indexes. The state is plain JSON data, so undo snapshots and structuredClone keep it.
-import { REASON_VALUES, mentionId } from './manuscript.js';
+import { REASON_AMBIGUOUS_MENTION, REASON_VALUES_V5, REVIEW_FEATURE_VALUES, mentionId } from './manuscript.js';
 import { scalarToUtf16 } from './review-report.js';
 import { diffSplice, mapRegion, shiftSpan } from './semantic-run.js';
-import { SEGMENT_LIMIT, SEGMENTATION_VERSION, guardPairForRequest, pairSegments } from './segmentation.ts';
+import { GAP_SEGMENTATION_VERSION, SEGMENT_LIMIT, SEGMENTATION_VERSION, guardPairForRequest, pairSegmentsWithGaps } from './segmentation.ts';
 import { sha256Hex } from './sha256.js';
 import type {
   Alignment, Basis, ChoiceKind, ChoiceView, Direction, Draft, DraftEditSplices, Pair,
@@ -31,7 +32,7 @@ export type CompactFinding = {
   target: [ScalarOffset, ScalarOffset] | null;
   candidates: Candidate[];
   candidates_truncated: boolean;
-  /** `reason` (one of REASON_VALUES) only on `not_evaluated`, and last: such a result is a v4 segment record. */
+  /** `reason` (one of REASON_VALUES_V5) only on `not_evaluated`, and last: a v4 record, or a v5 one for `ambiguous_mention`. */
   reason?: ReasonValue;
 };
 
@@ -70,11 +71,13 @@ export type Prior = {
  * The SPEC segment record plus:
  * - `report`, the full review-v2 response obtained in this session (null when restored);
  * - `sent`, the key of the resolutions sent with the request that produced `result` (null: unknown, so never current);
- * - `prior`, kept after an in-session target-only edit so the re-check is one request with resolutions.
+ * - `prior`, kept after an in-session target-only edit so the re-check is one request with resolutions;
+ * - `features`, the review features (REVIEW_FEATURE_VALUES) the request that produced `result` asked for, sorted; a record read
+ *   from a file has the file's `review_features`. A result is reused only under the same features (v5 SPEC "Review features").
  */
 export type RuntimeRecord = {
   index: SegmentIndex;
-  segmentation_version: typeof SEGMENTATION_VERSION | string;
+  segmentation_version: typeof SEGMENTATION_VERSION | typeof GAP_SEGMENTATION_VERSION | string;
   source_start: ScalarOffset;
   source_end: ScalarOffset;
   target_start: ScalarOffset;
@@ -90,6 +93,7 @@ export type RuntimeRecord = {
   report: ExpandedReport | null;
   sent: string | null;
   prior: Prior | null;
+  features: string[];
 };
 
 export type LongState = {
@@ -99,11 +103,14 @@ export type LongState = {
 };
 
 /**
- * `basis` is the session basis: null before the first live response, false when live responses carry no v3 basis.
+ * `basis` is the session basis: null before the first live response, false when live responses carry no v3 basis. `features` is
+ * the sorted review feature set (REVIEW_FEATURE_VALUES) the session asks for: null while the service capabilities are unknown, and
+ * an absent value means none.
  */
 export type Context = {
   draft: Draft;
   basis: SessionBasis;
+  features?: readonly string[] | null;
 };
 
 export type SegmentRequest = {
@@ -112,6 +119,8 @@ export type SegmentRequest = {
   alignmentInput: string;
   sentKey: string;
   withResolutions?: boolean;
+  /** The review features to ask for with this request; applyResult stores them with the result. */
+  features?: string[];
 };
 
 export type ExpandedFinding = {
@@ -218,9 +227,29 @@ const orderFinding = (f: CompactFinding): CompactFinding => ({
   candidates_truncated: f.candidates_truncated,
   ...(Object.hasOwn(f, 'reason') && f.reason !== undefined ? { reason: f.reason } : {}),
 });
-// `reason` is valid only on not_evaluated and only with a known value (REASON_VALUES); a finding without one has none.
+// `reason` is valid only on not_evaluated and only with a known value (REASON_VALUES_V5); a finding without one has none.
 const reasonHolds = (f: { verdict: string; reason?: unknown }): boolean =>
-  !Object.hasOwn(f, 'reason') || (f.verdict === 'not_evaluated' && typeof f.reason === 'string' && (REASON_VALUES as readonly string[]).includes(f.reason));
+  !Object.hasOwn(f, 'reason') || (f.verdict === 'not_evaluated' && typeof f.reason === 'string' && (REASON_VALUES_V5 as readonly string[]).includes(f.reason));
+
+// ---- review features ----
+
+/** The sorted, known review features of a list (REVIEW_FEATURE_VALUES); anything else is dropped. */
+export function reviewFeatureSet(list: readonly unknown[] | null | undefined): string[] {
+  return [...new Set((list ?? []).filter((x): x is string => typeof x === 'string' && (REVIEW_FEATURE_VALUES as readonly string[]).includes(x)))].sort();
+}
+const sameFeatures = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+/**
+ * The review features a session asks Core for, from the service capabilities: `ambiguous-mention-v1` when it is listed; null while
+ * the capabilities are unknown (v5 SPEC "Review features").
+ */
+export function sessionReviewFeatures(capabilities: readonly string[] | null | undefined): string[] | null {
+  if (capabilities === null || capabilities === undefined) return null;
+  return reviewFeatureSet(capabilities);
+}
+/** The session's features under `ctx`: null while unknown; an absent value is the empty set. */
+const sessionFeatures = (ctx: Pick<Context, 'features'>): readonly string[] | null => (ctx.features === undefined ? [] : ctx.features);
+/** A finding Core reported under ambiguous-mention-v1: an unsettled one-character name, judged only once the user resolves it. */
+export const isAmbiguousMention = (f: { reason?: unknown } | null | undefined): boolean => f?.reason === REASON_AMBIGUOUS_MENTION;
 const orderResult = (r: CompactResult): CompactResult => ({
   truncated: r.truncated,
   evaluated: r.evaluated,
@@ -236,15 +265,22 @@ export function isLong(draft: Pick<Draft, 'source' | 'target'>): boolean {
 }
 
 /**
- * The one pairing of records, requests and the writer (the workbench's safePairs): blank texts and a pairing that throws give [];
- * guardPairForRequest only downgrades a ready pair that could not be sent.
+ * The one pairing of records, requests and the writer (the workbench's safePairs) with its label: blank texts and a pairing that throws
+ * give []; guardPairForRequest only downgrades a ready pair that could not be sent. Explicit alignments that leave text uncovered
+ * pair with gap regions (GAP_SEGMENTATION_VERSION) instead of one whole-document manual pair.
  */
-export function corePairs({ source, target, alignments }: Pick<Draft, 'source' | 'target' | 'alignments'>): Pair[] {
-  if (!source.trim() && !target.trim()) return [];
+export function labelledPairs({ source, target, alignments }: Pick<Draft, 'source' | 'target' | 'alignments'>): { pairs: Pair[]; version: string } {
+  if (!source.trim() && !target.trim()) return { pairs: [], version: SEGMENTATION_VERSION };
   try {
     const explicit = alignments && alignments.length ? alignments : null;
-    return pairSegments(source, target, SEGMENT_LIMIT, explicit).map(p => guardPairForRequest(p));
-  } catch { return []; }
+    const { pairs, version } = pairSegmentsWithGaps(source, target, SEGMENT_LIMIT, explicit);
+    return { pairs: pairs.map(p => guardPairForRequest(p)), version };
+  } catch { return { pairs: [], version: SEGMENTATION_VERSION }; }
+}
+
+/** The pairs of labelledPairs. */
+export function corePairs(draft: Pick<Draft, 'source' | 'target' | 'alignments'>): Pair[] {
+  return labelledPairs(draft).pairs;
 }
 
 const HASH_CACHE_LIMIT = 4096;
@@ -321,19 +357,20 @@ export function alignmentInput(
   return list === null ? 'automatic' : sha256Hex(JSON.stringify(list));
 }
 
-const inputCache = new WeakMap<Draft, { long: boolean; items: SegmentInput[] }>();
+const inputCache = new WeakMap<Draft, { long: boolean; items: SegmentInput[]; version: string }>();
 
 /**
- * Per-pair inputs of a draft, cached per draft object (drafts are treated as immutable): `long`, and for each pair of corePairs
- * `{pair, range, sourceCore, targetCore, sourceHash, targetHash, alignments, alignmentInput}`, where `alignments` is the list a
- * request sends now (null: omitted) and `range` the core range in record field names.
+ * Per-pair inputs of a draft, cached per draft object (drafts are treated as immutable): `long`, the pairing label `version`, and for
+ * each pair of corePairs `{pair, range, sourceCore, targetCore, sourceHash, targetHash, alignments, alignmentInput}`, where
+ * `alignments` is the list a request sends now (null: omitted) and `range` the core range in record field names.
  */
-export function segmentInputs(draft: Draft): { long: boolean; items: SegmentInput[] } {
+export function segmentInputs(draft: Draft): { long: boolean; items: SegmentInput[]; version: string } {
   const cached = inputCache.get(draft);
   if (cached) return cached;
   const s = scalars(draft.source);
   const t = scalars(draft.target);
-  const items: SegmentInput[] = corePairs(draft).map(pair => {
+  const labelled = labelledPairs(draft);
+  const items: SegmentInput[] = labelled.pairs.map(pair => {
     const range: SegmentRange = {
       source_start: pair.source.core_start,
       source_end: pair.source.core_end,
@@ -354,7 +391,7 @@ export function segmentInputs(draft: Draft): { long: boolean; items: SegmentInpu
       alignmentInput: alignments === null ? 'automatic' : contentHash(JSON.stringify(alignments)),
     };
   });
-  const value = { long: isLong(draft), items };
+  const value = { long: isLong(draft), items, version: labelled.version };
   inputCache.set(draft, value);
   return value;
 }
@@ -504,6 +541,7 @@ const BLANK = {
   result: null,
   report: null,
   sent: null,
+  features: [] as string[],
 };
 
 function pendingRecord(index: number, item: SegmentInput, choices: Choice[] = []): RuntimeRecord {
@@ -525,10 +563,12 @@ function reusable(record: RuntimeRecord, item: SegmentInput, draft: Draft): bool
     && record.direction === draft.direction && record.alignment_input === item.alignmentInput && record.sent === choiceKey(record.choices);
 }
 
+// A reusable result is `saved` while the session basis or the session features are unknown, `current` when both match, else stale.
 function stateOf(record: RuntimeRecord, item: SegmentInput, ctx: Context): 'pending' | 'saved' | 'current' | 'stale' {
   if (!record.result) return 'pending';
-  if (reusable(record, item, ctx.draft)) {
-    if (ctx.basis === null) return 'saved';
+  const features = sessionFeatures(ctx);
+  if (reusable(record, item, ctx.draft) && (features === null || sameFeatures(record.features ?? [], features))) {
+    if (ctx.basis === null || features === null) return 'saved';
     if (sameV3Basis(record.basis, ctx.basis)) return 'current';
   }
   return 'stale';
@@ -686,7 +726,9 @@ export function longFromWorkfile(parsed: {
   segments?: readonly RuntimeRecord[];
   segment_choice_history?: readonly HistoryEntry[];
   progress?: { current: number | null; completed: number[] };
+  review_features?: readonly string[];
 }): LongState {
+  const fileFeatures = reviewFeatureSet(parsed.review_features);
   const draft: Draft = { source: parsed.source, target: parsed.target, direction: parsed.direction, alignments: parsed.alignments };
   const saved = (parsed.segments ?? []) as RuntimeRecord[];
   const history = (parsed.segment_choice_history ?? []).map(e => historyEntry(e, e.source_hash));
@@ -716,6 +758,7 @@ export function longFromWorkfile(parsed: {
       basis: orderBasis(old.basis as Basis),
       result: orderResult(old.result as CompactResult),
       sent: old.status === 'done' ? choiceKey(old.choices) : null,
+      features: [...fileFeatures],
     };
   });
   const used = new Set(owner);
@@ -929,6 +972,7 @@ export function segmentRequest(
     alignmentInput: item.alignmentInput,
     sentKey: JSON.stringify(resolutions),
     withResolutions: withResolutions && isBasis(basis),
+    features: [...(sessionFeatures(ctx) ?? [])],
   };
 }
 
@@ -977,7 +1021,8 @@ export function applyResult(
   if (!basis) return out('no_basis');
   const result = compactResult(repObj);
   if (!result) return out('not_storable');
-  if (stateOf(record, item, { draft: ctx.draft, basis }) === 'current') return out(null);
+  const features = reviewFeatureSet(request.features);
+  if (stateOf(record, item, { draft: ctx.draft, basis, features }) === 'current') return out(null);
   // Step 6, first bullet: a re-check planned with resolutions never confirms a choice that was not, even when none was confirmed.
   // Only the request without resolutions realigns by step 7.
   const withResolutions = request.withResolutions ?? request.sentKey !== EMPTY_KEY;
@@ -993,6 +1038,7 @@ export function applyResult(
     report: repObj as ExpandedReport,
     sent: request.sentKey,
     prior: null,
+    features,
   };
   return out(null, withRecord(long, index, next), choiceKey(choices) !== request.sentKey);
 }
@@ -1125,10 +1171,10 @@ export function setFinished(long: LongState, index: number, finished: boolean): 
 
 // ---- writing and export ----
 
-function writeRecord(record: RuntimeRecord | null, item: SegmentInput, index: number, ctx: Context) {
+function writeRecord(record: RuntimeRecord | null, item: SegmentInput, index: number, ctx: Context, version: string) {
   const head = {
     index: segmentIndex(index),
-    segmentation_version: SEGMENTATION_VERSION,
+    segmentation_version: version,
     ...item.range,
     source_hash: item.sourceHash,
     target_hash: item.targetHash,
@@ -1140,9 +1186,11 @@ function writeRecord(record: RuntimeRecord | null, item: SegmentInput, index: nu
     return { ...head, status: 'pending' as const, direction: null, alignment_input: null, basis: null, result: null, choices: choices.map(c => orderChoice(unconfirm(c))) };
   }
   // Basis null: no live response yet, the stored status stands. A live response without a v3 basis (false) fails closed: stale.
+  // Features are not compared with the session's here: the record carries its own, the writer records them in review_features
+  // (and writes stale a done record whose features differ from the file's), and a reader compares them with its own session.
   const done = record.status === 'done' && record.alignment_input === item.alignmentInput && record.sent === choiceKey(choices)
     && (ctx.basis === null || (isBasis(ctx.basis) && sameV3Basis(record.basis, ctx.basis)));
-  return {
+  const written = {
     ...head,
     status: (done ? 'done' : 'stale') as 'done' | 'stale',
     direction: record.direction,
@@ -1151,6 +1199,10 @@ function writeRecord(record: RuntimeRecord | null, item: SegmentInput, index: nu
     result: orderResult(record.result),
     choices: choices.map(orderChoice),
   };
+  // Runtime only and not enumerable, so the record keeps the SPEC key set: the manuscript writer reads it to set the file's
+  // review_features (lib/manuscript.js withFileFeatures).
+  Object.defineProperty(written, 'features', { value: [...(record.features ?? [])], enumerable: false });
+  return written;
 }
 
 /**
@@ -1162,12 +1214,12 @@ function writeRecord(record: RuntimeRecord | null, item: SegmentInput, index: nu
  */
 export function workfileParts(long: LongState, draft: Draft, ctx: { basis: SessionBasis }) {
   const history = long.history.map(e => historyEntry(e, e.source_hash));
-  const { long: isLongMode, items } = segmentInputs(draft);
+  const { long: isLongMode, items, version } = segmentInputs(draft);
   if (!isLongMode) return { segments: [], segment_choice_history: history, progress: { current: null, completed: [] } };
   if (long.records.length !== items.length && long.records.length > 0) {
     throw Object.assign(new Error('long-mode records do not match the segments'), { code: 'long_state_out_of_sync' });
   }
-  const segments = items.map((item, i) => writeRecord(long.records[i] ?? null, item, i, { ...ctx, draft }));
+  const segments = items.map((item, i) => writeRecord(long.records[i] ?? null, item, i, { ...ctx, draft }, version));
   const current = long.progress.current !== null && segments[long.progress.current] ? long.progress.current : null;
   const completed = [...new Set(long.progress.completed)].filter(i => segments[i] && segments[i].status !== 'pending').sort((a, b) => a - b);
   return { segments, segment_choice_history: history, progress: { current, completed } };
@@ -1333,6 +1385,23 @@ export function termSegments(long: LongState, ctx: Context): TermSegment[] {
       choices: view ? view.choices : record.choices,
     }];
   });
+}
+
+/**
+ * termSegments split for the term view: `judged` keeps every finding but the ambiguous one-character names (`ambiguous_mention`),
+ * which go to `ambiguous` on their own. Those are not evaluated and not a problem until the user resolves them, so they stay out of
+ * the term groups and their counts and are listed after them.
+ */
+export function splitAmbiguousSegments(segments: readonly TermSegment[]): { judged: TermSegment[]; ambiguous: TermSegment[] } {
+  const judged: TermSegment[] = [];
+  const ambiguous: TermSegment[] = [];
+  for (const segment of segments) {
+    const findings = segment.report.findings;
+    const held = findings.filter(isAmbiguousMention);
+    judged.push(held.length ? { ...segment, report: { ...segment.report, findings: findings.filter(f => !isAmbiguousMention(f)) } } : segment);
+    if (held.length) ambiguous.push({ ...segment, report: { ...segment.report, findings: held } });
+  }
+  return { judged, ambiguous };
 }
 
 /**

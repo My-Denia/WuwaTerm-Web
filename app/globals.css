@@ -197,8 +197,31 @@ footer div { display:flex; gap:20px; }
 
 /* Semantic review workbench (W2): two tracks, segment navigation, split helper. */
 .issue-overview { display:flex; flex-wrap:wrap; gap:8px; margin:22px 0 4px; }
-.term-track,.semantic-track,.segment-panel,.long-tools { margin-top:22px; padding-top:16px; border-top:1px solid var(--line); }
-.term-track > h3,.semantic-track h3,.segment-panel h3 { font-size:17px; margin:0 0 6px; }
+.term-track,.semantic-track,.segment-panel,.long-tools,.layer-panel { margin-top:22px; padding-top:16px; border-top:1px solid var(--line); }
+.term-track > h3,.semantic-track h3,.segment-panel h3,.layer-panel h3 { font-size:17px; margin:0 0 6px; }
+/* Layered review: layer 1 structure checks, the layer 2 kicker and folds, the reserved layer 3, ambiguous single characters. */
+.manuscript-review-pane > .layer-panel:first-child { margin-top:0; padding-top:0; border-top:0; }
+.layer-kicker { margin:0 0 4px; font-size:11px; font-weight:700; letter-spacing:1px; color:var(--accent); }
+.layer-note { color:var(--muted); font-size:13px; line-height:1.7; margin:0 0 10px; }
+.layer-overview { align-items:center; }
+.overview-note { display:inline-flex; align-items:center; min-height:40px; padding:0 4px; font-size:12px; color:var(--muted); }
+.structure-status p { margin:6px 0; font-size:13px; line-height:1.7; }
+.structure-segment { border-top:1px solid var(--line); padding:10px 0; }
+.structure-segment .result-summary { margin:0 0 6px; overflow-wrap:anywhere; }
+.structure-layout { color:var(--caution-text); }
+.structure-findings { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.structure-finding { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; font-size:13px; line-height:1.6; min-width:0; }
+.structure-finding .review-excerpt { flex:1 1 220px; min-width:0; overflow-wrap:anywhere; }
+.structure-finding .text-button { min-height:32px; }
+.rule-badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; background:var(--caution-bg); color:var(--caution-text); border:1px solid var(--caution-line); }
+.rule-badge[data-rule="empty_target"],.rule-badge[data-rule^="number_"] { background:var(--bad-bg); color:var(--bad-text); border-color:var(--bad-line); }
+.low-confidence-toggle { display:block; margin:6px 0 0; }
+.layer-covered { color:var(--text-strong); }
+.layer-style[data-on="false"] .track-note { color:var(--subtle); }
+.ambiguous-mentions { margin:14px 0 0; padding:10px 12px; border:1px dashed var(--neutral-line); border-radius:8px; background:var(--neutral-bg); }
+.ambiguous-mentions > summary { cursor:pointer; font-size:13px; font-weight:600; color:var(--neutral-text); min-height:32px; display:flex; align-items:center; }
+.ambiguous-mentions[open] > summary { margin-bottom:6px; }
+.ambiguous-mention .result-summary { margin:6px 0; overflow-wrap:anywhere; }
 .track-note { color:var(--muted); font-size:13px; line-height:1.7; margin:0 0 10px; }
 .long-tools p,.run-estimate,.run-phase { color:var(--muted); font-size:13px; line-height:1.7; }
 .run-phase { color:var(--text); }
@@ -266,7 +289,7 @@ footer div { display:flex; gap:20px; }
   .compare-columns { grid-template-columns:1fr; }
   .semantic-list { position:fixed; left:0; right:0; bottom:0; z-index:20; max-height:12dvh; overflow:hidden; background:var(--surface); border-top:1px solid var(--line); padding:8px 16px; box-shadow:0 -6px 18px var(--shadow); }
   .semantic-list.open { max-height:70dvh; overflow-y:auto; }
-  .semantic-list:not(.open) .semantic-filters,.semantic-list:not(.open) .semantic-items,.semantic-list:not(.open) > p { display:none; }
+  .semantic-list:not(.open) .semantic-filters,.semantic-list:not(.open) .semantic-items,.semantic-list:not(.open) > p,.semantic-list:not(.open) .low-confidence-toggle { display:none; }
   .drawer-toggle { display:block; width:100%; }
   .semantic-items { max-height:none; }
   .document-workspace[data-mode="manuscript"] { padding-bottom:72px; }

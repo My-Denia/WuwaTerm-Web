@@ -13,9 +13,12 @@ two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
 Current pins: `contracts/backend-ref.txt` is
+`089973fe24a0e0affbecadd6da472cffb7f222fb` (Core `main` after `v0.13.0`: PR #325, the
+`ambiguous-mention-v1` review-v2 feature and `wuwaterm-cjk-matcher-v11`, and PR #326,
+`POST /v1/structure-checks` with `structure-check-v1`, ADR 0022), raised from
 `e5b7f1a84d04deb5795296b1a652e13c4e9fd1a8` (Core `v0.13.0`: automatic translation direction by
 Latin-to-CJK ratio, user prose kept verbatim, `wuwaterm-cjk-matcher-v10` and the
-`wuwaterm.structural_checks` module), raised from
+`wuwaterm.structural_checks` module), which was raised from
 `6fb4d8a44b26f170a7b1c8e23f00f75b2bbfd2b8` (Core `v0.12.0`: `OperationExecutionBudget`, pure
 ASGI `TimeoutMiddleware`, bounded `RequestTrace`/`RuntimeMetrics`, and `wuwaterm.text_spans`),
 which was raised from `9a4f680f3ec3909e23afc2394f2c7eccf00af6e3` (Core PR #279: the MY-355
@@ -40,7 +43,15 @@ code, the explicit-alignments fixture gets the same alignment input digests, and
 manuscript with choices, a target-only edit and progress, built by each client's own
 runtime, gives the same v3 bytes and is kept unchanged by the other. The v4 cases carry no
 transitional expectation: the pinned consumer reads, writes and rejects the same files as
-the Web, in both directions.
+the Web, in both directions. The pinned consumer predates `contracts/manuscript-v5/`: it
+refuses every v5 file with the code Web 0.4.5 gives (`legacy_error`), and reads and writes
+the lower-format files a v5 writer writes back exactly as the Web does.
+
+The structure-check and ambiguous-mention contracts also run against the live Core: a
+review sent with `ambiguous-mention-v1` returns the unsettled name last and unjudged, an
+`official_pair` resolution of it is judged by Core and a `not_a_term` one keeps its
+candidates, and a `/api/structure-checks` batch built by the workbench passes the real
+parser and BFF and is validated against the request.
 
 The dense review contract runs against a live Core checkout, not a recorded body: the
 contract suite starts that checkout's own application object on a loopback socket and sends a

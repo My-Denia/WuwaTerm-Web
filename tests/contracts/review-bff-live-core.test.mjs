@@ -5,9 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { REASON_VALUES } from '../../lib/manuscript.js';
+import { REASON_VALUES, REPORT_V4, REPORT_V5, validReport } from '../../lib/manuscript.js';
+import { compactResult } from '../../lib/long-review.ts';
 import { createNodeEnvironment } from '../../lib/runtime/node.js';
-import { parseReviewRequest, proxyReviewRequest } from '../../lib/wuwaterm-proxy.js';
+import { structurePlan } from '../../lib/structure-layer.ts';
+import {
+  parseReviewRequest, parseStructureCheckRequest, proxyCapabilitiesRequest, proxyReviewRequest, proxyStructureCheckRequest,
+} from '../../lib/wuwaterm-proxy.js';
 import { requireBackendRoot } from './backend-source.mjs';
 
 // The two review-v2 features the workbench asks for, end to end against the Core checkout under
@@ -21,6 +25,8 @@ import { requireBackendRoot } from './backend-source.mjs';
 // accepts, and the page and reasons the BFF's strict validator then accepts from that Core.
 
 const FEATURES = 'dense-128,reason-v1';
+// What the workbench sends when the service lists ambiguous-mention-v1 (lib/workbench-transport.ts reviewFeatureHeader).
+const AMBIGUOUS_FEATURES = 'dense-128,reason-v1,ambiguous-mention-v1';
 // lib/wuwaterm-proxy.js: /api/reviews alone allows 65,536 bytes, and every other site endpoint keeps 32,768.
 const MAX_REVIEW_REQUEST_BYTES = 65_536;
 const OTHER_ENDPOINT_LIMIT = 32_768;
@@ -103,6 +109,8 @@ before(async () => {
     WUWATERM_API_BASE_URL: baseUrl,
     WUWATERM_SITE_DEVICE_TOKEN: token,
     WUWATERM_LOCAL_DB_PATH: join(workdir, 'pool.sqlite3'),
+    // These cases test the protocol, not the pool: the default six upstream calls a minute would make the later ones wait.
+    WUWATERM_LOCAL_LIMIT_UPSTREAM_PER_MINUTE: '60',
   });
 });
 
@@ -262,4 +270,91 @@ test('a review body above 32 KiB and within 64 KiB carries 128 dense resolutions
   assert.ok(dense.body.findings.some((finding) => REASON_VALUES.includes(finding.reason)));
   assert.ok(dense.body.findings.every((finding) => (finding.verdict === 'not_evaluated')
     === Object.hasOwn(finding, 'reason')));
+});
+
+test('ambiguous-mention-v1 reaches the live Core: the unsettled name arrives last and unjudged, and only a resolution judges it', async () => {
+  // Core's own enumeration case with a wrong translation of 椿: Changli instead of Camellya.
+  const input = { source: '今汐、椿姐、守岸人一起出发。', target: 'Jinhsi, Changli and the Shorekeeper set out.', direction: 'en', review_version: 'review-v2' };
+  const first = await reviewThroughBff(input, AMBIGUOUS_FEATURES);
+  assert.equal(first.response.status, 200, JSON.stringify(first.body));
+  assert.deepEqual(forwardedFeatures(first.forwarded), [AMBIGUOUS_FEATURES]);
+  assert.equal(first.response.headers.get('x-wuwaterm-review-features'), AMBIGUOUS_FEATURES);
+  const ambiguous = first.body.findings.filter((finding) => finding.reason === 'ambiguous_mention');
+  assert.equal(ambiguous.length, 1, JSON.stringify(first.body.findings));
+  const [finding] = ambiguous;
+  assert.equal(first.body.findings.at(-1), finding, 'Core sorts it after every judged finding');
+  assert.equal(finding.verdict, 'not_evaluated');
+  assert.equal(finding.source_span.text, '椿');
+  assert.equal(finding.target_span, null);
+  assert.match(finding.candidates[0].candidate_id, /^[0-9a-f]{64}$/u);
+  // The Web reads it only under the v5 limits, and the long-mode runtime can store it.
+  assert.equal(validReport(first.body, input.source, input.target, REPORT_V5), true);
+  assert.equal(validReport(first.body, input.source, input.target, REPORT_V4), false);
+  assert.notEqual(compactResult(first.body), null);
+
+  const context = {
+    source_revision: first.body.source_revision, rule_version: 'review-v2',
+    dictionary_revision: first.body.dictionary.revision, matcher_revision: first.body.matcher_revision,
+  };
+  const adopted = await reviewThroughBff({
+    ...input,
+    resolutions: [{ mention_id: finding.id, choice: 'official_pair', candidate_id: finding.candidates[0].candidate_id }],
+    resolution_context: context,
+  }, AMBIGUOUS_FEATURES);
+  assert.equal(adopted.response.status, 200, JSON.stringify(adopted.body));
+  const judged = adopted.body.findings.find((item) => item.id === finding.id);
+  assert.equal(judged.verdict, 'confirmed_conflict', 'Camellya was adopted and the translation says Changli');
+  assert.equal(Object.hasOwn(judged, 'reason'), false);
+
+  const ignored = await reviewThroughBff({ ...input, resolutions: [{ mention_id: finding.id, choice: 'not_a_term' }], resolution_context: context }, AMBIGUOUS_FEATURES);
+  assert.equal(ignored.response.status, 200, JSON.stringify(ignored.body));
+  const ordinary = ignored.body.findings.find((item) => item.id === finding.id);
+  assert.deepEqual([ordinary.verdict, ordinary.reason], ['not_evaluated', 'not_a_term']);
+  // The candidate set is the one the ambiguous finding offered, so a not_a_term choice stays confirmed after the re-check.
+  assert.deepEqual(ordinary.candidates.map((c) => c.candidate_id).sort(), finding.candidates.map((c) => c.candidate_id).sort());
+
+  // Without the feature the same review has no ambiguous finding.
+  const plain = await reviewThroughBff(input, FEATURES);
+  assert.equal(plain.response.status, 200);
+  assert.equal(plain.body.findings.some((item) => item.reason === 'ambiguous_mention'), false);
+  // Asking for it without reason-v1 never reaches Core.
+  const alone = await parseReviewRequest(new Request('https://web.example.test/api/reviews', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'X-WuwaTerm-Review-Features': 'ambiguous-mention-v1' }, body: JSON.stringify(input),
+  }));
+  assert.equal(alone.ok, false);
+});
+
+test('structure-check-v1 reaches the live Core through the BFF: listed in capabilities, batched by the workbench, validated strictly', async () => {
+  const capabilities = await (await proxyCapabilitiesRequest({ environment })).json();
+  assert.ok(capabilities.capabilities.includes('structure-check-v1'), JSON.stringify(capabilities));
+  assert.ok(capabilities.capabilities.includes('ambiguous-mention-v1'), JSON.stringify(capabilities));
+  const draft = {
+    source: '获得 3 个声骸，然后前往{0}。\n\n<color=Highlight>今汐</color>来了。\n\n这段还没有翻译。',
+    target: 'Obtain Echoes, then go there.\n\n<color=Highlight>Jinhsi</color> arrives.\n\n',
+    direction: 'en', alignments: null,
+  };
+  const { batches, items } = structurePlan(draft);
+  assert.equal(batches.length, 1);
+  const parsed = await parseStructureCheckRequest(new Request('https://web.example.test/api/structure-checks', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(batches[0]),
+  }));
+  assert.equal(parsed.ok, true);
+  await pace();
+  let forwarded = null;
+  const response = await proxyStructureCheckRequest({
+    environment, input: parsed.input,
+    fetchImpl: async (url, init) => { if (String(url).endsWith('/v1/structure-checks')) forwarded = String(url); return await fetch(url, init); },
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.ok(forwarded, 'the BFF did not call the live Core');
+  assert.equal(body.segments.length, items.length);
+  const rules = body.segments.map((segment) => segment.findings.map((finding) => finding.rule_id));
+  const all = rules.flat();
+  assert.ok(all.includes('number_missing'), JSON.stringify(rules));
+  assert.ok(all.includes('placeholder_missing'), JSON.stringify(rules));
+  // Three source paragraphs, two in the translation: segmentation-v1 pairs the whole text once, and Core reports the layout.
+  assert.ok(all.includes('paragraph_count_mismatch'), JSON.stringify(rules));
+  const number = body.segments.flatMap((segment) => segment.findings).find((finding) => finding.rule_id === 'number_missing');
+  assert.equal(number.source_span.text, '3');
 });

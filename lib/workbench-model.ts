@@ -1,7 +1,7 @@
 import type {
   ChoiceKind,
   Direction,
-  ReasonValue,
+  ReasonValueV5,
   RecordStatus,
   SemanticCategory,
   SemanticConfidence,
@@ -22,10 +22,11 @@ export const scalarOffset = (value: number): ScalarOffset => value as ScalarOffs
 export const utf16Offset = (value: number): Utf16Offset => value as Utf16Offset;
 export const segmentIndex = (value: number): SegmentIndex => value as SegmentIndex;
 
+/** Every reason the runtime handles: the v4 five and `ambiguous_mention`; a file label decides which of them it may hold. */
+export type ReasonValue = ReasonValueV5;
 export type {
   ChoiceKind,
   Direction,
-  ReasonValue,
   RecordStatus,
   SemanticCategory,
   SemanticConfidence,
@@ -109,7 +110,7 @@ export type LongState = import('./long-review.ts').LongState;
 export type SegmentRange = { source_start: ScalarOffset; source_end: ScalarOffset; target_start: ScalarOffset; target_end: ScalarOffset };
 export type SegmentInput = { pair: Pair; range: SegmentRange; sourceCore: string; targetCore: string; sourceHash: string; targetHash: string; alignments: Alignment[] | null; alignmentInput: string };
 export type RecordView = { state: RecordState; ready: boolean; needsCheck: boolean; finished: boolean; choices: (import('./long-review.ts').Choice & { view: ChoiceView })[] };
-export type LongCtx = { draft: Draft; basis: SessionBasis };
+export type LongCtx = { draft: Draft; basis: SessionBasis; features?: readonly string[] | null };
 export type Decision = {
   issue_id: string; fingerprint: string; category: SemanticCategory; segment_index: SegmentIndex; source_revision: string; target_revision: string;
   source_span: Span | null; target_span: Span | null; decision: SemanticDecisionKind; applied_text: string | null;

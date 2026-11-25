@@ -145,5 +145,5 @@ test('review UI imports the report module and does not insert manuscripts as HTM
   assert.match(zhCatalog, /rowReviewCeiling: '\{n\} 次 \/ UTC 日'/u);
   assert.match(component, /fill\(m\.review\.charCounts/u);
   assert.match(zhCatalog, /charCounts: '原文 \{s\} \/ 2,000 · 译文 \{t\} \/ 2,000'/u);
-  assert.match(controller, /validReport\(value, source, target, REPORT_V4\)/u);
+  assert.match(controller, /validReport\(value, source, target, features\.includes\(REVIEW_FEATURE_AMBIGUOUS_MENTION\) \? REPORT_V5 : REPORT_V4\)/u);
 });

@@ -10,6 +10,7 @@ import {
   WORKFILE_FORMAT_V2,
   WORKFILE_FORMAT_V3,
   WORKFILE_FORMAT_V4,
+  WORKFILE_FORMAT_V5,
 } from '../lib/manuscript.js';
 import {
   SEMANTIC_CATEGORIES,
@@ -61,7 +62,7 @@ test('generated contract enum constants match runtime module exports 1:1', () =>
   assert.deepEqual([...TERM_EFFECT_VALUES], [...TERM_EFFECTS]);
   assert.deepEqual([...SUGGESTION_WITHHELD_REASON_VALUES], [...WITHHELD_REASONS]);
   assert.deepEqual([...TRUNCATED_REASON_VALUES], [...TRUNCATED_REASONS]);
-  assert.deepEqual([...WORKFILE_FORMAT_VALUES], [WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4]);
+  assert.deepEqual([...WORKFILE_FORMAT_VALUES], [WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4, WORKFILE_FORMAT_V5]);
 });
 
 test('manuscript JSON Schema accepts 100% of committed valid v1–v4 fixtures', () => {

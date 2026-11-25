@@ -1,0 +1,211 @@
+{
+  "format": "wuwaterm-manuscript-v5",
+  "spec": "SPEC.md",
+  "schema": "schema.json",
+  "codes": [
+    "workfile_not_json",
+    "workfile_too_large",
+    "workfile_too_deep",
+    "workfile_too_many_entries",
+    "workfile_too_many_fields",
+    "workfile_forbidden_field",
+    "workfile_unsupported_format",
+    "workfile_invalid_content",
+    "workfile_duplicate_choices",
+    "workfile_segment_invalid",
+    "workfile_segment_order",
+    "workfile_segment_anchor_invalid",
+    "workfile_progress_invalid"
+  ],
+  "limits": {
+    "file_bytes": 46137344,
+    "legacy_file_bytes": 1048576,
+    "findings_per_result": 128,
+    "choices_per_record": 128,
+    "choices": 128,
+    "review_features": 8
+  },
+  "reasons": [
+    "not_a_term",
+    "ordinary_word",
+    "no_target_region",
+    "found_outside_region",
+    "ambiguous_repeat",
+    "ambiguous_mention"
+  ],
+  "review_features": [
+    "ambiguous-mention-v1"
+  ],
+  "segmentation_versions": [
+    "segmentation-v1",
+    "segmentation-v1-gaps"
+  ],
+  "valid": [
+    {
+      "file": "valid-v5-document-ambiguous.json",
+      "canonical": "valid-v5-document-ambiguous.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "document mode: a review-v2 report sent with ambiguous-mention-v1 (two judged names, then one ambiguous_mention finding) and an adopted candidate that waits for the next check; review_features [\"ambiguous-mention-v1\"]"
+    },
+    {
+      "file": "valid-v5-document-ambiguous.json",
+      "pad_to_bytes": 1048577,
+      "canonical": "valid-v5-document-ambiguous.json",
+      "legacy_error": "workfile_too_large",
+      "note": "the same v5 file padded with spaces to 1 MiB plus one byte: a v5 reader accepts it (44 MiB cap); an older reader stops at its 1 MiB check"
+    },
+    {
+      "file": "valid-v5-segments-ambiguous.json",
+      "canonical": "valid-v5-segments-ambiguous.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "long mode, three segments: done with an ambiguous_mention finding after two judged ones; stale with an unconfirmed adoption of the ambiguous candidate; pending"
+    },
+    {
+      "file": "valid-v5-features-without-ambiguous.json",
+      "canonical": "valid-v5-features-without-ambiguous.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "long mode: results made with ambiguous-mention-v1 that found no ambiguous name. Only review_features keeps them reusable under that feature, so the file stays v5"
+    },
+    {
+      "file": "valid-v5-gaps.json",
+      "canonical": "valid-v5-gaps.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "long mode with explicit alignments that leave the middle paragraph uncovered: both aligned paragraphs keep their done records, the gap is a pending needs_manual_split record; every record says segmentation-v1-gaps; review_features []"
+    },
+    {
+      "file": "valid-v5-fits-v4.json",
+      "canonical": "valid-v4-from-v5.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a v5 file with no review feature and no gap-tolerant record, with a v4 reason: written back as v4 (valid-v4-from-v5.json)"
+    },
+    {
+      "file": "valid-v4-from-v5.json",
+      "canonical": "valid-v4-from-v5.json",
+      "legacy_error": null,
+      "note": "the v4 bytes of valid-v5-fits-v4.json"
+    },
+    {
+      "file": "valid-v5-fits-v1.json",
+      "canonical": "valid-v1-from-v5.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a v5 file with no segment state, no review feature and nothing over the v1-v3 limits: written back as v1 (valid-v1-from-v5.json)"
+    },
+    {
+      "file": "valid-v1-from-v5.json",
+      "canonical": "valid-v1-from-v5.json",
+      "legacy_error": null,
+      "note": "the v1 bytes of valid-v5-fits-v1.json"
+    },
+    {
+      "file": "valid-v5-features-without-results.json",
+      "canonical": "valid-v3-from-v5.json",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a v5 file that lists ambiguous-mention-v1 but holds no result made under it: no result needs the list, so a writer writes it back as v3 (valid-v3-from-v5.json)"
+    },
+    {
+      "file": "valid-v3-from-v5.json",
+      "canonical": "valid-v3-from-v5.json",
+      "legacy_error": null,
+      "note": "the v3 bytes of valid-v5-features-without-results.json"
+    }
+  ],
+  "invalid": [
+    {
+      "file": "invalid-v5-missing-review-features.json",
+      "error": "workfile_unsupported_format",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "the v5 label with the 13 v4 keys: v5 has 14 top-level keys"
+    },
+    {
+      "file": "invalid-v5-feature-unknown.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "review_features lists a token that is not a recorded review feature (dense-128 changes the page size, not what a result holds)"
+    },
+    {
+      "file": "invalid-v5-feature-repeated.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "review_features repeats a token"
+    },
+    {
+      "file": "invalid-v5-feature-null.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "review_features is null"
+    },
+    {
+      "file": "invalid-v5-ambiguous-without-feature-document.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a history finding with the ambiguous_mention reason in a file that does not record ambiguous-mention-v1"
+    },
+    {
+      "file": "invalid-v5-ambiguous-without-feature-segment.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a record finding with the ambiguous_mention reason in a file that does not record ambiguous-mention-v1"
+    },
+    {
+      "file": "invalid-v5-reason-unknown.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a record finding whose reason is not one of the six"
+    },
+    {
+      "file": "invalid-v5-ambiguous-on-verified.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a verified history finding with a reason: a reason belongs to not_evaluated only"
+    },
+    {
+      "file": "invalid-v5-segmentation-unknown.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "a record with a segmentation label that is neither segmentation-v1 nor segmentation-v1-gaps"
+    },
+    {
+      "file": "invalid-v5-segmentation-mixed.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "records with two segmentation labels: one manuscript has one pairing"
+    },
+    {
+      "file": "invalid-v5-v4-format-ambiguous-document.json",
+      "error": "workfile_invalid_content",
+      "legacy_error": "workfile_invalid_content",
+      "note": "the v4 label with a history finding whose reason is ambiguous_mention: the v4 reasons are the five"
+    },
+    {
+      "file": "invalid-v5-v4-format-ambiguous-segment.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_segment_invalid",
+      "note": "the v4 label with a record finding whose reason is ambiguous_mention"
+    },
+    {
+      "file": "invalid-v5-v4-format-gaps.json",
+      "error": "workfile_segment_invalid",
+      "legacy_error": "workfile_segment_invalid",
+      "note": "the v4 label with segmentation-v1-gaps records"
+    },
+    {
+      "file": "invalid-v5-v4-format-review-features.json",
+      "error": "workfile_unsupported_format",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "the v4 label with the 14 v5 keys"
+    },
+    {
+      "file": "invalid-v5-format-v6.json",
+      "error": "workfile_unsupported_format",
+      "legacy_error": "workfile_unsupported_format",
+      "note": "an unknown format version falls through to the v2 reader"
+    },
+    {
+      "file": "valid-v5-document-ambiguous.json",
+      "pad_to_bytes": 46137345,
+      "error": "workfile_too_large",
+      "legacy_error": "workfile_too_large",
+      "note": "a v5 file one byte over 44 MiB (46,137,345 bytes)"
+    }
+  ]
+}

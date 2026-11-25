@@ -1,0 +1,2024 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wuwaterm.local/contracts/manuscript-v5/schema.json",
+  "title": "WuwaTerm Manuscript Contract v5 (generated from contracts/schemas/manuscript.schema.json)",
+  "$ref": "#/$defs/ManuscriptV5",
+  "$defs": {
+    "Direction": {
+      "type": "string",
+      "enum": [
+        "en",
+        "zh"
+      ]
+    },
+    "Verdict": {
+      "type": "string",
+      "enum": [
+        "verified_constraint",
+        "confirmed_conflict",
+        "needs_review",
+        "not_evaluated"
+      ]
+    },
+    "SemanticCategory": {
+      "type": "string",
+      "enum": [
+        "omission",
+        "unsupported_addition",
+        "meaning_shift",
+        "negation_change",
+        "quantity_change",
+        "reference_inconsistency",
+        "term_sense"
+      ]
+    },
+    "SemanticOrigin": {
+      "type": "string",
+      "enum": [
+        "model"
+      ]
+    },
+    "SemanticConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "TermEffect": {
+      "type": "string",
+      "enum": [
+        "none",
+        "alters_official_match",
+        "introduces_official_form",
+        "not_checked"
+      ]
+    },
+    "SuggestionWithheldReason": {
+      "type": "string",
+      "enum": [
+        "span_too_long",
+        "replacement_too_long"
+      ]
+    },
+    "TruncatedReason": {
+      "type": "string",
+      "enum": [
+        "issue_limit",
+        "byte_limit"
+      ]
+    },
+    "SemanticResponseStatus": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "not_reviewed"
+      ]
+    },
+    "Hex64": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "Hex32": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    },
+    "Span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CompactSpanTuple": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "integer",
+          "minimum": 1
+        }
+      ],
+      "items": false
+    },
+    "Alignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/Span"
+        },
+        "target": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Span"
+            }
+          ]
+        }
+      }
+    },
+    "CandidateSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_file",
+        "source_id"
+      ],
+      "properties": {
+        "source_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CompactCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "zh",
+        "en",
+        "category"
+      ],
+      "properties": {
+        "candidate_id": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CandidateV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zh",
+        "en",
+        "category",
+        "sources"
+      ],
+      "properties": {
+        "zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/CandidateSource"
+          }
+        }
+      }
+    },
+    "CandidateV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zh",
+        "en",
+        "category",
+        "sources",
+        "candidate_id"
+      ],
+      "properties": {
+        "candidate_id": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "zh": {
+          "type": "string",
+          "minLength": 1
+        },
+        "en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/CandidateSource"
+          }
+        }
+      }
+    },
+    "DictionaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "source_commit",
+        "term_count"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "term_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "DictionaryV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "source_commit",
+        "term_count",
+        "revision"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "term_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "$ref": "#/$defs/Hex64"
+        }
+      }
+    },
+    "StrictDictionaryV3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "source_commit",
+        "term_count",
+        "revision"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "term_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "$ref": "#/$defs/Hex64"
+        }
+      }
+    },
+    "ReviewCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evaluated",
+        "not_evaluated",
+        "rules"
+      ],
+      "properties": {
+        "evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rules": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "FindingV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "rule_id",
+        "verdict",
+        "source_span",
+        "target_span",
+        "candidates",
+        "candidates_truncated"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        },
+        "source_span": {
+          "$ref": "#/$defs/Span"
+        },
+        "target_span": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Span"
+            }
+          ]
+        },
+        "candidates": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/CandidateV1"
+          }
+        },
+        "candidates_truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ReportV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "source_revision",
+        "target_revision",
+        "rule_version",
+        "dictionary",
+        "coverage",
+        "findings",
+        "truncated"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "target_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "rule_version": {
+          "const": "review-v1"
+        },
+        "matcher_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "dictionary": {
+          "$ref": "#/$defs/DictionaryV1"
+        },
+        "coverage": {
+          "$ref": "#/$defs/ReviewCoverage"
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/FindingV1"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ChoiceBasis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_version",
+        "dictionary"
+      ],
+      "properties": {
+        "rule_version": {
+          "const": "review-v2"
+        },
+        "dictionary": {
+          "$ref": "#/$defs/DictionaryV2"
+        },
+        "matcher_revision": {
+          "$ref": "#/$defs/Hex64"
+        }
+      }
+    },
+    "DocumentChoice": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "direction",
+            "source_span",
+            "scope",
+            "choice",
+            "candidate",
+            "basis"
+          ],
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "direction": {
+              "$ref": "#/$defs/Direction"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "choice": {
+              "const": "not_a_term"
+            },
+            "candidate": {
+              "type": "null"
+            },
+            "basis": {
+              "$ref": "#/$defs/ChoiceBasis"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "direction",
+            "source_span",
+            "scope",
+            "choice",
+            "candidate",
+            "basis"
+          ],
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "direction": {
+              "$ref": "#/$defs/Direction"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "choice": {
+              "const": "official_pair"
+            },
+            "candidate": {
+              "$ref": "#/$defs/CompactCandidate"
+            },
+            "basis": {
+              "$ref": "#/$defs/ChoiceBasis"
+            }
+          }
+        }
+      ]
+    },
+    "Resolution": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mention_id",
+            "choice"
+          ],
+          "properties": {
+            "mention_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "choice": {
+              "const": "not_a_term"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mention_id",
+            "choice",
+            "candidate_id"
+          ],
+          "properties": {
+            "mention_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "choice": {
+              "const": "official_pair"
+            },
+            "candidate_id": {
+              "$ref": "#/$defs/Hex64"
+            }
+          }
+        }
+      ]
+    },
+    "SemanticTermBasis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dictionary_revision",
+        "matcher_revision"
+      ],
+      "properties": {
+        "dictionary_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "matcher_revision": {
+          "$ref": "#/$defs/Hex64"
+        }
+      }
+    },
+    "SemanticDecisionBasis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_version",
+        "term_basis"
+      ],
+      "properties": {
+        "review_version": {
+          "const": "semantic-review-v1"
+        },
+        "term_basis": {
+          "$ref": "#/$defs/SemanticTermBasis"
+        }
+      }
+    },
+    "SemanticDecision": {
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "source_span"
+              ],
+              "properties": {
+                "source_span": {
+                  "$ref": "#/$defs/Span"
+                }
+              }
+            },
+            {
+              "required": [
+                "target_span"
+              ],
+              "properties": {
+                "target_span": {
+                  "$ref": "#/$defs/Span"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "issue_id",
+                "fingerprint",
+                "category",
+                "segment_index",
+                "source_revision",
+                "target_revision",
+                "source_span",
+                "target_span",
+                "decision",
+                "applied_text",
+                "basis"
+              ],
+              "properties": {
+                "issue_id": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "fingerprint": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "category": {
+                  "$ref": "#/$defs/SemanticCategory"
+                },
+                "segment_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "source_revision": {
+                  "$ref": "#/$defs/Hex64"
+                },
+                "target_revision": {
+                  "$ref": "#/$defs/Hex64"
+                },
+                "source_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "target_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "decision": {
+                  "const": "ignored"
+                },
+                "applied_text": {
+                  "type": "null"
+                },
+                "basis": {
+                  "$ref": "#/$defs/SemanticDecisionBasis"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "issue_id",
+                "fingerprint",
+                "category",
+                "segment_index",
+                "source_revision",
+                "target_revision",
+                "source_span",
+                "target_span",
+                "decision",
+                "applied_text",
+                "basis"
+              ],
+              "properties": {
+                "issue_id": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "fingerprint": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "category": {
+                  "$ref": "#/$defs/SemanticCategory"
+                },
+                "segment_index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "source_revision": {
+                  "$ref": "#/$defs/Hex64"
+                },
+                "target_revision": {
+                  "$ref": "#/$defs/Hex64"
+                },
+                "source_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "target_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "decision": {
+                  "enum": [
+                    "accepted",
+                    "adjusted"
+                  ]
+                },
+                "applied_text": {
+                  "type": "string"
+                },
+                "basis": {
+                  "$ref": "#/$defs/SemanticDecisionBasis"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "SemanticText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "text"
+      ],
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "SemanticSuggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_span",
+        "replacement",
+        "term_effect"
+      ],
+      "properties": {
+        "target_span": {
+          "$ref": "#/$defs/Span"
+        },
+        "replacement": {
+          "type": "string"
+        },
+        "term_effect": {
+          "$ref": "#/$defs/TermEffect"
+        }
+      }
+    },
+    "SemanticAlternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replacement",
+        "term_effect"
+      ],
+      "properties": {
+        "replacement": {
+          "type": "string"
+        },
+        "term_effect": {
+          "$ref": "#/$defs/TermEffect"
+        }
+      }
+    },
+    "SemanticIssue": {
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": [
+                "source_span"
+              ],
+              "properties": {
+                "source_span": {
+                  "$ref": "#/$defs/Span"
+                }
+              }
+            },
+            {
+              "required": [
+                "target_span"
+              ],
+              "properties": {
+                "target_span": {
+                  "$ref": "#/$defs/Span"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "fingerprint",
+                "category",
+                "origin",
+                "confidence",
+                "source_span",
+                "target_span",
+                "source_excerpt",
+                "target_excerpt",
+                "rationale",
+                "suggestion",
+                "suggestion_withheld",
+                "alternatives"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "fingerprint": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "category": {
+                  "$ref": "#/$defs/SemanticCategory"
+                },
+                "origin": {
+                  "$ref": "#/$defs/SemanticOrigin"
+                },
+                "confidence": {
+                  "$ref": "#/$defs/SemanticConfidence"
+                },
+                "source_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "target_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "source_excerpt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "target_excerpt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rationale": {
+                  "type": "string"
+                },
+                "suggestion": {
+                  "type": "null"
+                },
+                "suggestion_withheld": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/SuggestionWithheldReason"
+                    }
+                  ]
+                },
+                "alternatives": {
+                  "type": "array",
+                  "maxItems": 0,
+                  "items": {
+                    "$ref": "#/$defs/SemanticAlternative"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "fingerprint",
+                "category",
+                "origin",
+                "confidence",
+                "source_span",
+                "target_span",
+                "source_excerpt",
+                "target_excerpt",
+                "rationale",
+                "suggestion",
+                "suggestion_withheld",
+                "alternatives"
+              ],
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "fingerprint": {
+                  "$ref": "#/$defs/Hex32"
+                },
+                "category": {
+                  "$ref": "#/$defs/SemanticCategory"
+                },
+                "origin": {
+                  "$ref": "#/$defs/SemanticOrigin"
+                },
+                "confidence": {
+                  "$ref": "#/$defs/SemanticConfidence"
+                },
+                "source_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "target_span": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Span"
+                    }
+                  ]
+                },
+                "source_excerpt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "target_excerpt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "rationale": {
+                  "type": "string"
+                },
+                "suggestion": {
+                  "$ref": "#/$defs/SemanticSuggestion"
+                },
+                "suggestion_withheld": {
+                  "type": "null"
+                },
+                "alternatives": {
+                  "type": "array",
+                  "maxItems": 1,
+                  "items": {
+                    "$ref": "#/$defs/SemanticAlternative"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "SemanticReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "review_version",
+        "source_revision",
+        "target_revision",
+        "term_basis",
+        "status",
+        "status_reason",
+        "dropped_unanchored",
+        "checked",
+        "issues",
+        "truncated",
+        "truncated_reason",
+        "omitted_issues"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review_version": {
+          "const": "semantic-review-v1"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "target_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "term_basis": {
+          "$ref": "#/$defs/SemanticTermBasis"
+        },
+        "status": {
+          "$ref": "#/$defs/SemanticResponseStatus"
+        },
+        "status_reason": {
+          "enum": [
+            null,
+            "invalid_model_output"
+          ]
+        },
+        "dropped_unanchored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checked": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/SemanticCategory"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/SemanticIssue"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "truncated_reason": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/TruncatedReason"
+            }
+          ]
+        },
+        "omitted_issues": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SemanticHistorySegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_index",
+        "source_start",
+        "source_end",
+        "target_start",
+        "target_end",
+        "report"
+      ],
+      "properties": {
+        "segment_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_end": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "report": {
+          "$ref": "#/$defs/SemanticReport"
+        }
+      }
+    },
+    "SemanticHistorySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target",
+        "direction",
+        "segments"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "segments": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/SemanticHistorySegment"
+          }
+        }
+      }
+    },
+    "V3Basis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_version",
+        "dictionary",
+        "matcher_revision"
+      ],
+      "properties": {
+        "rule_version": {
+          "const": "review-v2"
+        },
+        "dictionary": {
+          "$ref": "#/$defs/StrictDictionaryV3"
+        },
+        "matcher_revision": {
+          "$ref": "#/$defs/Hex64"
+        }
+      }
+    },
+    "SegmentChoice": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_span",
+            "choice",
+            "candidate",
+            "offered",
+            "confirmed"
+          ],
+          "properties": {
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "choice": {
+              "const": "official_pair"
+            },
+            "candidate": {
+              "$ref": "#/$defs/CompactCandidate"
+            },
+            "offered": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "$ref": "#/$defs/Hex64"
+              }
+            },
+            "confirmed": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_span",
+            "choice",
+            "candidate",
+            "offered",
+            "confirmed"
+          ],
+          "properties": {
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "choice": {
+              "const": "not_a_term"
+            },
+            "candidate": {
+              "type": "null"
+            },
+            "offered": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/Hex64"
+              }
+            },
+            "confirmed": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "PendingSegmentChoice": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/SegmentChoice"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "confirmed": {
+              "const": false
+            }
+          }
+        }
+      ]
+    },
+    "SegmentHistoryEntry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_hash",
+            "source_span",
+            "choice",
+            "candidate",
+            "offered"
+          ],
+          "properties": {
+            "source_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "choice": {
+              "const": "official_pair"
+            },
+            "candidate": {
+              "$ref": "#/$defs/CompactCandidate"
+            },
+            "offered": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "$ref": "#/$defs/Hex64"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_hash",
+            "source_span",
+            "choice",
+            "candidate",
+            "offered"
+          ],
+          "properties": {
+            "source_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "choice": {
+              "const": "not_a_term"
+            },
+            "candidate": {
+              "type": "null"
+            },
+            "offered": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/Hex64"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "completed"
+      ],
+      "properties": {
+        "current": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "completed": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "ReasonValueV5": {
+      "type": "string",
+      "enum": [
+        "not_a_term",
+        "ordinary_word",
+        "no_target_region",
+        "found_outside_region",
+        "ambiguous_repeat",
+        "ambiguous_mention"
+      ]
+    },
+    "ReviewFeature": {
+      "type": "string",
+      "enum": [
+        "ambiguous-mention-v1"
+      ]
+    },
+    "SegmentationVersionV5": {
+      "type": "string",
+      "enum": [
+        "segmentation-v1",
+        "segmentation-v1-gaps"
+      ]
+    },
+    "FindingV5": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "rule_id",
+            "verdict",
+            "source_span",
+            "target_span",
+            "candidates",
+            "candidates_truncated"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verdict": {
+              "$ref": "#/$defs/Verdict"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "target_span": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Span"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CandidateV2"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "rule_id",
+            "verdict",
+            "source_span",
+            "target_span",
+            "candidates",
+            "candidates_truncated",
+            "reason"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verdict": {
+              "const": "not_evaluated"
+            },
+            "source_span": {
+              "$ref": "#/$defs/Span"
+            },
+            "target_span": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Span"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CandidateV2"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            },
+            "reason": {
+              "$ref": "#/$defs/ReasonValueV5"
+            }
+          }
+        }
+      ]
+    },
+    "ReportV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "source_revision",
+        "target_revision",
+        "rule_version",
+        "dictionary",
+        "coverage",
+        "findings",
+        "truncated"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "target_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "rule_version": {
+          "const": "review-v2"
+        },
+        "matcher_revision": {
+          "$ref": "#/$defs/Hex64"
+        },
+        "dictionary": {
+          "$ref": "#/$defs/DictionaryV2"
+        },
+        "coverage": {
+          "$ref": "#/$defs/ReviewCoverage"
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/FindingV5"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "HistorySnapshotV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "target",
+        "direction",
+        "alignments",
+        "report"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "alignments": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/Alignment"
+              }
+            }
+          ]
+        },
+        "report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReportV1"
+            },
+            {
+              "$ref": "#/$defs/ReportV5"
+            }
+          ]
+        },
+        "resolutions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/Resolution"
+          }
+        }
+      }
+    },
+    "CompactFindingV5": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verdict",
+            "source",
+            "target",
+            "candidates",
+            "candidates_truncated"
+          ],
+          "properties": {
+            "verdict": {
+              "$ref": "#/$defs/Verdict"
+            },
+            "source": {
+              "$ref": "#/$defs/CompactSpanTuple"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/CompactSpanTuple"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CompactCandidate"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verdict",
+            "source",
+            "target",
+            "candidates",
+            "candidates_truncated",
+            "reason"
+          ],
+          "properties": {
+            "verdict": {
+              "const": "not_evaluated"
+            },
+            "source": {
+              "$ref": "#/$defs/CompactSpanTuple"
+            },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/CompactSpanTuple"
+                }
+              ]
+            },
+            "candidates": {
+              "type": "array",
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/CompactCandidate"
+              }
+            },
+            "candidates_truncated": {
+              "type": "boolean"
+            },
+            "reason": {
+              "$ref": "#/$defs/ReasonValueV5"
+            }
+          }
+        }
+      ]
+    },
+    "CompactResultV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "truncated",
+        "evaluated",
+        "not_evaluated",
+        "findings"
+      ],
+      "properties": {
+        "truncated": {
+          "type": "boolean"
+        },
+        "evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/CompactFindingV5"
+          }
+        }
+      }
+    },
+    "SegmentRecordV5": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "segmentation_version",
+            "source_start",
+            "source_end",
+            "target_start",
+            "target_end",
+            "source_hash",
+            "target_hash",
+            "status",
+            "direction",
+            "alignment_input",
+            "basis",
+            "result",
+            "choices"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "segmentation_version": {
+              "$ref": "#/$defs/SegmentationVersionV5"
+            },
+            "source_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "target_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "status": {
+              "const": "pending"
+            },
+            "direction": {
+              "type": "null"
+            },
+            "alignment_input": {
+              "type": "null"
+            },
+            "basis": {
+              "type": "null"
+            },
+            "result": {
+              "type": "null"
+            },
+            "choices": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/PendingSegmentChoice"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "segmentation_version",
+            "source_start",
+            "source_end",
+            "target_start",
+            "target_end",
+            "source_hash",
+            "target_hash",
+            "status",
+            "direction",
+            "alignment_input",
+            "basis",
+            "result",
+            "choices"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "segmentation_version": {
+              "$ref": "#/$defs/SegmentationVersionV5"
+            },
+            "source_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "target_end": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "source_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "target_hash": {
+              "$ref": "#/$defs/Hex64"
+            },
+            "status": {
+              "enum": [
+                "done",
+                "stale"
+              ]
+            },
+            "direction": {
+              "$ref": "#/$defs/Direction"
+            },
+            "alignment_input": {
+              "oneOf": [
+                {
+                  "const": "automatic"
+                },
+                {
+                  "$ref": "#/$defs/Hex64"
+                }
+              ]
+            },
+            "basis": {
+              "$ref": "#/$defs/V3Basis"
+            },
+            "result": {
+              "$ref": "#/$defs/CompactResultV5"
+            },
+            "choices": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "$ref": "#/$defs/SegmentChoice"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ManuscriptV5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "source",
+        "target",
+        "direction",
+        "alignments",
+        "choices",
+        "history",
+        "semantic_decisions",
+        "semantic_texts",
+        "semantic_history",
+        "segments",
+        "segment_choice_history",
+        "progress",
+        "review_features"
+      ],
+      "properties": {
+        "format": {
+          "const": "wuwaterm-manuscript-v5"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "alignments": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/Alignment"
+              }
+            }
+          ]
+        },
+        "choices": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/DocumentChoice"
+          }
+        },
+        "history": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/HistorySnapshotV5"
+          }
+        },
+        "semantic_decisions": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/SemanticDecision"
+          }
+        },
+        "semantic_texts": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/SemanticText"
+          }
+        },
+        "semantic_history": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/SemanticHistorySnapshot"
+          }
+        },
+        "segments": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/SegmentRecordV5"
+          }
+        },
+        "segment_choice_history": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "#/$defs/SegmentHistoryEntry"
+          }
+        },
+        "progress": {
+          "$ref": "#/$defs/Progress"
+        },
+        "review_features": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/ReviewFeature"
+          }
+        }
+      }
+    }
+  }
+}

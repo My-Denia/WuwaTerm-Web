@@ -6,7 +6,7 @@ import { contextBefore, diffSplice, fitRequestBody, initialRun, nextToSend, runR
 import {
   applyResult, chooseTerm, isLong, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
   removeChoice, removeHistoryEntry, restorableHistory, restoreHistoryEntry, reviseSegmentTarget,
-  sameV3Basis, segmentInputs, segmentRequest, setCurrent, setFinished, spliceTargetSpan,
+  sameV3Basis, segmentInputs, segmentRequest, sessionReviewFeatures, setCurrent, setFinished, spliceTargetSpan,
   termPlan, termSegmentKey, workfileParts,
 } from './long-review.ts';
 import {
@@ -21,12 +21,12 @@ import {
 } from './semantic-state.js';
 import { insertParagraphBreak, linesToParagraphs, mergeParagraphs } from './manual-split.ts';
 import {
-  MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, MAX_V4_CHOICES, REPORT_V4,
+  MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, MAX_V4_CHOICES, REPORT_V4, REPORT_V5, REVIEW_FEATURE_AMBIGUOUS_MENTION,
   canonicalManuscript, compareReports, leaveGuardActive, makeChoice, manuscriptSaveView,
   mentionId, parseWorkfile, reconcileChoices, recoverableWorkPresent, recoverSpan,
   remapForFreeEdit, remapForSplice, remapForTargetFill, sanitizeDuplicateChoices,
   serializeWorkfile, validAlignments, validReport, validSpan,
-  WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4,
+  WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, WORKFILE_FORMAT_V4, WORKFILE_FORMAT_V5,
   type AlignmentRemap, type InvalidatedAlignment,
 } from './manuscript.js';
 import { highlightSegments, revisionOf } from './review-report.js';
@@ -34,6 +34,8 @@ import { spliceOccurrence } from './target-revision.js';
 import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from './markdown-report.ts';
 import { msg } from './messages.ts';
 import { semanticExport, semanticFromWorkfile, semanticWorkfileParts } from './workbench-persistence.ts';
+import { emptyStructure, structurePlan, type StructureFinding, type StructureState } from './structure-layer.ts';
+import { CAPABILITY_STRUCTURE_CHECK, validStructureCheckResponse } from './structure-check.js';
 import { postWorkbench, REVIEW_REQUEST_LIMIT, runFailure } from './workbench-transport.ts';
 import type { UiLanguage } from './ui-language.ts';
 import { scalarOffset } from './workbench-model.ts';
@@ -87,7 +89,7 @@ const defaultUid = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypt
 export type WorkbenchPost = (
   path: string,
   body: object,
-  options?: { signal?: AbortSignal; reviewFeatures?: boolean; allowInvalidJson?: boolean },
+  options?: { signal?: AbortSignal; reviewFeatures?: boolean | readonly string[]; allowInvalidJson?: boolean },
 ) => Promise<{ response: Response; value: unknown }>;
 
 export type WorkbenchFetchCapabilities = (signal: AbortSignal) => Promise<string[]>;
@@ -166,6 +168,11 @@ export type WorkbenchSnapshot = {
   lastTranslation: QuickTranslation | null;
   /** How many undone steps redo can bring back; kept in the snapshot so a view re-renders when it changes. */
   redoCount: number;
+  /**
+   * Layer 1 structure checks (Core ADR 0022): session state only. Undo entries, the document checkpoint and every manuscript
+   * format leave it out, and nothing writes it to browser storage; a result shows only while its segment's texts are unchanged.
+   */
+  structure: StructureState;
 };
 
 type TranslateRunStep =
@@ -293,6 +300,7 @@ export class WorkbenchController {
 
   private capabilitiesAbort: AbortController | null = null;
   private capabilitiesPromise: Promise<string[]> | null = null;
+  private structureAbort: AbortController | null = null;
 
   private runGeneration = 0;
   private runAbort: AbortController | null = null;
@@ -343,6 +351,7 @@ export class WorkbenchController {
       autoDirection: true,
       lastTranslation: null,
       redoCount: 0,
+      structure: emptyStructure(),
     };
   }
 
@@ -378,6 +387,8 @@ export class WorkbenchController {
     this.capabilitiesAbort?.abort();
     this.capabilitiesAbort = null;
     this.capabilitiesPromise = null;
+    this.structureAbort?.abort();
+    this.structureAbort = null;
     this.inflight = null;
     this.translateRun = null;
   }
@@ -453,6 +464,73 @@ export class WorkbenchController {
 
   setCapabilities(capabilities: string[] | null): void {
     this.setState({ capabilities });
+  }
+
+  /** The review features this session asks Core for (manuscript-v5 SPEC "Review features"); null while capabilities are unknown. */
+  reviewFeatures(): string[] | null {
+    return sessionReviewFeatures(this.state.capabilities);
+  }
+
+  /** The long-mode context of the current draft under a session basis (default: the current one) and the session's features. */
+  private longCtx(basis: SessionBasis = this.state.basis): LongCtx {
+    return { draft: this.state.draft, basis, features: this.reviewFeatures() };
+  }
+
+  /** The session's review features for a request: the capabilities, awaited when they are still loading; none without a source. */
+  private async requestFeatures(): Promise<string[]> {
+    if (this.state.capabilities === null && this.capabilitiesPromise) await this.capabilitiesPromise.catch(() => []);
+    return this.reviewFeatures() ?? [];
+  }
+
+  /**
+   * Layer 1: send every ready or untranslated segment of the draft to `/api/structure-checks`, in batches of at most 64 segments
+   * and 60 KiB, one after another (each batch counts as one review). The results replace the previous ones and are kept by the
+   * content hashes of the cores sent. Only when the service lists structure-check-v1; started by the user, never on its own.
+   */
+  async runStructureChecks(): Promise<void> {
+    if (!this.state.capabilities?.includes(CAPABILITY_STRUCTURE_CHECK) || this.state.structure.phase === 'running') return;
+    const { items, batches, skipped } = structurePlan(this.state.draft);
+    if (!batches.length) {
+      this.setState({ structure: { ...emptyStructure(), phase: 'done', skipped: skipped.length } });
+      return;
+    }
+    this.structureAbort?.abort();
+    const abort = new AbortController();
+    this.structureAbort = abort;
+    const epoch = this.documentEpoch;
+    const live = () => !this.disposed && !abort.signal.aborted && this.documentEpoch === epoch && this.structureAbort === abort;
+    const keyOf = new Map(items.map(item => [item.id, item.key]));
+    const results: StructureState['results'] = {};
+    let checks: string[] = [];
+    this.setState({ structure: { ...this.state.structure, phase: 'running', error: null } });
+    try {
+      for (const batch of batches) {
+        const { response, value } = await this.post('/api/structure-checks', batch, { signal: abort.signal, allowInvalidJson: true });
+        if (!live()) return;
+        this.onPoolRefresh();
+        const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
+        if (!response.ok) {
+          const failure = runFailure(response, body);
+          this.setState({ structure: { phase: 'failed', results, skipped: skipped.length, checks, error: { reason: failure.code, ...(failure.requestId ? { requestId: failure.requestId } : {}) } } });
+          return;
+        }
+        if (!validStructureCheckResponse(body, batch)) {
+          this.setState({ structure: { phase: 'failed', results, skipped: skipped.length, checks, error: { reason: 'responseInvalid' } } });
+          return;
+        }
+        const answer = body as { checks: string[]; segments: { segment_id: string; findings: StructureFinding[]; omitted_findings: number; layout: StructureState['results'][string]['layout'] }[] };
+        checks = answer.checks;
+        for (const segment of answer.segments) {
+          const key = keyOf.get(segment.segment_id);
+          if (key) results[key] = { findings: segment.findings, omitted: segment.omitted_findings, layout: segment.layout };
+        }
+      }
+      this.setState({ structure: { phase: 'done', results, skipped: skipped.length, checks, error: null } });
+    } catch {
+      if (live()) this.setState({ structure: { phase: 'failed', results, skipped: skipped.length, checks, error: { reason: 'requestFailed' } } });
+    } finally {
+      if (this.structureAbort === abort) this.structureAbort = null;
+    }
   }
 
   /**
@@ -554,7 +632,10 @@ export class WorkbenchController {
       documentEpoch: this.documentEpoch,
       resetSignal: this.state.resetSignal + 1,
       lastSemanticAction: null,
+      structure: emptyStructure(),
     });
+    this.structureAbort?.abort();
+    this.structureAbort = null;
   }
 
   // Every new undo step starts a new transaction: it ends typing coalescing and an IME composition, and clears the redo steps.
@@ -990,12 +1071,12 @@ export class WorkbenchController {
     switch (action.type) {
       case 'adopt':
         return this.commitLong(
-          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: action.candidate }, { draft: this.state.draft, basis: this.state.basis }),
+          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: action.candidate }, this.longCtx()),
           'sem:longChoiceRecorded',
         );
       case 'not_a_term':
         return this.commitLong(
-          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: null }, { draft: this.state.draft, basis: this.state.basis }),
+          state => chooseTerm(state, { index: action.segmentIndex, finding: action.finding, candidate: null }, this.longCtx()),
           'sem:longChoiceRecorded',
         );
       case 'replace': {
@@ -1083,10 +1164,10 @@ export class WorkbenchController {
   }
 
   restoreTermHistoryEntry(position: number, targetSegmentIndex?: number): boolean {
-    const targetIndex = targetSegmentIndex ?? restorableHistory(this.state.semantic.long, { draft: this.state.draft, basis: this.state.basis })[position];
+    const targetIndex = targetSegmentIndex ?? restorableHistory(this.state.semantic.long, this.longCtx())[position];
     if (targetIndex === null || targetIndex === undefined) return false;
     return this.commitLong(
-      state => restoreHistoryEntry(state, position, targetIndex, { draft: this.state.draft, basis: this.state.basis }),
+      state => restoreHistoryEntry(state, position, targetIndex, this.longCtx()),
     );
   }
 
@@ -1535,7 +1616,8 @@ export class WorkbenchController {
       const nextReports: Snapshot[] = value.history.map((s: Draft & { report: Report; resolutions?: Resolution[] }) => ({
         ...s, resolutions: s.resolutions ?? null, trusted: false, signature: '',
       }));
-      const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3 || value.format === WORKFILE_FORMAT_V4;
+      const withSemantic = value.format === WORKFILE_FORMAT_V2 || value.format === WORKFILE_FORMAT_V3 || value.format === WORKFILE_FORMAT_V4
+        || value.format === WORKFILE_FORMAT_V5;
       const nextSemantic: SemanticState = {
         ...(withSemantic ? await semanticFromWorkfile(value) : emptySemantic() as SemanticState),
         long: longFromWorkfile(value),
@@ -1649,8 +1731,8 @@ export class WorkbenchController {
   }
 
   private longResultsCurrent(): boolean {
-    const { draft, semantic, basis } = this.state;
-    const ctx = { draft, basis };
+    const { draft, semantic } = this.state;
+    const ctx = this.longCtx();
     const { long, items } = inputsOf(draft);
     return long && items.length > 0 && items.every((item, i) => item.pair.status === 'ready'
       && viewOf(semantic.long, i, ctx)?.state === 'current');
@@ -1680,7 +1762,7 @@ export class WorkbenchController {
         pending: strip(comparison.pending), incomparable: strip(comparison.incomparable),
       } : null,
       verified_stamp: { valid: false },
-      ...semanticExport(draft, semantic, basis).result,
+      ...semanticExport(draft, semantic, basis, this.reviewFeatures()).result,
     }, null, 2);
     this.setState({ notice: resultCurrent ? 'exportCurrent' : 'exportStale' });
     return { filename: 'wuwaterm-result.json', content, mimeType: 'application/json' };
@@ -1695,7 +1777,7 @@ export class WorkbenchController {
     const current = !!latest?.trusted && latest.signature === documentSignature(draft, ready) && phase === 'success';
     const comparison = latest && previous ? compareReports(previous, latest) : null;
     const long = inputsOf(draft).long;
-    const parts = semanticExport(draft, semantic, basis);
+    const parts = semanticExport(draft, semantic, basis, this.reviewFeatures());
     const currency: MarkdownCurrency = long
       ? (!parts.segmentTerms?.length ? 'none' : this.longResultsCurrent() ? 'current' : 'stale')
       : !latest ? 'none' : current ? 'current' : latest.trusted ? 'stale' : 'imported';
@@ -1759,13 +1841,16 @@ export class WorkbenchController {
     }
 
     try {
-      const { response, value } = await this.post('/api/reviews', body, { signal: abort.signal, reviewFeatures: true });
+      // Capabilities still loading: wait for them, so the review asks for exactly the session's features. Otherwise send now.
+      const features = this.state.capabilities === null && this.capabilitiesPromise ? await this.requestFeatures() : this.reviewFeatures() ?? [];
+      if (this.disposed || abort.signal.aborted || this.docGeneration !== mine) return;
+      const { response, value } = await this.post('/api/reviews', body, { signal: abort.signal, reviewFeatures: features.length ? features : true });
       if (this.disposed || abort.signal.aborted || this.docGeneration !== mine) return;
       if (!response.ok) {
         const reason = value && typeof value === 'object' && 'reason' in value && typeof value.reason === 'string' ? value.reason : '';
         throw Object.assign(new Error(), { gahReason: reason, gahDetail: failureFields(response, value) });
       }
-      if (!validReport(value, source, target, REPORT_V4)) {
+      if (!validReport(value, source, target, features.includes(REVIEW_FEATURE_AMBIGUOUS_MENTION) ? REPORT_V5 : REPORT_V4)) {
         throw Object.assign(new Error(), { gahCode: 'responseInvalid' });
       }
       const report = value as Report;
@@ -2014,7 +2099,7 @@ export class WorkbenchController {
     const { draft, semantic, basis } = this.state;
     return {
       draft,
-      ...(semanticSegmentViews(draft, semantic, basis) as { long: boolean; pairs: Pair[]; items: PairView[] }),
+      ...(semanticSegmentViews(draft, semantic, basis, this.reviewFeatures()) as { long: boolean; pairs: Pair[]; items: PairView[] }),
     };
   }
 
@@ -2123,8 +2208,12 @@ export class WorkbenchController {
       const same = (x: SegmentInput | undefined) => !!x && x.sourceHash === sourceHash && x.targetHash === targetHash;
       return same(items[item.index]) ? item.index : items.findIndex(same);
     };
+    if (this.state.capabilities === null && this.capabilitiesPromise) {
+      await this.requestFeatures();
+      if (!live()) return;
+    }
     let at = locateItem();
-    let ctx: LongCtx = { draft: this.state.draft, basis: this.state.basis };
+    let ctx: LongCtx = this.longCtx();
     const first = at < 0 ? null : viewOf(this.state.semantic.long, at, ctx);
     if (!first || !first.ready) { this.dispatchRun({ type: 'skip', key: item.key }); return; }
     if (ctx.basis !== null && !first.needsCheck) { this.dispatchRun({ type: 'done', key: item.key }); return; }
@@ -2139,7 +2228,8 @@ export class WorkbenchController {
       }
       sent += 1;
       try {
-        const { response, value } = await this.post('/api/reviews', request.body, { signal, reviewFeatures: true, allowInvalidJson: true });
+        const features = request.features ?? [];
+        const { response, value } = await this.post('/api/reviews', request.body, { signal, reviewFeatures: features.length ? features : true, allowInvalidJson: true });
         const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
         if (!live()) return;
         this.onPoolRefresh();
@@ -2152,14 +2242,15 @@ export class WorkbenchController {
           this.failRun({ type: 'failed', key: item.key, ...failure, now: this.clock.now() });
           return;
         }
-        if (!validReport(body, request.body.source, request.body.target, REPORT_V4) || body?.rule_version !== 'review-v2') {
+        if (!validReport(body, request.body.source, request.body.target, features.includes(REVIEW_FEATURE_AMBIGUOUS_MENTION) ? REPORT_V5 : REPORT_V4)
+          || body?.rule_version !== 'review-v2') {
           fail('responseInvalid');
           return;
         }
         const before = this.state.basis;
         const result = applyResult(
           this.state.semantic.long,
-          { draft: this.state.draft, basis: before },
+          this.longCtx(before),
           request,
           body,
         );
@@ -2169,7 +2260,7 @@ export class WorkbenchController {
           : this.state.semantic;
         this.setState({ semantic: nextSemantic, basis: result.basis });
         if (!sameV3Basis(before, result.basis)) {
-          const nowCtx = { draft: this.state.draft, basis: result.basis };
+          const nowCtx = this.longCtx(result.basis);
           const { items } = inputsOf(nowCtx.draft);
           const due = this.state.semantic.long.records.flatMap((_, i) =>
             (viewOf(this.state.semantic.long, i, nowCtx)?.needsCheck ? [{ key: termSegmentKey(i, items[i]), index: i }] : []),
@@ -2181,7 +2272,7 @@ export class WorkbenchController {
         if (result.secondRequest && sent < 2) {
           at = locateItem();
           if (at < 0) { this.dispatchRun({ type: 'skip', key: item.key }); return; }
-          ctx = { draft: this.state.draft, basis: result.basis };
+          ctx = this.longCtx(result.basis);
           withResolutions = true;
           continue;
         }
@@ -2251,7 +2342,7 @@ export class WorkbenchController {
         items: steps.map((_, index) => ({ key: `tr#${index}`, index })),
       };
     }
-    const views = semanticSegmentViews(d, semanticState, basis) as { items: PairView[] };
+    const views = semanticSegmentViews(d, semanticState, basis, this.reviewFeatures()) as { items: PairView[] };
     const untranslated = views.items.filter(
       v => v.pair.status === 'untranslated' && !!v.sCore.trim() && chars(v.sCore).length <= SEGMENT_LIMIT,
     );
@@ -2487,8 +2578,8 @@ export class WorkbenchController {
   }
 
   startTermRun(): void {
-    const { draft, semantic, basis } = this.state;
-    const ctx: LongCtx = { draft, basis };
+    const { draft, semantic } = this.state;
+    const ctx: LongCtx = this.longCtx();
     const { items } = inputsOf(draft);
     const plan = termPlan(semantic.long, ctx);
     if (!plan.order.length) return;

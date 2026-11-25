@@ -242,6 +242,7 @@ const zh = {
     upstream_rate_limited: '服务繁忙，请稍后重试。',
     llm_unavailable: '整句翻译暂不可用，术语查询仍可尝试。',
     semantic_review_unavailable: '此服务暂不支持语义审校。术语审校仍可使用。',
+    structure_check_unavailable: '此服务暂不支持结构核查。术语审校仍可使用。',
     llm_budget_exhausted: '整句翻译暂时达到服务额度，术语查询仍可尝试。',
   },
   // Extra lines under a failed translation or check: what kind of failure, what to do, the wait and the request id.
@@ -380,6 +381,7 @@ const zh = {
       no_target_region: '没有对应的译文区域',
       found_outside_region: '在对应区域之外找到',
       ambiguous_repeat: '重复出现，无法一一对应',
+      ambiguous_mention: '可能是角色名的单字，待你确认',
     },
     spanRange: '原文 {start}–{end}',
     truncatedMark: ' · 候选已截断',
@@ -928,6 +930,7 @@ const en: typeof zh = {
     upstream_rate_limited: 'The service is busy. Please try again later.',
     llm_unavailable: 'Sentence translation is unavailable right now; term lookup may still work.',
     semantic_review_unavailable: 'Semantic review is not available on this service. Term review still works.',
+    structure_check_unavailable: 'Structure checks are not available on this service. Term review still works.',
     llm_budget_exhausted: 'Sentence translation has temporarily reached the service quota; term lookup may still work.',
   },
   failure: {
@@ -1064,6 +1067,7 @@ const en: typeof zh = {
       no_target_region: 'No matching translation region',
       found_outside_region: 'Found outside the matching region',
       ambiguous_repeat: 'Repeated; occurrences cannot be paired',
+      ambiguous_mention: 'A single character that may be a name; your call',
     },
     spanRange: 'source {start}–{end}',
     truncatedMark: ' · candidates truncated',

@@ -8,9 +8,10 @@ import {
   classifyFailure, itemDisplayState, runDisplayState, runProgress,
 } from '../../lib/semantic-run.js';
 import {
-  TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, restorableHistory,
+  TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, restorableHistory, sessionReviewFeatures, splitAmbiguousSegments,
   summarizeTermCandidates, termGroupCounts, termPlan, termSegments, uncheckedTermSegments,
 } from '../../lib/long-review.ts';
+import { layerTwoRows, structureViews } from '../../lib/structure-layer';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES,
 } from '../../lib/semantic-review.js';
@@ -85,7 +86,7 @@ function Snippet({ text, span, missing }: { text: string; span: Span | null; mis
 
 export function SemanticWorkbench(props: Props) {
   const { doc, snapshot, lang, pool, locate } = props;
-  const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction } = snapshot;
+  const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction, structure } = snapshot;
   const { source, target, direction } = draft;
   const s = semanticMsg(lang);
   const m = msg(lang);
@@ -106,6 +107,7 @@ export function SemanticWorkbench(props: Props) {
   const setGroupFilter = (id: GroupFilter) => { setGroupFilterState(id); setOpenGroups(new Set()); };
   const toggleGroup = (key: string) => setOpenGroups(prev => { const next = new Set(prev); if (!next.delete(key)) next.add(key); return next; });
   const [revising, setRevising] = useState<{ key: string; index: number; base: string; text: string } | null>(null);
+  const [lowOpen, setLowOpen] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
   const activeMark = useRef<HTMLElement | null>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
@@ -113,9 +115,12 @@ export function SemanticWorkbench(props: Props) {
   const semanticOn = !!capabilities?.includes(CAPABILITY_SEMANTIC_REVIEW);
   const contextOn = !!capabilities?.includes(CAPABILITY_TRANSLATION_CONTEXT);
   const sourceChars = useMemo(() => chars(source), [source]);
-  const projection = useMemo(() => semanticSegmentViews(draft, { results: semantic.results, long: semantic.long }, basis) as { long: boolean; pairs: Pair[]; items: PairView[] }, [draft, semantic.results, semantic.long, basis]);
+  // The session's review features decide whether a stored term result is current (manuscript-v5 SPEC "Review features").
+  const features = useMemo(() => sessionReviewFeatures(capabilities), [capabilities]);
+  const projection = useMemo(() => semanticSegmentViews(draft, { results: semantic.results, long: semantic.long }, basis, features) as { long: boolean; pairs: Pair[]; items: PairView[] }, [draft, semantic.results, semantic.long, basis, features]);
   const { long, pairs, items: views } = projection;
-  const longCtx: LongCtx = useMemo(() => ({ draft, basis }), [draft, basis]);
+  const longCtx: LongCtx = useMemo(() => ({ draft, basis, features }), [draft, basis, features]);
+  const layer1 = useMemo(() => structureViews(draft, structure), [draft, structure]);
   const selectedSegment = long ? semantic.long.progress.current : localSegment;
   const selectSegment = (index: number | null) => {
     if (long) doc.selectLongSegment(index);
@@ -139,17 +144,19 @@ export function SemanticWorkbench(props: Props) {
     const result = semantic.results.find(r => r.id === p.resultId);
     return result ? views.find(v => overlaps(result.region.source, { start: v.pair.source.core_start, end: v.pair.source.core_end })) ?? null : null;
   };
-  const rows = semantic.placed.map(p => {
-    const info = issueStatus(semantic, p) as { status: string; decision: Decision | null; reference: Decision | null };
-    const view = segmentOfPlaced(p);
-    const position = p.live.source_span?.start ?? p.live.target_span?.start ?? semantic.results.find(r => r.id === p.resultId)?.region.source.start ?? 0;
-    return { placed: p, ...info, segment: view ? view.pair.index : null, position, imported: !!semantic.results.find(r => r.id === p.resultId)?.imported };
-  }).sort((a, b) => a.position - b.position || a.placed.id.localeCompare(b.placed.id));
+  // Layer 1 wins an overlap (Core ADR 0022): an unhandled issue that a structure finding of its segment already describes is not
+  // raised again. Its decisions and the saved manuscript are untouched; only the list leaves it out, and says how many it left out.
+  const placedRows = useMemo(() => layerTwoRows(semantic, views, layer1), [semantic, views, layer1]);
+  const rows = placedRows.filter(r => !r.covered);
+  const coveredCount = placedRows.length - rows.length;
   const statusMatch = (status: string, filter: typeof statusFilter) => filter === 'all'
     || (filter === 'handled' ? isHandled(status) : filter === 'reconfirm' ? status === 'needs_reconfirmation' || status === 'previously_applied' : !isHandled(status));
-  const visible = rows.filter(r => statusMatch(r.status, statusFilter)
+  const filtered = rows.filter(r => statusMatch(r.status, statusFilter)
     && (categoryFilter === 'all' || r.placed.issue.category === categoryFilter)
     && (segmentFilter === 'all' || r.segment === segmentFilter));
+  // Layer 2 lists high- and medium-confidence findings; low-confidence ones are folded at the end until the user opens them.
+  const lowRows = filtered.filter(r => r.placed.issue.confidence === 'low');
+  const visible = [...filtered.filter(r => r.placed.issue.confidence !== 'low'), ...(lowOpen ? lowRows : [])];
   const counts = {
     pending: rows.filter(r => statusMatch(r.status, 'pending')).length,
     handled: rows.filter(r => statusMatch(r.status, 'handled')).length,
@@ -328,8 +335,14 @@ export function SemanticWorkbench(props: Props) {
   };
   const LONG_ROWS = 100;
   const targetChars = useMemo(() => chars(target), [target]);
-  const termGroups = useMemo(() => (long ? groupTermOccurrences(termSegments(semantic.long, longCtx), source, target, direction, uncheckedTermSegments(semantic.long, longCtx)) as TermGroup[] : []),
-    [long, semantic.long, longCtx, source, target, direction]);
+  // Ambiguous one-character names stay out of the term groups and their counts: they are listed after them, folded.
+  const splitTerms = useMemo(() => (long ? splitAmbiguousSegments(termSegments(semantic.long, longCtx)) : { judged: [], ambiguous: [] }), [long, semantic.long, longCtx]);
+  const termGroups = useMemo(() => (long ? groupTermOccurrences(splitTerms.judged, source, target, direction, uncheckedTermSegments(semantic.long, longCtx)) as TermGroup[] : []),
+    [long, splitTerms, semantic.long, longCtx, source, target, direction]);
+  const ambiguousPlaces = useMemo(() => (long && splitTerms.ambiguous.length
+    ? (groupTermOccurrences(splitTerms.ambiguous, source, target, direction) as TermGroup[]).flatMap(g => g.occurrences)
+      .sort((a, b) => a.segmentIndex - b.segmentIndex || a.docSource.start - b.docSource.start)
+    : []), [long, splitTerms, source, target, direction]);
   const groupCounts = useMemo(() => termGroupCounts(termGroups, selectedSegment), [termGroups, selectedSegment]);
   const filteredGroups = useMemo(() => filterTermGroups(termGroups, groupFilter, { segment: selectedSegment, expanded: openGroups }), [termGroups, groupFilter, selectedSegment, openGroups]);
   const placeCount = filteredGroups.reduce((n, g) => n + g.occurrences.length, 0);
@@ -440,6 +453,23 @@ export function SemanticWorkbench(props: Props) {
     </article>;
   };
 
+  // An ambiguous one-character name: not evaluated and not a problem until the user adopts a candidate or ignores it.
+  const renderAmbiguous = (occ: Occurrence) => {
+    const finding = occ.finding as TermFinding;
+    const view = views[occ.segmentIndex];
+    const chosen = choiceAt(view, finding.source_span);
+    return <article className="term-result ambiguous-mention" key={occ.key} data-segment={occ.segmentIndex} data-mention-id={finding.id} data-term-state={occ.freshness}>
+      <p className="result-summary"><span className="verdict-badge verdict-not_evaluated">{(m.review.verdicts as Record<string, string>).not_evaluated}</span> · {fill(s.ambiguous.item, { text: finding.source_span.text, n: occ.segmentNumber })}</p>
+      <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><ContextLine context={occ.sourceContext} missing={s.sourceMissing} /></div>
+      <div className="finding-actions">
+        {occ.candidates.map(c => <button key={c.candidate_id} type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'adopt', segmentIndex: occ.segmentIndex, finding, candidate: c })}>{fill(s.ambiguous.adopt, { zh: c.zh, en: c.en })}</button>)}
+        <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'not_a_term', segmentIndex: occ.segmentIndex, finding })}>{s.ambiguous.ignore}</button>
+        <button type="button" className="text-button" onClick={() => locate('source', occ.docSource)}>{m.review.jumpSource}</button>
+      </div>
+      {chosen && <p className="long-choice-state" data-choice-view={chosen.view}>{chosen.candidate ? fill(m.review.choicePair, { span: chosen.source_span.text, zh: chosen.candidate.zh, en: chosen.candidate.en }) : fill(m.review.choiceNotTerm, { span: chosen.source_span.text })} — {choiceViewText(chosen.view)}</p>}
+    </article>;
+  };
+
   const longTerms: ReactNode = long || semantic.long.history.length > 0 ? <div className="long-term-list" role="region" aria-label={s.longTermsTitle}>
     <h4>{s.longTermsTitle}</h4>
     {long && <p className="track-note">{s.longTermsNote}</p>}
@@ -480,6 +510,11 @@ export function SemanticWorkbench(props: Props) {
     </section>)}
     {long && termView === 'segments' && orderedFlat.map(renderOccurrence)}
     {long && selectedSegment === null && placeCount > (termView === 'groups' ? shownFlat.length : orderedFlat.length) && <p className="track-note">{fill(s.longTermsMore, { n: placeCount - (termView === 'groups' ? shownFlat.length : orderedFlat.length) })}</p>}
+    {long && ambiguousPlaces.length > 0 && <details className="ambiguous-mentions" data-count={ambiguousPlaces.length}>
+      <summary>{fill(s.ambiguous.title, { n: ambiguousPlaces.length })}</summary>
+      <p className="track-note">{s.ambiguous.note}</p>
+      {ambiguousPlaces.map(renderAmbiguous)}
+    </details>}
     {longChoices.length > 0 && <div className="choice-records long-choices"><h4>{fill(s.longChoicesTitle, { n: longChoices.length })}</h4>
       {longChoices.map(({ index, view, choice: c }) => {
         const at = { index, start: c.source_span.start, end: c.source_span.end };
@@ -589,8 +624,11 @@ export function SemanticWorkbench(props: Props) {
 
     {semanticOn && <section className="semantic-track" aria-labelledby="semantic-title" ref={sectionRef}>
       <div className="track-head">
+        <p className="layer-kicker" data-layer="2">{s.layers.l2Title}</p>
         <h3 id="semantic-title">{s.semanticTrackTitle} <span className="tag experimental-tag">{s.experimental}</span></h3>
         <p className="track-note">{s.semanticTrackNote}</p>
+        <p className="layer-note">{s.layers.l2Note}</p>
+        {coveredCount > 0 && <p className="layer-note layer-covered" data-covered={coveredCount}>{fill(s.layers.l2Covered, { n: coveredCount })}</p>}
       </div>
       {<>
         {pendingViews.length > 0 && !runActive && <p className="run-estimate">{fill(s.estimate, { n: pendingViews.length, chars: estimateChars.toLocaleString(locale) })}
@@ -630,6 +668,8 @@ export function SemanticWorkbench(props: Props) {
               </button>
             </li>)}
           </ol>
+          {lowRows.length > 0 && <button type="button" className="text-button low-confidence-toggle" aria-expanded={lowOpen} data-low={lowRows.length}
+            onClick={() => setLowOpen(!lowOpen)}>{fill(lowOpen ? s.layers.l2LowHide : s.layers.l2LowShow, { n: lowRows.length })}</button>}
           {visible.length === 0 && <p>{s.emptyFiltered}</p>}
         </div>
         {active && <IssueCard s={s} m={m} row={active} source={source} target={target} view={issueRegion} rows={rows} choice={choice} setChoice={setChoice}

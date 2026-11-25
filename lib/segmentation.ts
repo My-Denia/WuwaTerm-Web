@@ -22,6 +22,12 @@ type RawPair = {
 };
 
 export const SEGMENTATION_VERSION = 'segmentation-v1';
+/**
+ * Pairing label of a draft whose explicit alignments leave text outside every span (contracts/manuscript-v5/SPEC.md "Gap-tolerant
+ * segment records"). segmentation-v1 makes such a draft one needs_manual_split pair; pairSegmentsWithGaps keeps every alignment
+ * region and turns only the uncovered text into gap regions.
+ */
+export const GAP_SEGMENTATION_VERSION = 'segmentation-v1-gaps';
 export const SEGMENT_LIMIT = 1800;
 export const HARD_CUT_WINDOW = 200;
 export const BOUNDARY_PUNCTUATION = '，、；：,;:';
@@ -495,6 +501,11 @@ export function pairSegments(
     }
   }
 
+  return finishPairs(s, t, pairs, limit);
+}
+
+// The common tail of both pairings: adjacent small ready pairs merge, indexes are assigned, and the partition is checked.
+function finishPairs(s: readonly string[], t: readonly string[], pairs: readonly RawPair[], limit: number): Pair[] {
   const merged: RawPair[] = [];
   for (const pair of pairs) {
     const prev: RawPair | null = merged.length ? merged[merged.length - 1] : null;
@@ -520,6 +531,138 @@ export function pairSegments(
   }));
   validatePairs(s, t, result, limit);
   return result;
+}
+
+// ---- gap-tolerant pairing (contracts/manuscript-v5/SPEC.md) ----
+
+type Extent = [ScalarOffset, ScalarOffset] | null;
+type GapItem = { kind: 'aligned' | 'gap'; s: Extent; t: Extent };
+
+function alignmentSpans(s: readonly string[], t: readonly string[], alignments: readonly unknown[]): { src: [ScalarOffset, ScalarOffset][]; tgt: Extent[] } {
+  const src: [ScalarOffset, ScalarOffset][] = [];
+  const tgt: Extent[] = [];
+  let prevS = 0;
+  let prevT = 0;
+  for (const item of alignments) {
+    if (!isMapping(item) || !hasExactKeys(item, ['source', 'target'])) throw new Error('alignment keys are not valid');
+    const sSpan = coerceSpan('source', item.source, s);
+    const tSpan = item.target === null ? null : coerceSpan('target', item.target, t);
+    if (sSpan[0] < prevS) throw new Error('source spans are out of order or overlap');
+    prevS = sSpan[1];
+    if (tSpan !== null) {
+      if (tSpan[0] < prevT) throw new Error('target spans are out of order or overlap');
+      prevT = tSpan[1];
+    }
+    src.push(sSpan);
+    tgt.push(tSpan);
+  }
+  return { src, tgt };
+}
+
+/** Explicit alignments that leave a non-WS scalar outside every span on either side (segmentation-v1 rule 1.i's whole-document case). */
+export function alignmentsLeaveGaps(source: string, target: string, alignments: readonly Alignment[] | null | undefined): boolean {
+  if (!alignments || !alignments.length) return false;
+  const s = Array.from(source);
+  const t = Array.from(target);
+  if (!hasNonWs(s, 0, s.length) && !hasNonWs(t, 0, t.length)) return false;
+  return alignmentRegionPairs(s, t, alignments) === null;
+}
+
+const gapExtent = (t: readonly string[], a: number, b: number): Extent => (hasNonWs(t, a, b) ? core(t, a, b) : null);
+
+/**
+ * The items of a gapped alignment list, in text order. Between two alignments that have a target (anchors), the source gaps of
+ * the slots in between and the one target gap there become:
+ * - with no target gap, one source-only gap item per source gap (untranslated), the null-target alignments unchanged;
+ * - with a target gap and exactly one source gap and no null-target alignment in between, one gap item holding both;
+ * - with a target gap and no source gap and no null-target alignment in between, one target-only gap item (unpaired target);
+ * - otherwise one gap item over everything between the two anchors, null-target alignments included: their pairing is unknown.
+ */
+function gapItems(s: readonly string[], t: readonly string[], src: readonly [ScalarOffset, ScalarOffset][], tgt: readonly Extent[]): GapItem[] {
+  const n = src.length;
+  const items: GapItem[] = [];
+  const sourceGap = (k: number): Extent => gapExtent(s, k > 0 ? src[k - 1][1] : 0, k < n ? src[k][0] : s.length);
+  const anchors = tgt.flatMap((span, i) => (span === null ? [] : [i]));
+  let prev = -1;
+  for (const b of [...anchors, n]) {
+    const tFrom = prev >= 0 ? (tgt[prev] as [ScalarOffset, ScalarOffset])[1] : 0;
+    const tTo = b < n ? (tgt[b] as [ScalarOffset, ScalarOffset])[0] : t.length;
+    const tGap = gapExtent(t, tFrom, tTo);
+    const slots: number[] = [];
+    for (let k = prev + 1; k <= b; k++) slots.push(k);
+    const sourceGaps = slots.filter(k => sourceGap(k) !== null);
+    const nullTargets = b - prev - 1;
+    if (tGap === null) {
+      for (const k of slots) {
+        const gap = sourceGap(k);
+        if (gap) items.push({ kind: 'gap', s: gap, t: null });
+        if (k < b) items.push({ kind: 'aligned', s: src[k], t: null });
+      }
+    } else if (nullTargets === 0 && sourceGaps.length <= 1) {
+      items.push({ kind: 'gap', s: sourceGaps.length ? sourceGap(sourceGaps[0]) : null, t: tGap });
+    } else {
+      items.push({ kind: 'gap', s: gapExtent(s, prev >= 0 ? src[prev][1] : 0, b < n ? src[b][0] : s.length), t: tGap });
+    }
+    if (b < n) items.push({ kind: 'aligned', s: src[b], t: tgt[b] });
+    prev = b;
+  }
+  return items;
+}
+
+/**
+ * Pairs of a draft under its pairing label. Without explicit alignments, or when they cover the text, this is pairSegments
+ * (segmentation-v1). When they leave text outside every span, every alignment keeps its own region and only the uncovered text
+ * becomes gap regions (GAP_SEGMENTATION_VERSION): a gap with text on both sides needs a manual split, a source-only gap is
+ * untranslated and a target-only gap is an unpaired target. A gap is never ready: its pairing is a guess.
+ */
+export function pairSegmentsWithGaps(
+  source: string,
+  target: string,
+  limit: number = SEGMENT_LIMIT,
+  alignments: readonly Alignment[] | null | undefined = null,
+): { pairs: Pair[]; version: typeof SEGMENTATION_VERSION | typeof GAP_SEGMENTATION_VERSION } {
+  if (!alignmentsLeaveGaps(source, target, alignments)) {
+    return { pairs: pairSegments(source, target, limit, alignments), version: SEGMENTATION_VERSION };
+  }
+  const s = Array.from(source);
+  const t = Array.from(target);
+  const { src, tgt } = alignmentSpans(s, t, alignments as readonly Alignment[]);
+  const items = gapItems(s, t, src, tgt);
+  const m = items.length;
+  const bounds = (side: 's' | 't', length: number): number[] => {
+    const out = new Array<number>(m + 1).fill(0);
+    out[m] = length;
+    for (let i = m - 1; i > 0; i--) {
+      const extent = items[i][side];
+      out[i] = extent !== null ? extent[0] : out[i + 1];
+    }
+    return out;
+  };
+  const sB = bounds('s', s.length);
+  const tB = bounds('t', t.length);
+  // As segmentation-v1: a region whose two cores are empty (an all-WS alignment span) joins the region before it, or after it when first.
+  const regions = items
+    .map((item, i) => ({ kind: item.kind, r: [sB[i], sB[i + 1], tB[i], tB[i + 1]].map(scalarOffset) as Bounds4 }))
+    .filter(({ r }) => coreLen(s, r[0], r[1]) || coreLen(t, r[2], r[3]))
+    .map((entry, k, kept) => {
+      const last = k + 1 >= kept.length;
+      return {
+        kind: entry.kind,
+        r: [k === 0 ? scalarOffset(0) : entry.r[0], last ? scalarOffset(s.length) : kept[k + 1].r[0],
+          k === 0 ? scalarOffset(0) : entry.r[2], last ? scalarOffset(t.length) : kept[k + 1].r[2]] as Bounds4,
+      };
+    });
+  const pairs: RawPair[] = [];
+  for (const { kind, r } of regions) {
+    if (kind === 'aligned') {
+      pairs.push(...classifyRegionPair(s, t, r, limit, true));
+      continue;
+    }
+    const sLen = coreLen(s, r[0], r[1]);
+    const tLen = coreLen(t, r[2], r[3]);
+    pairs.push(makePair(sLen && tLen ? STATUS_MANUAL : sLen ? STATUS_UNTRANSLATED : STATUS_UNPAIRED_TARGET, false, r[0], r[1], r[2], r[3]));
+  }
+  return { pairs: finishPairs(s, t, pairs, limit), version: GAP_SEGMENTATION_VERSION };
 }
 
 // Never let an oversized or empty-core request go out: a ready pair that

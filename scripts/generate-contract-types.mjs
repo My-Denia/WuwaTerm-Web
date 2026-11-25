@@ -9,11 +9,17 @@ const PY_OUT_PATH = join(ROOT, 'contracts', 'generated', 'manuscript_contract.py
 const TERMBASE_SCHEMA_PATH = join(ROOT, 'contracts', 'termbase-v1', 'schema.json');
 const TERMBASE_TS_OUT_PATH = join(ROOT, 'lib', 'generated', 'termbase-contract.ts');
 const TERMBASE_PY_OUT_PATH = join(ROOT, 'contracts', 'generated', 'termbase_contract.py');
+// The standalone v5 schema for consumers that read only v5 (the Windows client): ManuscriptV5 and every definition it reaches,
+// cut from manuscript.schema.json, so the two can never disagree.
+const V5_SCHEMA_OUT_PATH = join(ROOT, 'contracts', 'manuscript-v5', 'schema.json');
 
 const ENUM_DEFS = [
   ['DIRECTION_VALUES', 'Direction'],
   ['VERDICT_VALUES', 'Verdict'],
   ['REASON_VALUES', 'ReasonValue'],
+  ['REASON_VALUES_V5', 'ReasonValueV5'],
+  ['REVIEW_FEATURE_VALUES', 'ReviewFeature'],
+  ['SEGMENTATION_VERSION_V5_VALUES', 'SegmentationVersionV5'],
   ['CHOICE_KIND_VALUES', 'ChoiceKind'],
   ['RECORD_STATUS_VALUES', 'RecordStatus'],
   ['SEMANTIC_CATEGORY_VALUES', 'SemanticCategory'],
@@ -41,14 +47,17 @@ const DTO_DEFS = [
   ['FindingV1', 'ContractFindingV1'],
   ['FindingV2', 'ContractFindingV2'],
   ['FindingV4', 'ContractFindingV4'],
+  ['FindingV5', 'ContractFindingV5'],
   ['ReportV1', 'ContractReportV1'],
   ['ReportV2', 'ContractReportV2'],
   ['ReportV4', 'ContractReportV4'],
+  ['ReportV5', 'ContractReportV5'],
   ['ChoiceBasis', 'ContractChoiceBasis'],
   ['DocumentChoice', 'ContractDocumentChoice'],
   ['Resolution', 'ContractResolution'],
   ['HistorySnapshotV1toV3', 'ContractHistorySnapshotV1toV3'],
   ['HistorySnapshotV4', 'ContractHistorySnapshotV4'],
+  ['HistorySnapshotV5', 'ContractHistorySnapshotV5'],
   ['SemanticTermBasis', 'ContractSemanticTermBasis'],
   ['SemanticDecisionBasis', 'ContractSemanticDecisionBasis'],
   ['SemanticDecision', 'ContractSemanticDecision'],
@@ -62,18 +71,22 @@ const DTO_DEFS = [
   ['V3Basis', 'ContractV3Basis'],
   ['CompactFindingV3', 'ContractCompactFindingV3'],
   ['CompactFindingV4', 'ContractCompactFindingV4'],
+  ['CompactFindingV5', 'ContractCompactFindingV5'],
   ['CompactResultV3', 'ContractCompactResultV3'],
   ['CompactResultV4', 'ContractCompactResultV4'],
+  ['CompactResultV5', 'ContractCompactResultV5'],
   ['SegmentChoice', 'ContractSegmentChoice'],
   ['PendingSegmentChoice', 'ContractPendingSegmentChoice'],
   ['SegmentHistoryEntry', 'ContractSegmentHistoryEntry'],
   ['SegmentRecordV3', 'ContractSegmentRecordV3'],
   ['SegmentRecordV4', 'ContractSegmentRecordV4'],
+  ['SegmentRecordV5', 'ContractSegmentRecordV5'],
   ['Progress', 'ContractProgress'],
   ['ManuscriptV1', 'ContractManuscriptV1'],
   ['ManuscriptV2', 'ContractManuscriptV2'],
   ['ManuscriptV3', 'ContractManuscriptV3'],
   ['ManuscriptV4', 'ContractManuscriptV4'],
+  ['ManuscriptV5', 'ContractManuscriptV5'],
 ];
 
 const DTO_MAP = new Map(DTO_DEFS);
@@ -198,7 +211,8 @@ function renderTs(schema) {
     '  | ContractManuscriptV1',
     '  | ContractManuscriptV2',
     '  | ContractManuscriptV3',
-    '  | ContractManuscriptV4;',
+    '  | ContractManuscriptV4',
+    '  | ContractManuscriptV5;',
     '',
   );
   return out.join('\n');
@@ -252,6 +266,7 @@ function renderPy(schema) {
     '    | ContractManuscriptV2',
     '    | ContractManuscriptV3',
     '    | ContractManuscriptV4',
+    '    | ContractManuscriptV5',
     ')',
     '',
   );
@@ -359,6 +374,30 @@ function renderTermbasePy(schema) {
   ].join('\n');
 }
 
+function renderV5Schema(schema) {
+  const defs = schema.$defs;
+  const needed = new Set();
+  const visit = node => {
+    if (Array.isArray(node)) { node.forEach(visit); return; }
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.$ref === 'string') {
+      const key = node.$ref.slice('#/$defs/'.length);
+      if (!Object.hasOwn(defs, key)) throw new Error(`Unknown $ref in v5 closure: ${node.$ref}`);
+      if (!needed.has(key)) { needed.add(key); visit(defs[key]); }
+    }
+    Object.values(node).forEach(visit);
+  };
+  visit({ $ref: '#/$defs/ManuscriptV5' });
+  const out = {
+    $schema: schema.$schema,
+    $id: 'https://wuwaterm.local/contracts/manuscript-v5/schema.json',
+    title: 'WuwaTerm Manuscript Contract v5 (generated from contracts/schemas/manuscript.schema.json)',
+    $ref: '#/$defs/ManuscriptV5',
+    $defs: Object.fromEntries(Object.keys(defs).filter(key => needed.has(key)).map(key => [key, defs[key]])),
+  };
+  return `${JSON.stringify(out, null, 2)}\n`;
+}
+
 const mode = process.argv.slice(2);
 if (mode.length !== 1 || (mode[0] !== '--write' && mode[0] !== '--check')) {
   console.error('Usage: node scripts/generate-contract-types.mjs <--write|--check>');
@@ -372,6 +411,7 @@ const expected = [
   [PY_OUT_PATH, renderPy(schema)],
   [TERMBASE_TS_OUT_PATH, renderTermbaseTs(termbaseSchema)],
   [TERMBASE_PY_OUT_PATH, renderTermbasePy(termbaseSchema)],
+  [V5_SCHEMA_OUT_PATH, renderV5Schema(schema)],
 ];
 
 if (mode[0] === '--write') {
@@ -379,7 +419,7 @@ if (mode[0] === '--write') {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, content, 'utf8');
   }
-  console.log('Generated TypeScript and Python contract DTOs (manuscript and termbase).');
+  console.log('Generated TypeScript and Python contract DTOs (manuscript and termbase) and the v5 schema.');
 } else {
   const stale = expected.filter(([filePath, content]) => {
     try {
@@ -392,5 +432,5 @@ if (mode[0] === '--write') {
     console.error('Stale generated contract files:', stale.map(([p]) => p).join(', '));
     process.exit(1);
   }
-  console.log('Contract DTOs match manuscript.schema.json and termbase-v1/schema.json.');
+  console.log('Contract DTOs and manuscript-v5/schema.json match manuscript.schema.json and termbase-v1/schema.json.');
 }
