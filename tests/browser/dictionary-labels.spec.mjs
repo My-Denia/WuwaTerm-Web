@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -63,7 +64,7 @@ async function switchTo(page, language) {
 test('lookup and review labels follow the interface language and leave unknown keys raw', async ({ page }) => {
   const counts = await open(page);
   await page.locator('#term-query').fill('声骸');
-  await page.locator('.terms-card').getByRole('button', { name: '查术语', exact: true }).click();
+  await page.locator('.term-lookup').getByRole('button', { name: '查术语', exact: true }).click();
   const known = page.locator('.terms-results .term-result').nth(0);
   const unknown = page.locator('.terms-results .term-result').nth(1);
   await expect(known.locator('dd').nth(0)).toHaveText('声骸');
@@ -71,6 +72,8 @@ test('lookup and review labels follow the interface language and leave unknown k
   await expect(unknown.locator('dd').nth(0)).toHaveText('not_a_category');
   await expect(unknown.locator('dd').nth(1)).toHaveText('not_a_reason');
 
+  // Review runs in manuscript mode; the lookup folds there and keeps its results.
+  await openManuscript(page);
   await page.locator('#review-source').fill('声骸');
   await page.locator('#review-target').fill('Echo');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();

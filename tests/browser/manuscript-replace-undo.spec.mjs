@@ -1,6 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { makeChoice, serializeWorkfile } from '../../lib/manuscript.js';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
+
+// Manuscript review on the one document workspace: replacing the document (an imported text or manuscript) asks while
+// unsaved work would be lost, can be undone with its reports, choices and alignments, and never lets a late response of
+// the replaced document win. Quick translation writes into the same document, so nothing is handed over between views.
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const A = { source: '今汐。', target: 'Jinhsi.', direction: 'en' };
@@ -44,9 +49,20 @@ async function open(page, translatedText) {
 }
 
 async function translate(page, draft = B) {
-  await page.locator('#translation-source').fill(draft.source);
+  await page.locator('#review-source').fill(draft.source);
   await page.getByRole('button', { name: '翻译整句', exact: true }).click();
-  await expect(page.locator('.translated-text')).toHaveText(draft.target);
+  await expect(page.locator('#review-target')).toHaveValue(draft.target);
+}
+
+// Replace the document with a plain-text file: the text becomes the source and the translation is cleared.
+async function importText(page, text) {
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'next.txt', mimeType: 'text/plain', buffer: Buffer.from(text) });
+}
+const textDialog = page => page.getByRole('dialog', { name: '用这个文件替换当前稿件？' });
+// A downloaded manuscript is not a confirmed disk write, so replacing unsaved or only-downloaded work always asks first.
+async function replaceWithText(page, text) {
+  await importText(page, text);
+  await textDialog(page).getByRole('button', { name: '导入并替换', exact: true }).click();
 }
 
 async function downloadText(page, button) {
@@ -62,14 +78,14 @@ async function workfile(page, button = '保存稿件') {
   return JSON.parse(await downloadText(page, button));
 }
 
-test('long translation handoff can be saved, reopened and shortened for review without truncation', async ({ page }) => {
+test('a long quick translation moves to manuscript review in place, and can be saved, reopened and shortened without truncation', async ({ page }) => {
   const target = '文'.repeat(4200);
   const { reviews } = await open(page, target);
   await translate(page, { ...B, target });
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue(target);
+  await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'manuscript');
+  await expect(page.locator('#review-source')).toHaveValue(B.source);
   await expect(page.getByRole('button', { name: '核对术语', exact: true })).toBeDisabled();
-  await expect(page.locator('.review-card')).toContainText('完整稿件仍可保存');
+  await expect(page.locator('.document-workspace')).toContainText('完整稿件仍可保存');
   const saved = await workfile(page);
   expect(saved.target).toBe(target);
   expect(reviews).toHaveLength(0);
@@ -84,6 +100,7 @@ test('long translation handoff can be saved, reopened and shortened for review w
 });
 
 async function prepare(page) {
+  await openManuscript(page);
   await page.locator('#review-source').fill(A.source);
   await page.locator('#review-target').fill(A.target);
   await page.locator('.alignment-panel > summary').click();
@@ -101,6 +118,7 @@ for (const language of ['zh', 'en']) {
       await page.getByRole('button', { name: 'English', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     }
+    await openManuscript(page);
     await expect(page.locator('.notice-state')).toHaveCount(0);
     await page.locator('#review-source').fill(A.source);
     await expect(page.locator('.notice-state')).toHaveCount(0);
@@ -110,7 +128,7 @@ for (const language of ['zh', 'en']) {
     await expect(page.locator('.notice-state')).toHaveCount(0);
     expect(reviews).toHaveLength(0);
     await test.info().attach(`first-edit-${language}`, {
-      body: await page.locator('.review-card').screenshot({ path: test.info().outputPath(`first-edit-${language}.png`) }), contentType: 'image/png',
+      body: await page.locator('.document-workspace').screenshot({ path: test.info().outputPath(`first-edit-${language}.png`) }), contentType: 'image/png',
     });
   });
 
@@ -120,6 +138,7 @@ for (const language of ['zh', 'en']) {
       await page.getByRole('button', { name: 'English', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');
     }
+    await openManuscript(page);
     await page.locator('#review-source').fill(A.source);
     await page.locator('#review-target').fill(A.target);
     await page.getByRole('button', { name: language === 'en' ? 'Check terms' : '核对术语', exact: true }).click();
@@ -133,13 +152,14 @@ for (const language of ['zh', 'en']) {
     await expect(page.locator('.notice-state')).toContainText(stale);
     expect(reviews).toHaveLength(1);
     await test.info().attach(`stale-report-${language}`, {
-      body: await page.locator('.review-card').screenshot({ path: test.info().outputPath(`stale-report-${language}.png`) }), contentType: 'image/png',
+      body: await page.locator('.document-workspace').screenshot({ path: test.info().outputPath(`stale-report-${language}.png`) }), contentType: 'image/png',
     });
   });
 }
 
 test('editing confirmed alignments keeps their separate reset notice', async ({ page }) => {
   const { reviews } = await open(page);
+  await openManuscript(page);
   await page.locator('#review-source').fill(A.source);
   await page.locator('#review-target').fill(A.target);
   await page.locator('.alignment-panel > summary').click();
@@ -159,40 +179,22 @@ test('editing confirmed alignments keeps their separate reset notice', async ({ 
   expect(reviews).toHaveLength(0);
 });
 
-test('empty reception focuses review without a review request', async ({ page }) => {
-  const { reviews } = await open(page);
-  await translate(page);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
-  await expect(page.locator('#review-target')).toHaveValue(B.target);
-  await expect(page.locator('#review-source')).toBeFocused();
-  await expect(page.getByRole('dialog')).toBeHidden();
-  expect(reviews).toHaveLength(0);
-});
-
-test('post-mount work survives cancel and identical send; replacement and undo restore associated work', async ({ page }) => {
+test('a kept replacement leaves work alone; a replacement and its undo restore the associated work', async ({ page }) => {
   const { reviews } = await open(page);
   await prepare(page);
-  const before = await workfile(page);
-  await translate(page);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '替换审校稿件？' });
+  await importText(page, B.source);
+  const dialog = textDialog(page);
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: '保留当前稿件' })).toBeFocused();
   await dialog.getByRole('button', { name: '保留当前稿件' }).click();
-  expect(await workfile(page)).toEqual(before);
-
-  await translate(page, A);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await expect(dialog).toBeHidden();
-  expect(await workfile(page)).toEqual(before);
+  await expect(page.locator('#review-source')).toHaveValue(A.source);
   await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
   await expect(page.locator('.alignment-row')).toHaveCount(1);
   await expect(page.locator('.review-findings .term-result')).toHaveCount(1);
+  const before = await workfile(page);
 
-  await translate(page);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await dialog.getByRole('button', { name: '替换稿件', exact: true }).click();
+  await replaceWithText(page, B.source);
+  await expect(dialog).toBeHidden();
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await expect(page.locator('.choice-records')).toHaveCount(0);
   await expect(page.locator('.review-findings')).toHaveCount(0);
@@ -210,20 +212,15 @@ test('post-mount work survives cancel and identical send; replacement and undo r
   expect(reviews).toHaveLength(1);
 });
 
-test('identical send and cancelled replacement keep a running check alive', async ({ page }) => {
+test('a kept replacement keeps a running check alive', async ({ page }) => {
   const { reviews, gate } = await open(page);
   await prepare(page);
-  await translate(page, A);
   let release;
   gate.next = new Promise(resolve => { release = resolve; });
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect.poll(() => reviews.length).toBe(2);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await expect(page.getByRole('button', { name: '核对中…', exact: true })).toBeVisible();
-  await expect(page.getByRole('dialog')).toBeHidden();
-  await translate(page);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await page.getByRole('button', { name: '保留当前稿件' }).click();
+  await importText(page, B.source);
+  await textDialog(page).getByRole('button', { name: '保留当前稿件' }).click();
   await expect(page.getByRole('button', { name: '核对中…', exact: true })).toBeVisible();
   release();
   await expect(page.locator('.review-current')).toBeVisible();
@@ -246,13 +243,13 @@ for (const restoreBeforeResponse of [false, true]) test(`late old response canno
   const { reviews, gate } = await open(page);
   await prepare(page);
   const before = await workfile(page);
-  await translate(page);
   let release;
   gate.next = new Promise(resolve => { release = resolve; });
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect.poll(() => reviews.length).toBe(2);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await page.getByRole('button', { name: '替换稿件', exact: true }).click();
+  // Confirming the replacement aborts the running check.
+  await replaceWithText(page, B.source);
+  await expect(page.locator('#review-source')).toHaveValue(B.source);
   expect(await page.evaluate(() => window.oldReviewSignal.aborted)).toBe(true);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   if (restoreBeforeResponse) await page.getByRole('button', { name: '撤销修订', exact: true }).click();
@@ -271,17 +268,17 @@ for (const restoreBeforeResponse of [false, true]) test(`late old response canno
 test('confirmation snapshots a report that finished while the decision was open', async ({ page }) => {
   const { reviews, gate } = await open(page);
   await prepare(page);
-  await translate(page);
   let release;
   gate.next = new Promise(resolve => { release = resolve; });
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect.poll(() => reviews.length).toBe(2);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await importText(page, B.source);
+  await expect(textDialog(page)).toBeVisible();
   release();
   // Inspect DOM directly because a modal makes the background inert.
   await expect(page.locator('.review-current')).toBeVisible();
-  await page.getByRole('button', { name: '替换稿件', exact: true }).click();
+  await textDialog(page).getByRole('button', { name: '导入并替换', exact: true }).click();
+  await expect(page.locator('#review-source')).toHaveValue(B.source);
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
   const restored = await workfile(page);
   expect(restored.history).toHaveLength(2);
@@ -291,14 +288,15 @@ test('confirmation snapshots a report that finished while the decision was open'
   expect(reviews).toHaveLength(2);
 });
 
-test('invalid events leave the edited workbench unchanged', async ({ page }) => {
+test('the retired send-to-review event changes nothing', async ({ page }) => {
   const { reviews } = await open(page);
   await prepare(page);
-  const before = await workfile(page);
+  const before = await workfile(page, '导出当前结果');
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('wuwaterm-send-review', {
-    detail: { source: 'new', target: 42, direction: 'en' },
+    detail: { source: 'new', target: 'New.', direction: 'en' },
   })));
-  expect(await workfile(page)).toEqual(before);
+  expect(await workfile(page, '导出当前结果')).toEqual(before);
+  await expect(page.locator('#review-source')).toHaveValue(A.source);
   await expect(page.getByRole('dialog')).toBeHidden();
   expect(reviews).toHaveLength(1);
 });
@@ -312,9 +310,10 @@ test('undo preserves imported choice provenance instead of treating it as a new 
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(content) });
   await expect(page.locator('.choice-records')).toContainText('待确认');
   const before = await workfile(page);
-  await translate(page);
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await page.getByRole('button', { name: '替换稿件', exact: true }).click();
+  // The work still matches the imported manuscript, so replacing it does not ask.
+  await importText(page, B.source);
+  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expect(textDialog(page)).toHaveCount(0);
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
   expect(await workfile(page)).toEqual(before);
   expect(reviews).toHaveLength(0);
@@ -375,6 +374,7 @@ for (const origin of ['checked', 'imported']) test(`import undo restores both ${
 
 test('import undo clears imported reports when the previous manuscript had none', async ({ page }) => {
   const { reviews } = await open(page);
+  await openManuscript(page);
   await page.locator('#review-source').fill(A.source);
   await page.locator('#review-target').fill(A.target);
   const before = await workfile(page);
@@ -454,30 +454,27 @@ test('a narrow keyboard resume fetches fresh basis before explicitly reconfirmin
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test('plain-text import, clear-then-handoff, in-review translation, alignment recovery, and choice-record confirmation', async ({ page }) => {
+test('plain-text import, in-review translation, alignment recovery, and choice-record confirmation', async ({ page }) => {
   const { reviews } = await open(page);
-  await page.getByLabel('选择原稿文本文件').setInputFiles({ name: 'gbk.txt', mimeType: 'text/plain', buffer: Buffer.from([0xc4, 0xe3]) });
-  await expect(page.locator('#translation-source')).toHaveValue('');
-  await expect(page.locator('.translation-file-status')).toContainText('请确认文件为 UTF-8 编码');
+  // Quick mode imports through the same strict UTF-8 reader as manuscript review.
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'gbk.txt', mimeType: 'text/plain', buffer: Buffer.from([0xc4, 0xe3]) });
+  await expect(page.locator('#review-source')).toHaveValue('');
+  await expect(page.locator('.document-workspace .error-panel')).toContainText('文件无效；当前稿件未被替换。');
 
-  await page.getByLabel('选择原稿文本文件').setInputFiles({ name: 'long.txt', mimeType: 'text/plain', buffer: Buffer.from('今'.repeat(2005)) });
-  await expect(page.locator('.translation-file-status').first()).toContainText('单次整句翻译限 2,000 字符');
-  await expect(page.getByRole('button', { name: '翻译整句', exact: true })).toBeDisabled();
+  // A text past the one-request limit opens in manuscript mode, where whole-text translation is disabled for it.
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'long.txt', mimeType: 'text/plain', buffer: Buffer.from('今'.repeat(2005)) });
+  await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'manuscript');
+  await expect(page.locator('#review-source')).toHaveValue('今'.repeat(2005));
+  await expect(page.getByRole('button', { name: '生成译文', exact: true })).toBeDisabled();
 
-  await page.getByLabel('选择原稿文本文件').setInputFiles({ name: 'source.md', mimeType: 'text/markdown', buffer: Buffer.from(A.source) });
-  await expect(page.locator('#translation-source')).toHaveValue(A.source);
-  await page.getByRole('button', { name: '翻译整句', exact: true }).click();
-  await expect(page.locator('.translated-text')).toHaveText(A.target);
-
-  await page.locator('#review-source').fill('临时草稿。');
-  await page.getByRole('button', { name: '清空稿件', exact: true }).click();
-  await page.getByRole('button', { name: '送去审校', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: '替换审校稿件？' })).toBeHidden();
+  await page.getByLabel('选择稿件文件').setInputFiles({ name: 'source.md', mimeType: 'text/markdown', buffer: Buffer.from(A.source) });
+  await textDialog(page).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('#review-source')).toHaveValue(A.source);
+  await page.getByRole('button', { name: '生成译文', exact: true }).click();
   await expect(page.locator('#review-target')).toHaveValue(A.target);
 
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'gbk.txt', mimeType: 'text/plain', buffer: Buffer.from([0xc4, 0xe3]) });
-  await expect(page.locator('.review-card .error-panel')).toContainText('文件无效；当前稿件未被替换。');
+  await expect(page.locator('.document-workspace .error-panel')).toContainText('文件无效；当前稿件未被替换。');
   await expect(page.locator('#review-source')).toHaveValue(A.source);
   await expect(page.locator('#review-target')).toHaveValue(A.target);
 
@@ -521,6 +518,7 @@ test('plain-text import, clear-then-handoff, in-review translation, alignment re
 
 test('workfile import rejects valid JSON wrapper containing invalid or truncated UTF-8 bytes without U+FFFD replacement', async ({ page }) => {
   const { reviews } = await open(page);
+  await openManuscript(page);
   const validJson = serializeWorkfile({ ...B, alignments: null, choices: [], history: [] });
   const [prefix, suffix] = validJson.split(B.source);
   for (const [index, [name, badBytes]] of [
@@ -530,10 +528,10 @@ test('workfile import rejects valid JSON wrapper containing invalid or truncated
     const currentSource = `${A.source}${index}`;
     await page.locator('#review-source').fill(currentSource);
     await page.locator('#review-target').fill(A.target);
-    await expect(page.locator('.review-card .error-panel')).toHaveCount(0);
+    await expect(page.locator('.document-workspace .error-panel')).toHaveCount(0);
     const buffer = Buffer.concat([Buffer.from(prefix, 'utf8'), Buffer.from(badBytes), Buffer.from(suffix, 'utf8')]);
     await page.getByLabel('选择稿件文件').setInputFiles({ name, mimeType: 'application/json', buffer });
-    await expect(page.locator('.review-card .error-panel')).toHaveText('文件无效；当前稿件未被替换。');
+    await expect(page.locator('.document-workspace .error-panel')).toHaveText('文件无效；当前稿件未被替换。');
     await expect(page.locator('#review-source')).toHaveValue(currentSource);
     await expect(page.locator('#review-target')).toHaveValue(A.target);
     expect(await page.locator('#review-source').inputValue()).not.toContain('\uFFFD');

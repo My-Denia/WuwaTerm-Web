@@ -119,12 +119,11 @@ test('a late generation N-1 report is not 当前已核', async () => {
 });
 
 test('review UI imports the report module and does not insert manuscripts as HTML', () => {
-  const component = readFileSync(fileURLToPath(new URL('../app/components/review-workbench.tsx', import.meta.url)), 'utf8');
+  const component = readFileSync(fileURLToPath(new URL('../app/components/document-workspace.tsx', import.meta.url)), 'utf8');
   const controller = readFileSync(fileURLToPath(new URL('../lib/workbench-controller.ts', import.meta.url)), 'utf8');
   const page = readFileSync(fileURLToPath(new URL('../app/page.tsx', import.meta.url)), 'utf8');
-  const translation = readFileSync(fileURLToPath(new URL('../app/components/translation-workbench.tsx', import.meta.url)), 'utf8');
   assert.match(component, /review-report\.js/u);
-  assert.match(page, /ReviewWorkbench/u);
+  assert.match(page, /DocumentWorkspace/u);
   assert.equal(component.includes('dangerouslySetInnerHTML'), false);
   assert.equal(component.includes('innerHTML'), false);
   assert.equal(page.includes('dangerouslySetInnerHTML'), false);
@@ -147,5 +146,4 @@ test('review UI imports the report module and does not insert manuscripts as HTM
   assert.match(component, /fill\(m\.review\.charCounts/u);
   assert.match(zhCatalog, /charCounts: '原文 \{s\} \/ 2,000 · 译文 \{t\} \/ 2,000'/u);
   assert.match(controller, /validReport\(value, source, target, REPORT_V4\)/u);
-  assert.match(translation, /const result = state\.data/u);
 });

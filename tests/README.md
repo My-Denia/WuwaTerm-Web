@@ -39,7 +39,9 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-The browser suite covers the translation/review handoff, findings navigation,
+The browser suite covers the one document workspace (quick translation and
+manuscript review on the same document, the in-place mode switch, request counts
+and empty browser storage), document replacement and undo, findings navigation,
 dictionary provenance, interface language and the Markdown export. API calls
 are intercepted with synthetic responses and review requests are counted; the
 tests exercise the real client bundle in the browser. CI runs the independent

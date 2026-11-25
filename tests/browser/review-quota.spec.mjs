@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -22,13 +23,14 @@ function poolBody(reviewsRemaining) {
   };
 }
 
+// The full allowance rows live in the runtime drawer; the status line shows the same snapshot in short form.
 async function cellStrongText(page, label) {
-  const cells = page.locator('.pool-strip div');
+  const cells = page.locator('.drawer-pool > div');
   const count = await cells.count();
   for (let i = 0; i < count; i += 1) {
     const cell = cells.nth(i);
-    const labelText = await cell.locator('span').first().textContent();
-    if (labelText === label) return cell.locator('strong').first().evaluate(node => node.textContent);
+    const labelText = await cell.locator('dt').first().textContent();
+    if (labelText === label) return cell.locator('dd').first().evaluate(node => node.textContent);
   }
   return null;
 }
@@ -61,6 +63,7 @@ test('first-run shows a full shared review allowance in Chinese and English', as
   await page.goto(BASE + '/');
   await expect.poll(async () => cellStrongText(page, '今日审校'), { timeout: 30_000 }).toBe('60 / 60 次');
   expect(await cellStrongText(page, '今日术语查询')).toBe('100 / 100 次');
+  await openManuscript(page);
   await fillPair(page);
   await expect.poll(async () => exactText(page.locator('.review-quota p').first())).toBe(ZH_FULL);
   await expect(page.locator('body')).toContainText('显示为快照，提交时重新核对');
@@ -87,6 +90,7 @@ test('a full review quota disables the two admission buttons and leaves local ac
   });
   await page.goto(BASE + '/');
   await expect.poll(async () => cellStrongText(page, '今日审校'), { timeout: 30_000 }).toBe('0 / 60 次');
+  await openManuscript(page);
   await fillPair(page);
   await expect.poll(async () => exactText(page.locator('.review-quota p').first())).toBe(ZH_EMPTY);
   await expect(page.locator('.review-quota')).toContainText('今日审校共享额度已用完');
@@ -129,6 +133,7 @@ test('adopt and not-term stay available after a check once the snapshot reaches 
   });
   await page.goto(BASE + '/');
   await expect.poll(async () => cellStrongText(page, '今日审校'), { timeout: 30_000 }).toBe('60 / 60 次');
+  await openManuscript(page);
   await fillPair(page);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.getByRole('button', { name: '采用此官方词对', exact: true }).first()).toBeEnabled();
@@ -156,9 +161,9 @@ test('a 200 pool response without reviews is an incomplete snapshot and does not
   });
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('额度状态暂不可用', { timeout: 30_000 });
+  await openManuscript(page);
   await expect(page.locator('.review-quota')).toContainText('额度状态暂不可用');
-  const labels = await page.locator('.pool-strip div span').evaluateAll(nodes => nodes.map(node => node.textContent));
-  expect(labels.includes('今日审校')).toBe(false);
+  await expect(page.locator('.drawer-pool')).toHaveCount(0);
   const body = await page.locator('body').evaluate(node => node.textContent ?? '');
   expect(body.includes('60 / 60')).toBe(false);
   await fillPair(page);

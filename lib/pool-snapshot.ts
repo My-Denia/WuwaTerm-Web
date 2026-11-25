@@ -17,9 +17,3 @@ export function isPool(v: unknown): v is Pool {
     && [x.terms, x.translations, x.characters, x.reviews].every(a => a && Number.isInteger(a.remaining) && Number.isInteger(a.limit) && a.remaining >= 0 && a.limit >= a.remaining)
     && typeof x.reset_at === 'string';
 }
-
-export const POOL_REFRESH_EVENT = 'wuwaterm-pool-refresh';
-
-export function requestPoolRefresh(): void {
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event(POOL_REFRESH_EVENT));
-}

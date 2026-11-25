@@ -25,9 +25,7 @@ export function SiteChrome({ children }: { children: React.ReactNode }) {
         </a>
         <div className="section-pills" role="navigation" aria-label={m.terms.quickJumpTitle}>
           <a href="#terms-title" className="section-pill">{m.terms.jumpTerms}</a>
-          <a href="#translation-title" className="section-pill">{m.terms.jumpTranslation}</a>
-          <a href="#review-title" className="section-pill">{m.terms.jumpReview}</a>
-          <a href="#provenance-section" className="section-pill">{m.terms.jumpProvenance}</a>
+          <a href="#workspace-title" className="section-pill">{m.terms.jumpWorkspace}</a>
         </div>
         <div className="nav-links"><a href={withQuery('/limits', termQuery)}>{m.nav.limits}</a><a href={withQuery('/privacy', termQuery)}>{m.nav.privacy}</a><span className="beta-badge">{m.nav.betaBadge}</span><LanguageToggle /></div>
       </nav>

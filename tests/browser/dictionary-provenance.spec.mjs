@@ -61,6 +61,12 @@ async function openPage(page, metaFor) {
   // CI runners, so allow a generous wait here.
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
   expect(counts.meta).toBe(0);
+  // The provenance lives in the runtime drawer; opening the drawer reads nothing.
+  await expect(async () => {
+    await page.getByRole('button', { name: '运行详情', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: '运行详情' })).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  expect(counts.meta).toBe(0);
   return counts;
 }
 

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openManuscript } from '../helpers/semantic-routes.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -40,6 +41,7 @@ async function setupPage(page, { requests = [] } = {}) {
   });
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
+  await openManuscript(page);
 }
 
 test('Chinese UI: disk-save -> close session -> fresh context -> reopen from filesystem path', async ({ browser }, testInfo) => {

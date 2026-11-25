@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncEx
 import {
   FILTERS, filterFindings, findingVerdictCounts, reconcileActiveId, compactScalarContext,
 } from '../../lib/review-navigation.js';
-import { highlightSegments, scalarToUtf16, summarizeReviewParts } from '../../lib/review-report.js';
+import { highlightSegments, summarizeReviewParts } from '../../lib/review-report.js';
 import {
   basisOf, compareReports, leaveGuardActive, manuscriptSaveView,
   reconcileChoices, sameBasis,
@@ -12,15 +12,19 @@ import {
 import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
-import { isPool, POOL_REFRESH_EVENT, type Pool } from '../../lib/pool-snapshot';
+import { isLong } from '../../lib/long-review';
+import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
-import { workbenchPath } from '../../lib/ui-runtime';
 import { semanticCounts } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
-import type { Candidate, Choice, Draft, Finding, PendingWorkfile, Snapshot, Span, Utf16Offset } from '../../lib/workbench-model';
+import type { Candidate, Choice, Draft, Finding, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
+import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
+import { QuickTermLookup } from './quick-term-lookup';
+import { RequestId } from './request-feedback';
+import { RuntimeStatus } from './runtime-status';
 import { useUiLanguage } from './ui-language-context';
 import { SemanticWorkbench } from './semantic-workbench';
 
@@ -36,11 +40,7 @@ type RevisionIntent = {
   fragment: string;
   selected: Span | null;
 };
-type PoolView = { kind: 'loading' } | { kind: 'success'; data: Pool } | { kind: 'error' };
-
-async function poolPayload(response: Response): Promise<unknown> {
-  try { return await response.json(); } catch { return null; }
-}
+type PendingReplacement = { kind: 'text'; text: string } | { kind: 'query'; text: string } | { kind: 'workfile'; workfile: PendingWorkfile };
 
 function Excerpt({ text, span, missing }: { text: string; span: Span | null; missing: string }) {
   const { lang } = useUiLanguage();
@@ -71,35 +71,44 @@ function unloadUrl(anchor: HTMLAnchorElement): string | null {
   return url.href;
 }
 
-export function ReviewWorkbench() {
+/**
+ * The one document workspace. A single controller holds the draft, history, reports and semantic state; quick translation
+ * and manuscript review are two layouts of that same document. The editors stay mounted across a mode switch, so moving to
+ * manuscript mode (a long text, an imported manuscript, or the user's choice) keeps the texts, history, caret and IME state.
+ */
+export function DocumentWorkspace() {
   const { lang } = useUiLanguage();
-  const [doc] = useState(() => createWorkbenchController({ initialLang: lang }));
+  const runtime = useRuntimeStore();
+  const { pool } = useRuntime();
+  const [doc] = useState(() => createWorkbenchController({
+    initialLang: lang,
+    fetchCapabilities: () => runtime.capabilities(),
+    onPoolRefresh: () => runtime.refreshPool(),
+  }));
   const snapshot = useSyncExternalStore(doc.subscribe, doc.getSnapshot, doc.getSnapshot);
   const {
     draft, choices, imported, reports, history, documentCheckpoint, semantic, basis, capabilities,
     phase, translating, sourceDirtyForTranslation, notice, error,
     importedCanonical, downloadedCanonical, run, pairTranslating, generation, inFlight,
+    workspaceMode, autoDirection, lastTranslation, redoCount,
   } = snapshot;
   const { source, target, direction, alignments } = draft;
+  const quick = workspaceMode === 'quick';
 
-  const [pendingDraft, setPendingDraft] = useState<Draft | null>(null);
-  const [pendingImport, setPendingImport] = useState<{ kind: 'text'; text: string } | { kind: 'workfile'; workfile: PendingWorkfile } | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingReplacement | null>(null);
   const importDialog = useRef<HTMLDialogElement>(null);
   const keepImportButton = useRef<HTMLButtonElement>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
   const [verdictFilter, setVerdictFilter] = useState<(typeof FILTERS)[number]['id']>('all');
   const [canonicalFindingId, setCanonicalFindingId] = useState<string | null>(null);
-  const [pool, setPool] = useState<PoolView>({ kind: 'loading' });
+  const [copied, setCopied] = useState<'done' | 'failed' | null>(null);
   const [revision, setRevision] = useState<RevisionIntent | null>(null);
   const revisionRef = useRef<RevisionIntent | null>(null);
   const revisionDialog = useRef<HTMLDialogElement>(null);
   const fragmentBox = useRef<HTMLTextAreaElement>(null);
-  const [poolAttempt, setPoolAttempt] = useState(0);
-  const sourceBox = useRef<HTMLTextAreaElement>(null);
-  const targetBox = useRef<HTMLTextAreaElement>(null);
+  const sourceEditor = useRef<EditorSurfaceHandle>(null);
+  const targetEditor = useRef<EditorSurfaceHandle>(null);
   const fileBox = useRef<HTMLInputElement>(null);
-  const handoffDialog = useRef<HTMLDialogElement>(null);
-  const keepDraftButton = useRef<HTMLButtonElement>(null);
   const leaveDialog = useRef<HTMLDialogElement>(null);
   const stayLeaveButton = useRef<HTMLButtonElement>(null);
   const leaveBypass = useRef(false);
@@ -129,6 +138,9 @@ export function ReviewWorkbench() {
   const targetLength = Array.from(target).length;
   const validInput = !!source.trim() && !!target.trim() && sourceLength <= 2000 && targetLength <= 2000;
   const reviewsClosed = pool.kind === 'success' && pool.data.reviews.remaining === 0;
+  const longDocument = isLong(draft);
+  // The last whole-text translation describes the editors only while both texts are still the ones it produced.
+  const quickResult = lastTranslation && lastTranslation.source === source && lastTranslation.text === target ? lastTranslation : null;
   const translationClosed = pool.kind === 'success' && (!pool.data.translation_enabled || pool.data.translations.remaining === 0 || pool.data.characters.remaining === 0);
   const sourceCompatible = !!latest?.trusted && latest.source === source && latest.direction === direction;
   const comparison = latest && previous ? compareReports(previous, latest) : null;
@@ -139,6 +151,7 @@ export function ReviewWorkbench() {
   const semanticRunActive = isRunActive(run, pairTranslating);
   const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating || semanticRunActive });
   const m = msg(lang);
+  const w = m.workspace;
   const saveStateText = {
     empty: m.review.saveStateEmpty,
     'page-only': m.review.saveStatePageOnly,
@@ -206,65 +219,13 @@ export function ReviewWorkbench() {
     if (outcome.status === 'stale') { cancelRevision(); return; }
     if (outcome.status !== 'applied') return;
     cancelRevision();
-    requestAnimationFrame(() => jumpTo(targetBox.current, outcome.target, outcome.span));
+    requestAnimationFrame(() => targetEditor.current?.reveal(outcome.span));
   }
-
-  const receiveDraft = useCallback((next: Draft) => {
-    handoffDialog.current?.close();
-    setPendingDraft(null);
-    if (!doc.receiveDraft(next)) return;
-    sourceBox.current?.focus();
-    if (typeof document !== 'undefined') { document.getElementById('review-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-  }, [doc]);
-
-  useEffect(() => {
-    function onDraft(event: Event) {
-      const detail = (event as CustomEvent).detail;
-      if (!detail || typeof detail.source !== 'string' || typeof detail.target !== 'string' || !['en', 'zh'].includes(detail.direction)) return;
-      const before = doc.getSnapshot();
-      if (before.draft.source === detail.source && before.draft.target === detail.target && before.draft.direction === detail.direction) return;
-      cancelRevision(revisionRef.current ? 'revisionStale' : '');
-      const next: Draft = { source: detail.source, target: detail.target, direction: detail.direction, alignments: null };
-      const empty = !workPresent(before.draft, before.choices, before.reports, before.semantic);
-      if (empty) receiveDraft(next);
-      else {
-        setPendingDraft(next);
-        if (typeof document !== 'undefined') { document.getElementById('review-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      }
-    }
-    window.addEventListener('wuwaterm-send-review', onDraft);
-    return () => window.removeEventListener('wuwaterm-send-review', onDraft);
-  }, [doc, receiveDraft, cancelRevision]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void (async () => {
-      try {
-        const response = await fetch(workbenchPath('/api/pool'), { cache: 'no-store', signal: controller.signal });
-        const value = await poolPayload(response);
-        if (!controller.signal.aborted) setPool(response.ok && isPool(value) ? { kind: 'success', data: value } : { kind: 'error' });
-      } catch { if (!controller.signal.aborted) setPool({ kind: 'error' }); }
-    })();
-    return () => controller.abort();
-  }, [poolAttempt]);
-
-  useEffect(() => {
-    const onRefresh = () => setPoolAttempt(count => count + 1);
-    window.addEventListener(POOL_REFRESH_EVENT, onRefresh);
-    return () => window.removeEventListener(POOL_REFRESH_EVENT, onRefresh);
-  }, []);
 
   useEffect(() => {
     if (!activeFindingId) return;
     document.querySelector(`[data-mention-id="${CSS.escape(activeFindingId)}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activeFindingId]);
-
-  useEffect(() => {
-    if (pendingDraft) {
-      if (!handoffDialog.current?.open) handoffDialog.current?.showModal();
-      keepDraftButton.current?.focus();
-    } else handoffDialog.current?.close();
-  }, [pendingDraft]);
 
   useEffect(() => {
     if (pendingImport !== null) {
@@ -322,43 +283,43 @@ export function ReviewWorkbench() {
     await check();
   }
   async function translateInReview() {
+    setCopied(null);
     await doc.translateInReview({ translationClosed });
   }
-  function jumpTo(box: HTMLTextAreaElement | null, text: string, span: Span) {
-    if (!box) return;
-    const located = highlightSegments(text, span);
-    const start = scalarToUtf16(text, span.start);
-    const end = scalarToUtf16(text, span.end);
-    if (!located || start === null || end === null) return;
-    box.focus({ preventScroll: true });
-    const domOffset = (offset: Utf16Offset) => text.slice(0, offset).replace(/\r\n?/g, '\n').length;
-    box.setSelectionRange(domOffset(start), domOffset(end));
-    box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  function translateQuick(event: FormEvent) {
+    event.preventDefault();
+    void translateInReview();
   }
-  function selectedSpan(box: HTMLTextAreaElement | null, text: string): Span | null {
-    if (!box || box.selectionStart === box.selectionEnd) return null;
-    const rawOffset = (offset: number) => {
-      let raw = 0;
-      for (let dom = 0; dom < offset; dom += 1) {
-        if (raw >= text.length) return null;
-        raw += text[raw] === '\r' && text[raw + 1] === '\n' ? 2 : 1;
-      }
-      return raw;
-    };
-    const start = rawOffset(box.selectionStart);
-    const end = rawOffset(box.selectionEnd);
-    if (start === null || end === null) return null;
-    return { start: Array.from(text.slice(0, start)).length, end: Array.from(text.slice(0, end)).length, text: text.slice(start, end) };
+  function jumpTo(side: 'source' | 'target', span: Span) {
+    (side === 'source' ? sourceEditor : targetEditor).current?.reveal(span);
+  }
+  function editSide(side: 'source' | 'target') {
+    return (value: string, edit: EditorEdit) => doc.editText(side, value, edit.composing ? { composing: true } : {});
   }
   function addAlignment(omit = false, whole = false) {
-    const a = whole ? null : selectedSpan(sourceBox.current, source);
-    const b = omit || whole ? null : selectedSpan(targetBox.current, target);
+    const a = whole ? null : sourceEditor.current?.selection() ?? null;
+    const b = omit || whole ? null : targetEditor.current?.selection() ?? null;
     doc.recordAlignment(a, b, omit, whole);
   }
-  function replaceWithText(text: string) {
+  function insertTerm(text: string) {
+    const current = doc.getSnapshot().draft.source;
+    doc.editText('source', current ? current + ' ' + text : text);
+    sourceEditor.current?.focus();
+  }
+  function moveQueryToSource(text: string) {
+    if (!text.trim()) return;
+    if (doc.replacementNeedsConfirm()) { setPendingImport({ kind: 'query', text }); return; }
+    doc.replaceWithText(text, 'movedQuery');
+    sourceEditor.current?.focus();
+  }
+  function replaceWithText(text: string, notice?: string) {
     importDialog.current?.close();
     setPendingImport(null);
-    doc.replaceWithText(text);
+    doc.replaceWithText(text, notice);
+  }
+  async function copyTranslation() {
+    try { await navigator.clipboard.writeText(target); setCopied('done'); }
+    catch { setCopied('failed'); }
   }
   function replaceWithWorkfile(workfile: PendingWorkfile) {
     importDialog.current?.close();
@@ -371,7 +332,7 @@ export function ReviewWorkbench() {
     else if (outcome.status === 'needs_confirm_workfile') setPendingImport({ kind: 'workfile', workfile: outcome.pendingWorkfile });
   }
   function clearDraft() {
-    if (doc.clearDraft()) sourceBox.current?.focus();
+    if (doc.clearDraft()) sourceEditor.current?.focus();
   }
   function save() {
     const out = doc.save();
@@ -444,8 +405,8 @@ export function ReviewWorkbench() {
               <Excerpt text={target} span={targetLocated ? finding.target_span : null} missing={m.review.excerptMissingTarget} />
             </div>
             <div className="finding-jumps">
-              <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo(sourceBox.current, source, finding.source_span)}>{m.review.jumpSource}</button>
-              <button className="text-button" type="button" disabled={!targetLocated} onClick={() => { if (finding.target_span) jumpTo(targetBox.current, target, finding.target_span); }}>{m.review.jumpTarget}</button>
+              <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo('source', finding.source_span)}>{m.review.jumpSource}</button>
+              <button className="text-button" type="button" disabled={!targetLocated} onClick={() => { if (finding.target_span) jumpTo('target', finding.target_span); }}>{m.review.jumpTarget}</button>
             </div>
             {finding.candidates.map((candidate: Candidate) => <div className="term-pair" key={candidate.candidate_id}><strong>{candidate.zh}</strong><span>{candidate.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, candidate.category)}</small>
               <div className="finding-actions">
@@ -466,7 +427,11 @@ export function ReviewWorkbench() {
     {longTerms}
   </section>;
 
-  return <section className="workspace-card review-card" aria-labelledby="review-title">
+  const kindLabel = quickResult?.kind
+    ? ({ exact: m.translation.kindExact, fuzzy: m.translation.kindFuzzy, noop: m.translation.kindNoop, llm: m.translation.kindLlm })[quickResult.kind]
+    : null;
+
+  return <section className="document-workspace" data-mode={workspaceMode} aria-labelledby="workspace-title">
     <dialog className="handoff-dialog revision-dialog" ref={revisionDialog} aria-labelledby="revision-title" aria-describedby="revision-description" onCancel={() => cancelRevision()}>
       <h3 id="revision-title">{m.review.revisionTitle}</h3>
       <p id="revision-description">{m.review.revisionDescription}</p>
@@ -508,116 +473,160 @@ export function ReviewWorkbench() {
       </div>
     </dialog>
     <dialog className="handoff-dialog" ref={importDialog} aria-labelledby="import-replace-title" aria-describedby="import-replace-description" onCancel={() => setPendingImport(null)}>
-      <h3 id="import-replace-title">{pendingImport?.kind === 'workfile' ? m.review.workfileReplaceTitle : m.review.importReplaceTitle}</h3>
-      <p id="import-replace-description">{pendingImport?.kind === 'workfile' ? m.review.workfileReplaceBody : m.review.importReplaceBody}</p>
+      <h3 id="import-replace-title">{pendingImport?.kind === 'workfile' ? m.review.workfileReplaceTitle : pendingImport?.kind === 'query' ? w.queryReplaceTitle : m.review.importReplaceTitle}</h3>
+      <p id="import-replace-description">{pendingImport?.kind === 'workfile' ? m.review.workfileReplaceBody : pendingImport?.kind === 'query' ? w.queryReplaceBody : m.review.importReplaceBody}</p>
       <div className="actions">
         <button ref={keepImportButton} type="button" className="secondary-button" onClick={() => setPendingImport(null)}>{m.review.dialogKeep}</button>
         <button type="button" className="secondary-button" onClick={() => {
           if (pendingImport?.kind === 'text') replaceWithText(pendingImport.text);
+          else if (pendingImport?.kind === 'query') { replaceWithText(pendingImport.text, 'movedQuery'); sourceEditor.current?.focus(); }
           else if (pendingImport?.kind === 'workfile') replaceWithWorkfile(pendingImport.workfile);
-        }}>{m.review.importReplaceConfirm}</button>
+        }}>{pendingImport?.kind === 'query' ? w.queryReplaceConfirm : m.review.importReplaceConfirm}</button>
       </div>
     </dialog>
-    <dialog className="handoff-dialog" ref={handoffDialog} aria-labelledby="handoff-title" aria-describedby="handoff-description" onCancel={() => setPendingDraft(null)}>
-      <h3 id="handoff-title">{m.review.dialogTitle}</h3>
-      <p id="handoff-description">{m.review.dialogBody}</p>
-      <div className="actions">
-        <button ref={keepDraftButton} type="button" className="secondary-button" onClick={() => { handoffDialog.current?.close(); setPendingDraft(null); }}>{m.review.dialogKeep}</button>
-        <button type="button" className="secondary-button" onClick={() => { if (pendingDraft) receiveDraft(pendingDraft); }}>{m.review.dialogReplace}</button>
+    <header className="workspace-head">
+      <div className="workspace-heading">
+        <h1 id="workspace-title" tabIndex={-1}>{m.hero.title}<span>{m.hero.titleAccent}</span></h1>
+        <p>{m.hero.subtitle}</p>
       </div>
-    </dialog>
-    <div className="card-heading"><div><p className="section-kicker">{m.review.kicker}</p><h2 id="review-title">{m.review.title}</h2></div><span className="tag">{m.review.tag}</span></div>
-    <p className="card-intro">{m.review.intro}</p>
-    {!latest && !source.trim() && !target.trim() && choices.length === 0 && (
-      <ol className="guide-steps" aria-label={m.review.guideAria} role="list">
-        {m.review.guide.map((step, i) => <li key={i}><strong>{step.title}</strong><span>{step.body}</span></li>)}
-      </ol>
-    )}
-    <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
-    <div className="manuscript-workspace">
-    <div className="manuscript-editor-pane">
-    <form onSubmit={submit}>
-      <div className="label-row"><label htmlFor="review-source">{m.review.sourceLabel}</label><select aria-label={m.review.directionAria} value={direction} onChange={e => doc.setDirection(e.target.value as 'en' | 'zh')}><option value="en">{m.review.directionEn}</option><option value="zh">{m.review.directionZh}</option></select></div>
-      <textarea ref={sourceBox} id="review-source" value={source} onChange={e => doc.editText('source', e.target.value)} rows={5} placeholder={m.review.sourcePlaceholder} />
-      <label htmlFor="review-target">{m.review.targetLabel}</label>
-      <textarea ref={targetBox} id="review-target" value={target} onChange={e => doc.editText('target', e.target.value)} rows={5} placeholder={m.review.targetPlaceholder} />
-      <div className="field-hint"><span>{m.review.hintSafety}</span><span>{fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span></div>
-      {(sourceLength > 2000 || targetLength > 2000) && <p role="status">{m.review.longManuscript}</p>}
-      <details className="alignment-panel"><summary>{alignments === null ? m.review.alignmentSummaryNone : fill(m.review.alignmentSummaryCount, { n: alignments.length })}</summary>
-        <p>{m.review.alignmentIntro}</p>
-        <div className="actions">
-          <button type="button" className="secondary-button" onClick={() => addAlignment()}>{m.review.alignmentConfirm}</button>
-          <button type="button" className="secondary-button" onClick={() => addAlignment(true)}>{m.review.alignmentOmit}</button>
-          <button type="button" className="secondary-button" disabled={!validInput} onClick={() => addAlignment(false, true)}>{m.review.alignmentWhole}</button>
-          <button type="button" className="secondary-button" onClick={() => doc.clearAlignments()}>{m.review.alignmentClear}</button>
-          <button type="button" className="secondary-button" onClick={() => doc.resetAlignments()}>{m.review.alignmentReset}</button>
+      <div className="mode-switch" role="group" aria-label={w.modeAria}>
+        <button type="button" aria-pressed={quick} disabled={!quick && longDocument} title={!quick && longDocument ? w.modeQuickLocked : undefined} onClick={() => doc.setWorkspaceMode('quick')}>{w.modeQuick}</button>
+        <button type="button" aria-pressed={!quick} onClick={() => doc.setWorkspaceMode('manuscript')}>{w.modeManuscript}</button>
+      </div>
+    </header>
+    <RuntimeStatus saveView={saveView} reportCommit={latest?.report.dictionary.source_commit ?? null} />
+    <div className="workspace-grid">
+      <QuickTermLookup quick={quick} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+      <div className="manuscript-workspace">
+        <div className="manuscript-editor-pane">
+          {!quick && !latest && !source.trim() && !target.trim() && choices.length === 0 && (
+            <ol className="guide-steps" aria-label={m.review.guideAria} role="list">
+              {m.review.guide.map((step, i) => <li key={i}><strong>{step.title}</strong><span>{step.body}</span></li>)}
+            </ol>
+          )}
+          <form onSubmit={quick ? translateQuick : submit}>
+            <div className="editor-panes">
+              <div className="editor-pane">
+                <div className="label-row">
+                  <label htmlFor="review-source">{m.review.sourceLabel}</label>
+                  <select aria-label={quick ? m.translation.directionAria : m.review.directionAria} value={quick && autoDirection ? 'auto' : direction} onChange={e => {
+                    const value = e.target.value as 'auto' | 'en' | 'zh';
+                    if (quick) doc.setQuickDirection(value);
+                    else if (value !== 'auto') doc.setDirection(value);
+                  }}>
+                    {quick && <option value="auto">{m.translation.directionAuto}</option>}
+                    <option value="en">{quick ? m.translation.directionToEn : m.review.directionEn}</option>
+                    <option value="zh">{quick ? m.translation.directionToZh : m.review.directionZh}</option>
+                  </select>
+                </div>
+                <EditorSurfaceAdapter ref={sourceEditor} id="review-source" value={source} rows={6} placeholder={quick ? m.translation.placeholder : m.review.sourcePlaceholder} onEdit={editSide('source')} />
+              </div>
+              <div className="editor-pane">
+                <div className="label-row">
+                  <label htmlFor="review-target">{quick ? w.targetLabel : m.review.targetLabel}</label>
+                  {quick && !!target && <button type="button" className="text-button" onClick={() => void copyTranslation()}>{copied === 'done' ? m.translation.copied : m.translation.copy}</button>}
+                </div>
+                <EditorSurfaceAdapter ref={targetEditor} id="review-target" value={target} rows={6} placeholder={quick ? m.translation.idlePlaceholder : m.review.targetPlaceholder} onEdit={editSide('target')} />
+              </div>
+            </div>
+            <div className="field-hint"><span>{m.review.hintSafety}</span><span aria-live="polite">{quick ? fill(m.translation.charCount, { n: sourceLength.toLocaleString(locale) }) : fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span></div>
+            {!quick && (sourceLength > 2000 || targetLength > 2000) && <p role="status">{m.review.longManuscript}</p>}
+            {quick && translationClosed && <p className="notice-state">{pool.kind === 'success' && !pool.data.translation_enabled ? m.tMsg.translation_disabled : m.tMsg.translation_pool_exhausted}</p>}
+            {!quick && <details className="alignment-panel"><summary>{alignments === null ? m.review.alignmentSummaryNone : fill(m.review.alignmentSummaryCount, { n: alignments.length })}</summary>
+              <p>{m.review.alignmentIntro}</p>
+              <div className="actions">
+                <button type="button" className="secondary-button" onClick={() => addAlignment()}>{m.review.alignmentConfirm}</button>
+                <button type="button" className="secondary-button" onClick={() => addAlignment(true)}>{m.review.alignmentOmit}</button>
+                <button type="button" className="secondary-button" disabled={!validInput} onClick={() => addAlignment(false, true)}>{m.review.alignmentWhole}</button>
+                <button type="button" className="secondary-button" onClick={() => doc.clearAlignments()}>{m.review.alignmentClear}</button>
+                <button type="button" className="secondary-button" onClick={() => doc.resetAlignments()}>{m.review.alignmentReset}</button>
+              </div>
+              {alignments?.map((a, i) => <div className="alignment-row" key={i}><p>{fill(m.review.alignmentRowSource, { start: a.source.start + 1, end: a.source.end, text: a.source.text })}</p><p>{a.target ? fill(m.review.alignmentRowTarget, { start: a.target.start + 1, end: a.target.end, text: a.target.text }) : m.review.alignmentRowOmit}</p><button type="button" className="text-button" onClick={() => doc.removeAlignment(i)}>{m.review.alignmentRemove}</button></div>)}
+            </details>}
+            {!quick && <div className="review-quota">
+              {pool.kind === 'success' ? <>
+                <p>{fill(m.review.quotaSnapshot, { n: pool.data.reviews.remaining, limit: pool.data.reviews.limit })}</p>
+                {reviewsClosed && <p>{m.rMsg.reviews_pool_exhausted}</p>}
+              </> : <p>{pool.kind === 'error' ? m.pool.unavailable : m.pool.loading}</p>}
+            </div>}
+            <div className="actions">
+              {quick ? <>
+                <button type="submit" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed}>{translating ? m.translation.submitLoading : m.translation.submitIdle}</button>
+                {translating && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.translation.cancelWait}</button>}
+                <button className="secondary-button" type="button" onClick={() => fileBox.current?.click()}>{m.translation.importFile}</button>
+                <button className="secondary-button" type="button" onClick={() => doc.setWorkspaceMode('manuscript')}>{w.openManuscript}</button>
+              </> : <>
+                <button type="submit" className={translatePrimary ? 'secondary-button' : undefined} disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
+                <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
+                {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
+                {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.review.cancelWait}</button>}
+              </>}
+              <button className="secondary-button" type="button" onClick={() => doc.undo()} disabled={!history.length}>{m.review.undo}</button>
+              <button className="secondary-button" type="button" onClick={() => doc.redo()} disabled={redoCount === 0}>{w.redo}</button>
+            </div>
+          </form>
+          {/* One hidden file input for both modes, opened by the visible import buttons and kept out of the tab order. */}
+          <input ref={fileBox} className="visually-hidden" type="file" tabIndex={-1} accept=".json,.txt,.md,application/json,text/plain,text/markdown" aria-label={m.review.importFileAria} onChange={e => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            void importFile(file);
+          }} />
+          {quick && translating && <p className="notice-state" role="status">{m.translation.loadingStatus}</p>}
+          {quick && quickResult && <div className="translation-result" aria-live="polite">
+            <div className="result-meta">{kindLabel && <span>{kindLabel}</span>}<span>{quickResult.direction === 'en' ? m.translation.directionEn : m.translation.directionZh}</span></div>
+            {quickResult.dictionaryMiss && <p className="field-hint">{m.translation.dictionaryMiss}</p>}
+            {copied === 'failed' && <p role="status">{m.translation.copyFailed}</p>}
+            {quickResult.requestId && <RequestId value={quickResult.requestId} />}
+          </div>}
+          {!quick && <>
+            <p className="manuscript-save-state" role="status">{saveStateText}{guard ? ` ${m.review.saveStateLeaveNote}` : ''}</p>
+            <div className="actions draft-actions">
+              <div className="draft-primary-actions">
+                <button type="button" className="secondary-button" onClick={clearDraft} disabled={!holdsWork}>{m.review.clearDraft}</button>
+                <button type="button" className="secondary-button" onClick={save}>{m.review.save}</button>
+                <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>{m.review.import}</button>
+                {documentCheckpoint && <button type="button" className="secondary-button" onClick={() => doc.restoreDocumentCheckpoint()}>{m.review.restoreCheckpoint}</button>}
+              </div>
+              <div className="export-actions">
+                <button type="button" className="secondary-button" onClick={exportTxt}>{m.review.exportTxt}</button>
+                <button type="button" className="secondary-button" onClick={exportResult}>{m.review.exportResult}</button>
+                <button type="button" className="secondary-button" onClick={exportMarkdown}>{m.review.exportMarkdown}</button>
+              </div>
+            </div>
+          </>}
+          {notice && <p className="notice-state" role="status">{noticeText}</p>}
+          {!quick && alignments !== null && alignments.length === 0 && <div className="alignment-recovery" role="region" aria-label={m.review.alignmentRecoveryAria}>
+            <p>{m.review.alignmentEmptyPrompt}</p>
+            <div className="actions">
+              <button type="button" className="secondary-button" disabled={!validInput || phase === 'loading'} onClick={() => addAlignment(false, true)}>{m.review.alignmentReconfirmWhole}</button>
+              <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={() => doc.resetAlignments()}>{m.review.alignmentFallbackReset}</button>
+            </div>
+          </div>}
+          {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}{error.saveConflict && <div className="actions save-conflict-actions"><button type="button" className="secondary-button" onClick={resolveConflictsAndSave}>{m.review.resolveConflictsAndSave}</button><button type="button" className="secondary-button" onClick={exportProseTxt}>{m.review.exportProseTxt}</button></div>}</div>}
+          {!quick && phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
+          {!quick && basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
         </div>
-        {alignments?.map((a, i) => <div className="alignment-row" key={i}><p>{fill(m.review.alignmentRowSource, { start: a.source.start + 1, end: a.source.end, text: a.source.text })}</p><p>{a.target ? fill(m.review.alignmentRowTarget, { start: a.target.start + 1, end: a.target.end, text: a.target.text }) : m.review.alignmentRowOmit}</p><button type="button" className="text-button" onClick={() => doc.removeAlignment(i)}>{m.review.alignmentRemove}</button></div>)}
-      </details>
-      <div className="review-quota">
-        {pool.kind === 'success' ? <>
-          <p>{fill(m.review.quotaSnapshot, { n: pool.data.reviews.remaining, limit: pool.data.reviews.limit })}</p>
-          {reviewsClosed && <p>{m.rMsg.reviews_pool_exhausted}</p>}
-        </> : <p>{pool.kind === 'loading' ? m.pool.loading : m.pool.unavailable}</p>}
+        {!quick && <div className="manuscript-review-pane">
+          {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
+            {choices.map((choice, i) => {
+              const canConfirm = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' && doc.canConfirmChoice(i);
+              return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{canConfirm && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.confirmChoice(i)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
+            })}
+          </div>}
+          {capabilities?.includes('semantic-review-v1') && <div className="issue-overview" role="group" aria-label={sm.overviewAria}>
+            <button type="button" className="secondary-button" onClick={() => document.getElementById('term-track-title')?.scrollIntoView({ block: 'start' })}>{fill(sm.overviewTerms, { n: termTotal })}</button>
+            <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
+          </div>}
+          <SemanticWorkbench
+            doc={doc}
+            snapshot={snapshot}
+            lang={lang}
+            pool={pool}
+            locate={(side, span) => jumpTo(side, span)}
+            termTrack={termTrack}
+          />
+        </div>}
       </div>
-      <div className="actions">
-        <button type="submit" className={translatePrimary ? 'secondary-button' : undefined} disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
-        <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
-        {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
-        {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.review.cancelWait}</button>}
-        <button className="secondary-button" type="button" onClick={() => doc.undo()} disabled={!history.length}>{m.review.undo}</button>
-      </div>
-    </form>
-    <div className="actions draft-actions">
-      <div className="draft-primary-actions">
-        <button type="button" className="secondary-button" onClick={clearDraft} disabled={!holdsWork}>{m.review.clearDraft}</button>
-        <button type="button" className="secondary-button" onClick={save}>{m.review.save}</button>
-        <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>{m.review.import}</button>
-        <input ref={fileBox} className="visually-hidden" type="file" accept=".json,.txt,.md,application/json,text/plain,text/markdown" aria-label={m.review.importFileAria} onChange={e => {
-          const file = e.target.files?.[0];
-          e.target.value = '';
-          void importFile(file);
-        }} />
-        {documentCheckpoint && <button type="button" className="secondary-button" onClick={() => doc.restoreDocumentCheckpoint()}>{m.review.restoreCheckpoint}</button>}
-      </div>
-      <div className="export-actions">
-        <button type="button" className="secondary-button" onClick={exportTxt}>{m.review.exportTxt}</button>
-        <button type="button" className="secondary-button" onClick={exportResult}>{m.review.exportResult}</button>
-        <button type="button" className="secondary-button" onClick={exportMarkdown}>{m.review.exportMarkdown}</button>
-      </div>
-    </div>
-    {notice && <p className="notice-state" role="status">{noticeText}</p>}
-    {alignments !== null && alignments.length === 0 && <div className="alignment-recovery" role="region" aria-label={m.review.alignmentRecoveryAria}>
-      <p>{m.review.alignmentEmptyPrompt}</p>
-      <div className="actions">
-        <button type="button" className="secondary-button" disabled={!validInput || phase === 'loading'} onClick={() => addAlignment(false, true)}>{m.review.alignmentReconfirmWhole}</button>
-        <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={() => doc.resetAlignments()}>{m.review.alignmentFallbackReset}</button>
-      </div>
-    </div>}
-    {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}{error.saveConflict && <div className="actions save-conflict-actions"><button type="button" className="secondary-button" onClick={resolveConflictsAndSave}>{m.review.resolveConflictsAndSave}</button><button type="button" className="secondary-button" onClick={exportProseTxt}>{m.review.exportProseTxt}</button></div>}</div>}
-    {phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
-    {basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
-    </div>
-    <div className="manuscript-review-pane">
-    {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
-      {choices.map((choice, i) => {
-        const canConfirm = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' && doc.canConfirmChoice(i);
-        return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{canConfirm && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.confirmChoice(i)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
-      })}
-    </div>}
-    {capabilities?.includes('semantic-review-v1') && <div className="issue-overview" role="group" aria-label={sm.overviewAria}>
-      <button type="button" className="secondary-button" onClick={() => document.getElementById('term-track-title')?.scrollIntoView({ block: 'start' })}>{fill(sm.overviewTerms, { n: termTotal })}</button>
-      <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
-    </div>}
-    <SemanticWorkbench
-      doc={doc}
-      snapshot={snapshot}
-      lang={lang}
-      pool={pool}
-      locate={(side, span) => (side === 'source' ? jumpTo(sourceBox.current, source, span) : jumpTo(targetBox.current, target, span))}
-      termTrack={termTrack}
-    />
-    </div>
     </div>
   </section>;
 }

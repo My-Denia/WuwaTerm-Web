@@ -103,9 +103,21 @@ export async function installRoutes(page, options = {}) {
 export async function openWorkbench(page, options = {}) {
   const rec = await installRoutes(page, options);
   await page.goto(BASE + '/');
-  await expect(page.locator('.review-quota')).toContainText('/ 60', { timeout: 30_000 });
+  // The workspace opens in quick mode; these specs drive manuscript review on the same document.
+  await expect(page.locator('.pool-strip')).toContainText('/60', { timeout: 30_000 });
+  await openManuscript(page);
+  await expect(page.locator('.review-quota')).toContainText('/ 60');
   await expect.poll(() => rec.capabilityCalls, { timeout: 15_000 }).toBeGreaterThan(0);
   return rec;
+}
+
+/** Switch the document workspace to manuscript review (zh or en interface). */
+export async function openManuscript(page) {
+  // Retried like switchTo: a click that lands before hydration has no handler yet.
+  await expect(async () => {
+    await page.locator('.mode-switch button').nth(1).click();
+    await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'manuscript', { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 export async function switchTo(page, language) {

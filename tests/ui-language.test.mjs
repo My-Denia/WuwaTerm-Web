@@ -11,7 +11,7 @@ const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u;
 // English copy may legitimately show Chinese only where a Chinese term itself
 // is the content: the zh button label, the decorative hero eyebrow, and the
 // zh-term lookup example. Unit suffixes are legitimately empty in English.
-const EN_CJK_ALLOWLIST = new Set(['language.zh', 'hero.eyebrow', 'terms.placeholder', 'privacy.s2p3']);
+const EN_CJK_ALLOWLIST = new Set(['language.zh', 'terms.placeholder', 'privacy.s2p3']);
 const EN_EMPTY_ALLOWLIST = new Set(['pool.termsUnit', 'pool.charactersUnit']);
 
 function shape(value) {

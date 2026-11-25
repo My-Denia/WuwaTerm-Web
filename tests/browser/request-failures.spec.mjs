@@ -5,7 +5,7 @@ import { fill, msg } from '../../lib/messages.ts';
 import { S, failure, fillPair, openWorkbench } from '../helpers/semantic-routes.mjs';
 
 const M = msg('zh');
-const panel = page => page.locator('.review-card .error-panel');
+const panel = page => page.locator('.document-workspace .error-panel');
 const requestIdLabel = M.failure.requestId.split('{')[0];
 
 test('a failed translation in the review workbench says what failed, what to do and which request it was', async ({ page }) => {
@@ -20,8 +20,8 @@ test('a failed translation in the review workbench says what failed, what to do 
   }
   await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
   await expect(panel(page)).toContainText(M.failure.causeTimeout);
-  // The advice names a path every user has: retry, or split the text and translate the parts in the translation card.
-  await expect(panel(page)).toContainText('可以稍后重试；文本较长时，可以拆成几段较短的文本，在“整句翻译”中分别翻译。');
+  // The advice names a path every user has: retry, or split the text and translate the parts in quick translation.
+  await expect(panel(page)).toContainText('可以稍后重试；文本较长时，可以拆成几段较短的文本，在“快速翻译”中分别翻译。');
   await expect(panel(page)).not.toContainText('审校工作台逐段翻译');
   // The site timed out waiting, so no upstream request id exists to show.
   await expect(panel(page)).not.toContainText(requestIdLabel);
@@ -45,7 +45,7 @@ test('a failed single-pair translation names the cause and the request id', asyn
   await openWorkbench(page, { capabilities: [], translateFailures: { 1: failure(503, 'llm_unavailable', { request_id: 'synthetic-pair-1' }) } });
   await page.locator('#review-source').fill('她看见三只鸟。');
   await page.getByRole('button', { name: S.segTranslate, exact: true }).click();
-  const notice = page.locator('.review-card .notice-state');
+  const notice = page.locator('.document-workspace .notice-state');
   for (const line of [M.tMsg.llm_unavailable, M.failure.causeUnavailable, fill(M.failure.requestId, { id: 'synthetic-pair-1' })]) {
     await expect(notice).toContainText(line);
   }
