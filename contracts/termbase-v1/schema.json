@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wuwaterm.local/contracts/termbase-v1.schema.json",
+  "title": "WuwaTerm local user termbase (wuwaterm-termbase-v1)",
+  "$ref": "#/$defs/TermbaseV1",
+  "$defs": {
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?Z$"
+    },
+    "Direction": {
+      "type": "string",
+      "enum": ["en", "zh"]
+    },
+    "Kind": {
+      "type": "string",
+      "enum": ["community_term", "preferred_term", "do_not_translate"]
+    },
+    "Entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "target", "direction", "kind", "note", "updated_at"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "target": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "direction": { "$ref": "#/$defs/Direction" },
+        "kind": { "$ref": "#/$defs/Kind" },
+        "note": { "type": "string", "minLength": 0, "maxLength": 160 },
+        "updated_at": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "TermbaseV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "schema_version", "updated_at", "entries"],
+      "properties": {
+        "format": { "const": "wuwaterm-termbase-v1" },
+        "schema_version": { "const": 1 },
+        "updated_at": { "$ref": "#/$defs/Timestamp" },
+        "entries": { "type": "array", "minItems": 0, "maxItems": 2000, "items": { "$ref": "#/$defs/Entry" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "format": "wuwaterm-termbase-v1",
+  "schema_version": 1,
+  "updated_at": "2026-11-25T00:00:00Z",
+  "entries": [
+    {
+      "id": "tb-001",
+      "source": "",
+      "target": "target tb-001",
+      "direction": "en",
+      "kind": "community_term",
+      "note": "",
+      "updated_at": "2026-11-25T00:00:00Z"
+    }
+  ]
+}

@@ -105,6 +105,15 @@ imported file. Cross-page links use full document navigation so browser Back,
 Forward and reload request the browser's own warning. Cancelling retains the
 manuscript, decisions and reports. A crash or forced quit can still discard the page.
 
+**My terms (reference).** A collapsible panel in the workspace holds a personal term
+list in the format `wuwaterm-termbase-v1`
+([contract](../contracts/termbase-v1/SPEC.md)): import and export are explicit file
+actions, entries are added, edited and deleted in page memory, and a reload empties
+the list. It writes to no `localStorage`, `sessionStorage`, IndexedDB or cookie,
+sends no request, and is never part of a `.wuwaterm` manuscript. An entry found in
+the current source text is shown as a user reference, apart from the official
+dictionary; it takes no part in translation, term locking or review.
+
 The 2,000-character review request limit does not restrict manuscript storage:
 long translations can be saved and reopened intact within the file size cap
 (1 MiB for v1 and v2, 44 MiB for v3 and v4).

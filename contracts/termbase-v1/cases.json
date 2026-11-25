@@ -1,0 +1,394 @@
+{
+  "format": "wuwaterm-termbase-v1",
+  "spec": "SPEC.md",
+  "schema": "schema.json",
+  "codes": [
+    "termbase_not_json",
+    "termbase_too_large",
+    "termbase_too_many_entries",
+    "termbase_duplicate_key",
+    "termbase_forbidden_key",
+    "termbase_nul",
+    "termbase_surrogate",
+    "termbase_non_finite",
+    "termbase_invalid_content"
+  ],
+  "limits": {
+    "file_bytes": 1048576,
+    "entries": 2000,
+    "id_scalars": 64,
+    "source_scalars": 120,
+    "target_scalars": 160,
+    "note_scalars": 160
+  },
+  "valid": [
+    {
+      "file": "valid-empty.json",
+      "note": "no entries",
+      "canonical": true
+    },
+    {
+      "file": "valid-one-entry.json",
+      "note": "one community term in the document example form",
+      "canonical": true
+    },
+    {
+      "file": "valid-all-kinds.json",
+      "note": "both directions and all three kinds, a fractional-second timestamp, astral characters, an empty note",
+      "canonical": true
+    },
+    {
+      "file": "valid-max-length-fields.json",
+      "note": "every string at its upper bound, counted in scalars (astral characters are 4 bytes each)",
+      "canonical": true
+    },
+    {
+      "file": "valid-escaped-astral-pair.json",
+      "note": "a surrogate pair written as two \\u escapes is one scalar; not the canonical bytes",
+      "canonical": false
+    },
+    {
+      "file": "valid-compact-spacing.json",
+      "note": "minified with arbitrary insignificant whitespace; not the canonical bytes",
+      "canonical": false
+    }
+  ],
+  "invalid": [
+    {
+      "file": "invalid-not-object.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "the top level is an array"
+    },
+    {
+      "file": "invalid-unknown-top-key.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "an unknown top-level key"
+    },
+    {
+      "file": "invalid-unknown-entry-key.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "an unknown entry key"
+    },
+    {
+      "file": "invalid-wrong-format.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "format is not wuwaterm-termbase-v1"
+    },
+    {
+      "file": "invalid-schema-version-2.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "schema_version is 2"
+    },
+    {
+      "file": "invalid-schema-version-string.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "schema_version is the string \"1\""
+    },
+    {
+      "file": "invalid-missing-entries.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "no entries key"
+    },
+    {
+      "file": "invalid-entries-not-array.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "entries is an object"
+    },
+    {
+      "file": "invalid-entry-missing-note.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "an entry without note"
+    },
+    {
+      "file": "invalid-timestamp-offset.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "a UTC offset instead of Z"
+    },
+    {
+      "file": "invalid-timestamp-lowercase.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "lowercase t and z"
+    },
+    {
+      "file": "invalid-timestamp-date-only.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "a date without a time"
+    },
+    {
+      "file": "invalid-calendar-day.json",
+      "code": "termbase_invalid_content",
+      "schema": "accepts",
+      "note": "February 30th: the pattern allows it, the reader checks the month length"
+    },
+    {
+      "file": "invalid-direction-auto.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "direction is \"auto\""
+    },
+    {
+      "file": "invalid-kind-unknown.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "an unknown kind"
+    },
+    {
+      "file": "invalid-id-empty.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "id is empty"
+    },
+    {
+      "file": "invalid-id-65-scalars.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "id has 65 scalars"
+    },
+    {
+      "file": "invalid-source-empty.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "source is empty"
+    },
+    {
+      "file": "invalid-source-121-scalars.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "source has 121 scalars"
+    },
+    {
+      "file": "invalid-target-empty.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "target is empty"
+    },
+    {
+      "file": "invalid-target-161-scalars.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "target has 161 scalars"
+    },
+    {
+      "file": "invalid-note-161-scalars.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "note has 161 scalars"
+    },
+    {
+      "file": "invalid-field-not-string.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "target is a number"
+    },
+    {
+      "file": "invalid-duplicate-id.json",
+      "code": "termbase_invalid_content",
+      "schema": "accepts",
+      "note": "two entries share an id; a schema cannot say unique by field"
+    },
+    {
+      "file": "invalid-too-deep.json",
+      "code": "termbase_invalid_content",
+      "schema": "rejects",
+      "note": "nesting deeper than the reader allows"
+    },
+    {
+      "file": "invalid-duplicate-key-top.json",
+      "code": "termbase_duplicate_key",
+      "schema": "accepts",
+      "note": "format appears twice (JSON.parse keeps the last)"
+    },
+    {
+      "file": "invalid-duplicate-key-entry.json",
+      "code": "termbase_duplicate_key",
+      "schema": "accepts",
+      "note": "target appears twice in an entry"
+    },
+    {
+      "file": "invalid-proto-key-top.json",
+      "code": "termbase_forbidden_key",
+      "schema": "rejects",
+      "note": "__proto__ at the top level"
+    },
+    {
+      "file": "invalid-constructor-key-top.json",
+      "code": "termbase_forbidden_key",
+      "schema": "rejects",
+      "note": "constructor at the top level"
+    },
+    {
+      "file": "invalid-prototype-key-top.json",
+      "code": "termbase_forbidden_key",
+      "schema": "rejects",
+      "note": "prototype at the top level"
+    },
+    {
+      "file": "invalid-proto-key-entry.json",
+      "code": "termbase_forbidden_key",
+      "schema": "rejects",
+      "note": "__proto__ inside an entry"
+    },
+    {
+      "file": "invalid-constructor-key-nested.json",
+      "code": "termbase_forbidden_key",
+      "schema": "rejects",
+      "note": "constructor inside a nested unknown value"
+    },
+    {
+      "file": "invalid-nul-escape.json",
+      "code": "termbase_nul",
+      "schema": "accepts",
+      "note": "a note holding \\u0000"
+    },
+    {
+      "file": "invalid-nul-byte.json",
+      "code": "termbase_nul",
+      "schema": "not-json",
+      "note": "a raw 0x00 byte between tokens"
+    },
+    {
+      "file": "invalid-lone-high-surrogate.json",
+      "code": "termbase_surrogate",
+      "schema": "accepts",
+      "note": "a note holding an isolated \\ud800"
+    },
+    {
+      "file": "invalid-lone-low-surrogate.json",
+      "code": "termbase_surrogate",
+      "schema": "accepts",
+      "note": "a note holding an isolated \\udc00"
+    },
+    {
+      "file": "invalid-reversed-surrogate-pair.json",
+      "code": "termbase_surrogate",
+      "schema": "accepts",
+      "note": "a low surrogate before a high one"
+    },
+    {
+      "file": "invalid-nan.json",
+      "code": "termbase_non_finite",
+      "schema": "not-json",
+      "note": "schema_version is NaN"
+    },
+    {
+      "file": "invalid-infinity.json",
+      "code": "termbase_non_finite",
+      "schema": "not-json",
+      "note": "schema_version is Infinity"
+    },
+    {
+      "file": "invalid-negative-infinity.json",
+      "code": "termbase_non_finite",
+      "schema": "not-json",
+      "note": "schema_version is -Infinity"
+    },
+    {
+      "file": "invalid-number-overflow.json",
+      "code": "termbase_non_finite",
+      "schema": "rejects",
+      "note": "schema_version 1e999 reads as Infinity"
+    },
+    {
+      "file": "invalid-empty-file.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "zero bytes"
+    },
+    {
+      "file": "invalid-trailing-comma.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a trailing comma"
+    },
+    {
+      "file": "invalid-comment.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a comment"
+    },
+    {
+      "file": "invalid-single-quotes.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "single-quoted strings"
+    },
+    {
+      "file": "invalid-leading-zero.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "schema_version 01"
+    },
+    {
+      "file": "invalid-raw-control-char.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a raw tab inside a string"
+    },
+    {
+      "file": "invalid-text-after-value.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a second value after the file"
+    },
+    {
+      "file": "invalid-utf8-bom.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a UTF-8 byte order mark"
+    },
+    {
+      "file": "invalid-utf8-bytes.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a lone 0xff byte"
+    },
+    {
+      "file": "invalid-utf8-encoded-surrogate.json",
+      "code": "termbase_not_json",
+      "schema": "not-json",
+      "note": "a surrogate encoded as three UTF-8 bytes (ED A0 80)"
+    }
+  ],
+  "generated": [
+    {
+      "file": "valid-2000-entries.json",
+      "kind": "entries",
+      "count": 2000,
+      "code": null,
+      "note": "exactly 2,000 entries, canonical bytes"
+    },
+    {
+      "file": "valid-exactly-1-mib.json",
+      "kind": "bytes",
+      "bytes": 1048576,
+      "code": null,
+      "note": "2,000 entries padded with trailing spaces to exactly 1,048,576 bytes"
+    },
+    {
+      "file": "invalid-2001-entries.json",
+      "kind": "entries",
+      "count": 2001,
+      "code": "termbase_too_many_entries",
+      "note": "2,001 entries"
+    },
+    {
+      "file": "invalid-1-mib-plus-1.json",
+      "kind": "bytes",
+      "bytes": 1048577,
+      "code": "termbase_too_large",
+      "note": "the same file padded to 1,048,577 bytes"
+    }
+  ]
+}
