@@ -110,6 +110,7 @@ test('edited manuscripts export with stale wording, imported history with untrus
   const history = [{ source: saved.source, target: saved.target, direction: saved.direction, alignments: null, report: saved.report, resolutions: [] }];
   const content = serializeWorkfile({ source: saved.source, target: saved.target, direction: saved.direction, alignments: null, choices: [choice], history });
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(content) });
+  await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('.review-summary')).toContainText('历史报告');
   const imported = await download(page, '导出 Markdown 报告');
   expect(imported.text).toContain('导入的历史报告');

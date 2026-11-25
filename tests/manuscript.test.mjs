@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
+import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, sanitizeDuplicateChoices, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
 import { fixture, hash } from './fixtures/manuscript.mjs';
 const choiceFor = (s, i = 0, c = s.report.findings[i].candidates[0]) => makeChoice({ ...s, finding: s.report.findings[i], candidate: c });
 const clean = s => { const { source, target, direction, alignments, report, resolutions } = s; return { source, target, direction, alignments, report, resolutions }; };
@@ -315,4 +315,27 @@ test('gated not_evaluated reports keep existing protections: missing finding and
   assert.equal(missingPending.code, 'finding_missing_or_truncated');
   assert.equal(missingPending.resolution, null);
   assert.equal(reconcileChoice(c, s, gated).status, 'applicable'); // verdict alone never blocks reuse
+});
+
+test('sanitizeDuplicateChoices drops colliding duplicate choices while keeping valid choices and prose intact', () => {
+  const s = fixture('alpha\nbeta', '阿尔法');
+  const validKeep = choiceFor(fixture('今汐', 'Jinhsi'), 0, null);
+  const f = s.report.findings[0];
+  const dupA = makeChoice({ source: 'alpha\nbeta\none', direction: 'en', alignments: null, report: s.report, finding: { ...f, source_span: { start: 6, end: 10, text: 'beta' }, id: '6:10:beta' }, candidate: null });
+  const dupB = makeChoice({ source: 'alpha\nbeta\ntwo', direction: 'en', alignments: null, report: s.report, finding: { ...f, source_span: { start: 6, end: 10, text: 'beta' }, id: '6:10:beta' }, candidate: null });
+  const exactA = { ...validKeep };
+  const exactB = { ...validKeep };
+  const decA = { decision_id: 'd1', segment_index: 0, occurrence: '0:2:今汐', source_span: { start: 0, end: 2, text: '今汐' }, target_span: null, precedent: true, choice: 'not_a_term', resolution: 'ok', provenance: { source_revision: 'a'.repeat(64) } };
+  const decB = { ...decA, decision_id: 'd2' };
+  const cleaned = sanitizeDuplicateChoices({
+    source: 'alpha\nbeta\n今汐',
+    direction: 'en',
+    choices: [dupA, validKeep, dupB, exactA, exactB],
+    semantic_decisions: [decA, decB],
+    segments: [{ index: 0, choices: [exactA, exactB] }],
+  });
+  assert.equal(cleaned.dropped, 6);
+  assert.deepEqual(cleaned.choices, [validKeep]);
+  assert.deepEqual(cleaned.semantic_decisions, [decB]);
+  assert.deepEqual(cleaned.segments[0].choices, [exactB]);
 });

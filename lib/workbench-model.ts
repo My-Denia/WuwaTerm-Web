@@ -81,8 +81,9 @@ export type Choice = {
 export type Resolution = { mention_id: string; choice: ChoiceKind; candidate_id?: string };
 export type Snapshot = Draft & { report: Report; trusted: boolean; signature: string; resolutions: Resolution[] | null };
 export type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[]; semantic: SemanticState; serial?: number; replacedDocument?: boolean };
+export type DocumentCheckpoint = { entry: Undo; kind: 'import' | 'replace' | 'clear'; createdAt: number };
 export type NoticeState = string | null;
-export type ErrorState = { reason?: string; code?: string; text?: string; kind?: 'translation' | 'review'; requestId?: string; retryAfter?: number } | null;
+export type ErrorState = { reason?: string; code?: string; text?: string; kind?: 'translation' | 'review'; requestId?: string; retryAfter?: number; saveConflict?: boolean } | null;
 export type DocumentPhase = 'idle' | 'loading' | 'success' | 'error' | 'cancelled';
 
 type Suggestion = { target_span: Span; replacement: string; term_effect: TermEffect };
@@ -176,4 +177,14 @@ export type TargetRevisionResult =
 
 export type ExportArtifact = { filename: string; content: string; mimeType: string };
 export type ImportFileLike = { name: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
-export type ImportOutcome = { status: 'imported' | 'error' | 'ignored' } | { status: 'needs_confirm_text'; pendingText: string };
+export type PendingWorkfile = {
+  draft: Draft;
+  choices: Choice[];
+  reports: Snapshot[];
+  semantic: SemanticState;
+  importedBody: string | null;
+};
+export type ImportOutcome =
+  | { status: 'imported' | 'error' | 'ignored' }
+  | { status: 'needs_confirm_text'; pendingText: string }
+  | { status: 'needs_confirm_workfile'; pendingWorkfile: PendingWorkfile };

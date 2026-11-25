@@ -264,6 +264,7 @@ test('with no report yet, save/import/export really work and send no review requ
 
   const file = serializeWorkfile({ source: SOURCE, target: TARGET, direction: 'en', alignments: null, choices: [], history: [] });
   await page.getByLabel(ZH.importFile).setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+  await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('.manuscript-save-state')).toContainText('当前工作与这次导入的稿件一致');
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
   await expect(page.locator('#review-source')).toHaveValue(SOURCE);
@@ -301,6 +302,7 @@ test('at zero review quota the local file tools stay usable and send no review r
   await switchTo(page, 'English');
   const file = serializeWorkfile({ source: SOURCE, target: TARGET, direction: 'en', alignments: null, choices: [], history: [] });
   await page.getByLabel(EN.importFile).setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(file) });
+  await page.getByRole('dialog', { name: 'Replace the current manuscript with this workfile?' }).getByRole('button', { name: 'Import and replace', exact: true }).click();
   await expect(page.locator('#review-source')).toHaveValue(SOURCE);
   for (const name of [EN.clear, EN.save, EN.import, EN.exportTxt, EN.exportResult, EN.exportMarkdown]) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();

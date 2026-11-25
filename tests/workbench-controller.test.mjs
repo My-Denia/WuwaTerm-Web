@@ -3,9 +3,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { canonicalOf, createWorkbenchController, isRunActive } from '../lib/workbench-controller.ts';
+import { MAX_UNDO, canonicalOf, createWorkbenchController, isRunActive } from '../lib/workbench-controller.ts';
 import { recordView } from '../lib/long-review.ts';
-import { remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, serializeWorkfile } from '../lib/manuscript.js';
+import {
+  makeChoice, remapAlignmentsForTargetFill, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices, serializeWorkfile,
+} from '../lib/manuscript.js';
 import { issueStatus } from '../lib/semantic-state.js';
 import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from './fixtures/manuscript.mjs';
 import { defaultSemanticResponse, semanticResponse } from './helpers/semantic-fixture.mjs';
@@ -823,7 +825,9 @@ test('manual paragraph repair commands and document-level target revision / choi
   doc.choose(missingTargetFinding, candidate);
   const saved = doc.save();
   assert.ok(saved);
-  await doc.importFile(fileFromText('reopened.json', saved.content));
+  const reopened = await doc.importFile(fileFromText('reopened.json', saved.content));
+  assert.equal(reopened.status, 'needs_confirm_workfile');
+  doc.replaceWithWorkfile(reopened.pendingWorkfile);
   await doc.check(false);
   assert.equal(doc.canConfirmChoice(0), true);
   assert.equal(doc.confirmChoice(0), true);
@@ -1076,5 +1080,103 @@ test('localized target edits, reopened batch resume, ready retranslate and undo 
   assert.equal(doc.getSnapshot().draft.alignments?.length, 0);
   assert.equal(doc.getSnapshot().notice, 'editedAlignments');
 
+  doc.dispose();
+});
+
+test('workfile import guard protects unsaved edits, coalesces typing undo, keeps eviction-immune checkpoint, and resolves duplicate save conflicts', async () => {
+  const clock = makeClock(1_700_000_000_000);
+  const doc = createWorkbenchController({ clock, onPoolRefresh: () => {} });
+
+  // 1. JSON import over unsaved edits after save requires confirmation and keeps edits intact until confirmed.
+  const sourceDraft = 'alpha\nbeta\ngamma\ndelta\nepsilon\nzeta';
+  doc.editText('source', sourceDraft);
+  doc.editText('target', 'initial target');
+  const saved = doc.save();
+  assert.ok(saved);
+  doc.editText('target', 'initial target + unsaved edit');
+
+  const gatedOutcome = await doc.importFile(fileFromText('saved.json', saved.content));
+  assert.equal(gatedOutcome.status, 'needs_confirm_workfile');
+  assert.equal(doc.getSnapshot().draft.target, 'initial target + unsaved edit');
+
+  doc.replaceWithWorkfile(gatedOutcome.pendingWorkfile);
+  assert.equal(doc.getSnapshot().draft.target, 'initial target');
+  assert.ok(doc.getSnapshot().documentCheckpoint);
+
+  // 2. Typing 25 sequential characters after import coalesces into 1 typing undo transaction: 2 undos reach pre-import draft.
+  const beforeTypingCount = doc.getSnapshot().history.length;
+  for (let i = 1; i <= 25; i++) {
+    doc.editText('target', `initial target${'!'.repeat(i)}`);
+  }
+  assert.equal(doc.getSnapshot().history.length, beforeTypingCount + 1);
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.target, 'initial target');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.target, 'initial target + unsaved edit');
+
+  // 3. Even if >MAX_UNDO separate typing transactions evict the replace record from history, documentCheckpoint restores pre-import work.
+  const confirmOutcome = await doc.importFile(fileFromText('saved.json', saved.content));
+  assert.equal(confirmOutcome.status, 'needs_confirm_workfile');
+  doc.replaceWithWorkfile(confirmOutcome.pendingWorkfile);
+  for (let i = 1; i <= MAX_UNDO + 10; i++) {
+    await clock.advance(2000);
+    doc.editText('target', `burst-${i}`);
+  }
+  assert.equal(doc.getSnapshot().history.length, MAX_UNDO);
+  assert.equal(doc.getSnapshot().history.some(u => u.replacedDocument), false);
+  assert.ok(doc.getSnapshot().documentCheckpoint);
+  assert.equal(doc.restoreDocumentCheckpoint(), true);
+  assert.equal(doc.getSnapshot().draft.target, 'initial target + unsaved edit');
+  assert.equal(doc.getSnapshot().notice, 'restoredCheckpoint');
+
+  // 4. Duplicate-choice save failure sets saveConflict and resolveConflictingChoicesAndSave() clears colliding choices undoably.
+  const f1 = fixture('beta', '译文');
+  const s1 = 'alpha\nbeta';
+  const collidingA = makeChoice({
+    source: 'alpha\nbeta\none',
+    direction: 'en',
+    alignments: null,
+    report: { ...f1.report, findings: [{ ...f1.report.findings[0], source_span: { start: 6, end: 10, text: 'beta' }, id: '6:10:beta' }] },
+    finding: { ...f1.report.findings[0], source_span: { start: 6, end: 10, text: 'beta' }, id: '6:10:beta' },
+    candidate: null,
+  });
+  const collidingB = makeChoice({
+    source: 'alpha\nbeta\ntwo',
+    direction: 'en',
+    alignments: null,
+    report: { ...f1.report, findings: [{ ...f1.report.findings[0], source_span: { start: 6, end: 10, text: 'beta' }, id: '6:10:beta' }] },
+    finding: { ...f1.report.findings[0], source_span: { start: 6, end: 10, text: 'beta' }, id: '6:10:beta' },
+    candidate: null,
+  });
+  const docConflict = createWorkbenchController({ clock, onPoolRefresh: () => {} });
+  docConflict.receiveDraft({ source: s1, target: '阿尔法', direction: 'en', alignments: null });
+  docConflict['setState']({ choices: [collidingA, collidingB] });
+  assert.equal(docConflict.save(), null);
+  assert.equal(docConflict.getSnapshot().error?.code, 'workfile_duplicate_choices');
+  assert.equal(docConflict.getSnapshot().error?.saveConflict, true);
+
+  const sanitized = sanitizeDuplicateChoices({ source: s1, direction: 'en', choices: [collidingA, collidingB] });
+  assert.equal(sanitized.dropped, 2);
+
+  const prose = docConflict.exportProseTxt();
+  assert.equal(prose.filename, 'wuwaterm-prose.txt');
+  assert.equal(prose.content, `${s1}\n\n---\n\n阿尔法`);
+
+  const beforeGen = docConflict.getSnapshot().generation;
+  docConflict['setState']({ phase: 'loading', translating: true, inFlight: true });
+  const resolvedSave = docConflict.resolveConflictingChoicesAndSave();
+  assert.ok(resolvedSave);
+  const afterSnap = docConflict.getSnapshot();
+  assert.equal(afterSnap.choices.length, 0);
+  assert.equal(afterSnap.draft.source, s1);
+  assert.equal(afterSnap.notice, 'resolvedConflictsSaved');
+  assert.equal(afterSnap.generation, beforeGen + 1);
+  assert.equal(afterSnap.phase, 'idle');
+  assert.equal(afterSnap.translating, false);
+  assert.equal(afterSnap.inFlight, false);
+
+  docConflict.undo();
+  assert.equal(docConflict.getSnapshot().choices.length, 2);
+  docConflict.dispose();
   doc.dispose();
 });

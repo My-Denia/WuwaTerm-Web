@@ -18,6 +18,13 @@ function savedManuscript(draft) {
   });
 }
 
+async function confirmWorkfileImport(page) {
+  const dialog = page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '导入并替换', exact: true }).click();
+  await expect(dialog).toBeHidden();
+}
+
 async function open(page) {
   const reviews = [];
   const translations = [];
@@ -108,6 +115,7 @@ test('A selected then B; B succeeds then A rejects: candidate must not show obso
 
   // B succeeds
   await page.evaluate(() => window.__resolveRead('file-b.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
   await expect(page.locator('.error-panel')).toHaveCount(0);
@@ -140,6 +148,7 @@ test('both success completion orders: A-before-B and B-before-A must end at B', 
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-b1.json');
 
   await page.evaluate(() => window.__resolveRead('file-b1.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await page.evaluate(() => window.__resolveRead('file-a1.json'));
   await expect(page.locator('#review-source')).toHaveValue(B.source);
@@ -166,6 +175,7 @@ test('both success completion orders: A-before-B and B-before-A must end at B', 
 
   // Now C finishes
   await page.evaluate(() => window.__resolveRead('file-c2.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(C.source);
   await expect(page.locator('.error-panel')).toHaveCount(0);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
@@ -192,6 +202,7 @@ test('obsolete A parse failure and obsolete A success after B result do not poll
 
   // B succeeds first
   await page.evaluate(() => window.__resolveRead('file-b-good.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
   await expect(page.locator('.error-panel')).toHaveCount(0);
@@ -301,6 +312,7 @@ test('the same file can be selected again and late A cannot clear later selectio
 
   // Second A resolves: owning, imports B
   await page.evaluate(() => window.__resolveRead('file-a.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
 
@@ -420,6 +432,7 @@ test('review finishing during pending read: import then undo restores acceptance
 
   // B finishes reading and is accepted
   await page.evaluate(() => window.__resolveRead('file-b.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
 
   // Undo import: must restore the acceptance-time reports from the check that just finished
@@ -478,6 +491,7 @@ test('import and undo issue zero translation/review POSTs and exports remain his
   });
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-b.json');
   await page.evaluate(() => window.__resolveRead('file-b.json'));
+  await confirmWorkfileImport(page);
   await expect(page.locator('#review-source')).toHaveValue(B.source);
 
   // Undo
@@ -508,6 +522,7 @@ test('a v2 manuscript with semantic records imports and restores its decisions',
   const v2 = readFileSync(new URL('../../contracts/manuscript-v2/valid-all-parts.json', import.meta.url));
   const parsed = JSON.parse(v2.toString('utf-8'));
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'semantic.json', mimeType: 'application/json', buffer: v2 });
+  await confirmWorkfileImport(page);
   await expect(page.locator('.error-panel')).toHaveCount(0);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
   await expect(page.locator('#review-source')).toHaveValue(parsed.source);
@@ -522,4 +537,43 @@ test('a v2 manuscript with semantic records imports and restores its decisions',
   const saved = JSON.parse(Buffer.concat(parts).toString('utf-8'));
   expect(saved.format).toBe('wuwaterm-manuscript-v2');
   expect(saved.semantic_decisions).toEqual(parsed.semantic_decisions);
+});
+
+test('importing JSON workfile over unsaved revision asks confirmation, coalesces typing undo, and exposes checkpoint recovery', async ({ page }) => {
+  await open(page);
+  await page.locator('#review-source').fill('一。\n\n二。\n\n三。\n\n四。\n\n五。\n\n六。');
+  await page.locator('#review-target').fill('One. Two. Three. Four. Five. Six.');
+
+  const saveWait = page.waitForEvent('download');
+  await page.getByRole('button', { name: '保存稿件', exact: true }).click();
+  const stream = await (await saveWait).createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const savedJson = Buffer.concat(chunks).toString('utf8');
+
+  // Append unsaved revision
+  await page.locator('#review-target').fill('One. Two. Three. Four. Five. Six. [unsaved edit]');
+
+  // Re-importing JSON must prompt confirmation; Keep must preserve the unsaved edit.
+  await page.getByLabel('选择稿件文件').setInputFiles({
+    name: 'saved.json', mimeType: 'application/json', buffer: Buffer.from(savedJson),
+  });
+  const dialog = page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '保留当前稿件', exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('One. Two. Three. Four. Five. Six. [unsaved edit]');
+
+  // Import again and confirm replacement.
+  await page.getByLabel('选择稿件文件').setInputFiles({
+    name: 'saved.json', mimeType: 'application/json', buffer: Buffer.from(savedJson),
+  });
+  await confirmWorkfileImport(page);
+  await expect(page.locator('#review-target')).toHaveValue('One. Two. Three. Four. Five. Six.');
+
+  // Typing 25 chars in a row keeps both Undo and the protected pre-import checkpoint working.
+  await page.locator('#review-target').focus();
+  await page.locator('#review-target').pressSequentially('1234567890123456789012345');
+  await expect(page.getByRole('button', { name: '恢复更换前整稿', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '恢复更换前整稿', exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('One. Two. Three. Four. Five. Six. [unsaved edit]');
 });

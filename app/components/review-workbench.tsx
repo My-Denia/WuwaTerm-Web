@@ -20,7 +20,7 @@ import { semanticMsg } from '../../lib/semantic-messages';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
-import type { Candidate, Choice, Draft, Finding, Snapshot, Span, Utf16Offset } from '../../lib/workbench-model';
+import type { Candidate, Choice, Draft, Finding, PendingWorkfile, Snapshot, Span, Utf16Offset } from '../../lib/workbench-model';
 import { useUiLanguage } from './ui-language-context';
 import { SemanticWorkbench } from './semantic-workbench';
 
@@ -76,14 +76,14 @@ export function ReviewWorkbench() {
   const [doc] = useState(() => createWorkbenchController({ initialLang: lang }));
   const snapshot = useSyncExternalStore(doc.subscribe, doc.getSnapshot, doc.getSnapshot);
   const {
-    draft, choices, imported, reports, history, semantic, basis, capabilities,
+    draft, choices, imported, reports, history, documentCheckpoint, semantic, basis, capabilities,
     phase, translating, sourceDirtyForTranslation, notice, error,
     importedCanonical, downloadedCanonical, run, pairTranslating, generation, inFlight,
   } = snapshot;
   const { source, target, direction, alignments } = draft;
 
   const [pendingDraft, setPendingDraft] = useState<Draft | null>(null);
-  const [pendingText, setPendingText] = useState<string | null>(null);
+  const [pendingImport, setPendingImport] = useState<{ kind: 'text'; text: string } | { kind: 'workfile'; workfile: PendingWorkfile } | null>(null);
   const importDialog = useRef<HTMLDialogElement>(null);
   const keepImportButton = useRef<HTMLButtonElement>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
@@ -162,6 +162,7 @@ export function ReviewWorkbench() {
     : notice.startsWith('t:') ? translationNotice(notice.slice(2))
     : ((m.notices as Record<string, string>)[notice] ?? '');
   const errorTextValue = !error ? ''
+    : error.saveConflict ? m.review.saveConflictBody
     : error.reason !== undefined && error.reason !== null ? ((m.rMsg as Record<string, string>)[error.reason] ?? (m.tMsg as Record<string, string>)[error.reason] ?? m.rMsg.fallback)
     : error.code && (m.errors as Record<string, string>)[error.code] ? (m.errors as Record<string, string>)[error.code]!
     : error.text ?? '';
@@ -266,11 +267,11 @@ export function ReviewWorkbench() {
   }, [pendingDraft]);
 
   useEffect(() => {
-    if (pendingText !== null) {
+    if (pendingImport !== null) {
       if (!importDialog.current?.open) importDialog.current?.showModal();
       keepImportButton.current?.focus();
     } else importDialog.current?.close();
-  }, [pendingText]);
+  }, [pendingImport]);
 
   useEffect(() => {
     if (pendingLeaveUrl) {
@@ -355,12 +356,19 @@ export function ReviewWorkbench() {
     doc.recordAlignment(a, b, omit, whole);
   }
   function replaceWithText(text: string) {
-    setPendingText(null);
+    importDialog.current?.close();
+    setPendingImport(null);
     doc.replaceWithText(text);
+  }
+  function replaceWithWorkfile(workfile: PendingWorkfile) {
+    importDialog.current?.close();
+    setPendingImport(null);
+    doc.replaceWithWorkfile(workfile);
   }
   async function importFile(file?: File) {
     const outcome = await doc.importFile(file);
-    if (outcome.status === 'needs_confirm_text') setPendingText(outcome.pendingText);
+    if (outcome.status === 'needs_confirm_text') setPendingImport({ kind: 'text', text: outcome.pendingText });
+    else if (outcome.status === 'needs_confirm_workfile') setPendingImport({ kind: 'workfile', workfile: outcome.pendingWorkfile });
   }
   function clearDraft() {
     if (doc.clearDraft()) sourceBox.current?.focus();
@@ -368,6 +376,14 @@ export function ReviewWorkbench() {
   function save() {
     const out = doc.save();
     if (out) downloadFile(out.filename, out.content, out.mimeType);
+  }
+  function resolveConflictsAndSave() {
+    const out = doc.resolveConflictingChoicesAndSave();
+    if (out) downloadFile(out.filename, out.content, out.mimeType);
+  }
+  function exportProseTxt() {
+    const out = doc.exportProseTxt();
+    downloadFile(out.filename, out.content, out.mimeType);
   }
   function exportTxt() {
     const out = doc.exportTxt();
@@ -482,18 +498,22 @@ export function ReviewWorkbench() {
         <p>{saveView === 'matches-download' ? m.review.leaveDownload : m.review.leaveUnsaved}</p>
       </div>
       {error && <p role="alert">{errorTextValue}</p>}
+      {error?.saveConflict && <div className="actions save-conflict-actions"><button type="button" className="secondary-button" onClick={resolveConflictsAndSave}>{m.review.resolveConflictsAndSave}</button><button type="button" className="secondary-button" onClick={exportProseTxt}>{m.review.exportProseTxt}</button></div>}
       <div className="actions">
         <button ref={stayLeaveButton} type="button" onClick={() => setPendingLeaveUrl(null)}>{m.review.leaveStay}</button>
         <button type="button" className="secondary-button" onClick={save}>{m.review.leaveSaveStay}</button>
         <button type="button" className="secondary-button" onClick={() => { const url = pendingLeaveUrl; if (!url) { setPendingLeaveUrl(null); return; } leaveBypass.current = true; window.location.assign(url); }}>{m.review.leaveAnyway}</button>
       </div>
     </dialog>
-    <dialog className="handoff-dialog" ref={importDialog} aria-labelledby="import-replace-title" aria-describedby="import-replace-description" onCancel={() => setPendingText(null)}>
-      <h3 id="import-replace-title">{m.review.importReplaceTitle}</h3>
-      <p id="import-replace-description">{m.review.importReplaceBody}</p>
+    <dialog className="handoff-dialog" ref={importDialog} aria-labelledby="import-replace-title" aria-describedby="import-replace-description" onCancel={() => setPendingImport(null)}>
+      <h3 id="import-replace-title">{pendingImport?.kind === 'workfile' ? m.review.workfileReplaceTitle : m.review.importReplaceTitle}</h3>
+      <p id="import-replace-description">{pendingImport?.kind === 'workfile' ? m.review.workfileReplaceBody : m.review.importReplaceBody}</p>
       <div className="actions">
-        <button ref={keepImportButton} type="button" className="secondary-button" onClick={() => setPendingText(null)}>{m.review.dialogKeep}</button>
-        <button type="button" className="secondary-button" onClick={() => { if (pendingText !== null) replaceWithText(pendingText); }}>{m.review.importReplaceConfirm}</button>
+        <button ref={keepImportButton} type="button" className="secondary-button" onClick={() => setPendingImport(null)}>{m.review.dialogKeep}</button>
+        <button type="button" className="secondary-button" onClick={() => {
+          if (pendingImport?.kind === 'text') replaceWithText(pendingImport.text);
+          else if (pendingImport?.kind === 'workfile') replaceWithWorkfile(pendingImport.workfile);
+        }}>{m.review.importReplaceConfirm}</button>
       </div>
     </dialog>
     <dialog className="handoff-dialog" ref={handoffDialog} aria-labelledby="handoff-title" aria-describedby="handoff-description" onCancel={() => setPendingDraft(null)}>
@@ -556,6 +576,7 @@ export function ReviewWorkbench() {
       <button type="button" className="secondary-button" onClick={exportTxt}>{m.review.exportTxt}</button>
       <button type="button" className="secondary-button" onClick={exportResult}>{m.review.exportResult}</button>
       <button type="button" className="secondary-button" onClick={exportMarkdown}>{m.review.exportMarkdown}</button>
+      {documentCheckpoint && <button type="button" className="secondary-button" onClick={() => doc.restoreDocumentCheckpoint()}>{m.review.restoreCheckpoint}</button>}
     </div>
     {notice && <p className="notice-state" role="status">{noticeText}</p>}
     {alignments !== null && alignments.length === 0 && <div className="alignment-recovery" role="region" aria-label={m.review.alignmentRecoveryAria}>
@@ -565,7 +586,7 @@ export function ReviewWorkbench() {
         <button type="button" className="secondary-button" disabled={phase === 'loading'} onClick={() => doc.resetAlignments()}>{m.review.alignmentFallbackReset}</button>
       </div>
     </div>}
-    {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}</div>}
+    {error && <div className="error-panel" role="alert"><p>{errorTextValue}</p>{errorDetails.map(line => <p key={line} className="error-detail">{line}</p>)}{error.saveConflict && <div className="actions save-conflict-actions"><button type="button" className="secondary-button" onClick={resolveConflictsAndSave}>{m.review.resolveConflictsAndSave}</button><button type="button" className="secondary-button" onClick={exportProseTxt}>{m.review.exportProseTxt}</button></div>}</div>}
     {phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
     {basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
     {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
