@@ -13,14 +13,18 @@ two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
 Current pins: `contracts/backend-ref.txt` is
+`e5b7f1a84d04deb5795296b1a652e13c4e9fd1a8` (Core `v0.13.0`: automatic translation direction by
+Latin-to-CJK ratio, user prose kept verbatim, `wuwaterm-cjk-matcher-v10` and the
+`wuwaterm.structural_checks` module), raised from
 `6fb4d8a44b26f170a7b1c8e23f00f75b2bbfd2b8` (Core `v0.12.0`: `OperationExecutionBudget`, pure
 ASGI `TimeoutMiddleware`, bounded `RequestTrace`/`RuntimeMetrics`, and `wuwaterm.text_spans`),
-raised from `9a4f680f3ec3909e23afc2394f2c7eccf00af6e3` (Core PR #279: the MY-355 attribution
-fixes, the MY-356 `dense-128`/`reason-v1` review-v2 features with the 64 KiB review body, and the
-MY-359 regroup guard), which was raised from `d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core
-PR #199, the semantic review engine: semantic review is experimental and off unless
-`WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and `translation-context-v1` is always listed when a
-model is configured), which was raised from `7122ea7cb41e5987aac80b23fc27bd071fcfa22b`
+which was raised from `9a4f680f3ec3909e23afc2394f2c7eccf00af6e3` (Core PR #279: the MY-355
+attribution fixes, the MY-356 `dense-128`/`reason-v1` review-v2 features with the 64 KiB review
+body, and the MY-359 regroup guard), which was raised from
+`d5c35d299dc8c6d467b8e3a2f8c6b03cf2720a45` (Core PR #199, the semantic review engine: semantic
+review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
+`translation-context-v1` is always listed when a model is configured), which was raised from
+`7122ea7cb41e5987aac80b23fc27bd071fcfa22b`
 (Core PR #198, the contracts) by Web PR #16.
 `contracts/windows-ref.txt` is `a45dbf2cb000721be71d009d84413e9bc5783f74`
 (WuwaTerm-Windows PR #43, 3-pass duplicate-segment attribution, raised from
