@@ -374,6 +374,31 @@ footer div { display:flex; gap:20px; }
 .term-lookup .term-pair span { font-size:15px; }
 .term-lookup .term-result dl { gap:14px; flex-wrap:wrap; }
 
+.workspace-side { display:grid; gap:12px; min-width:0; align-content:start; }
+.my-terms { min-width:0; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+.document-workspace[data-mode="manuscript"] .my-terms { padding:6px 14px; }
+.my-terms .lookup-heading h2 { margin:0; font-size:15px; font-weight:650; }
+.my-terms-counts { margin:4px 0 0; color:var(--muted); font-size:12px; }
+.my-terms[data-open="true"] .my-terms-counts { margin-bottom:6px; }
+.my-terms h3 { margin:18px 0 6px; font-size:13px; font-weight:650; }
+.my-terms-note { display:block; margin:6px 0 0; font-size:11px; }
+.my-terms-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.my-terms-confirm { margin-top:12px; padding:10px 12px; border:1px solid var(--warn-line); border-radius:8px; background:var(--warn-bg); color:var(--warn-text); font-size:12px; line-height:1.7; }
+.my-terms-confirm p { margin:0; }
+.my-terms-feedback { margin:12px 0 0; font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
+.my-terms-error { padding:10px 12px; border:1px solid var(--warn-line); border-radius:8px; background:var(--warn-bg); color:var(--warn-text); }
+.my-terms-hit,.my-terms-list li { padding:10px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.my-terms-list { margin:0; padding:0; list-style:none; }
+.my-terms .term-pair strong { font-size:15px; }
+.my-terms .term-pair span { font-size:14px; }
+.my-terms-meta { margin:4px 0 0; color:var(--muted); font-size:11px; line-height:1.7; }
+.my-terms-badge { display:block; width:fit-content; max-width:100%; margin-bottom:4px; padding:2px 8px; border:1px solid var(--line-strong); border-radius:8px; color:var(--text); font-size:11px; line-height:1.5; }
+.my-terms-form { margin-top:6px; }
+.my-terms-form input,.my-terms-form select { width:100%; min-height:40px; padding:8px 10px; font-size:13px; }
+.my-terms-form select { margin-bottom:9px; }
+.my-terms-form input { margin-bottom:9px; }
+.my-terms-form label { margin-bottom:5px; }
+
 .manuscript-workspace { gap:16px; }
 .document-workspace[data-mode="quick"] .manuscript-workspace { grid-template-columns:minmax(0,1fr); }
 .manuscript-editor-pane,.manuscript-review-pane { padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
@@ -398,6 +423,6 @@ footer div { display:flex; gap:20px; }
   .mode-switch button { flex:1 1 0; padding-inline:8px; }
   .runtime-status { gap:2px 12px; padding:6px 8px 6px 12px; }
   .status-details { margin-left:0; }
-  .manuscript-editor-pane,.manuscript-review-pane,.term-lookup { padding:14px; }
+  .manuscript-editor-pane,.manuscript-review-pane,.term-lookup,.my-terms { padding:14px; }
   .runtime-drawer { padding:16px; }
 }

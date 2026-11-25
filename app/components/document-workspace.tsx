@@ -12,16 +12,19 @@ import {
 import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision.js';
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
+import { downloadFile } from '../../lib/download-file';
 import { isLong } from '../../lib/long-review';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
 import { semanticCounts } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
+import { inferDirection } from '../../lib/termbase';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
 import type { Candidate, Choice, Draft, Finding, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
 import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
+import { MyTerms } from './my-terms';
 import { QuickTermLookup } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
 import { RuntimeStatus } from './runtime-status';
@@ -53,12 +56,6 @@ function Excerpt({ text, span, missing }: { text: string; span: Span | null; mis
       <p className="review-excerpt">{located.before}<mark>{located.hit}</mark>{located.after}</p>
     </details>}
   </>;
-}
-
-function downloadFile(name: string, content: string, type = 'application/json') {
-  const url = URL.createObjectURL(new Blob([content], { type }));
-  const link = document.createElement('a'); link.href = url; link.download = name; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function unloadUrl(anchor: HTMLAnchorElement): string | null {
@@ -496,7 +493,10 @@ export function DocumentWorkspace() {
     </header>
     <RuntimeStatus saveView={saveView} reportCommit={latest?.report.dictionary.source_commit ?? null} />
     <div className="workspace-grid">
-      <QuickTermLookup quick={quick} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+      <div className="workspace-side">
+        <QuickTermLookup quick={quick} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+        <MyTerms source={source} direction={quick && autoDirection ? inferDirection(source) : direction} />
+      </div>
       <div className="manuscript-workspace">
         <div className="manuscript-editor-pane">
           {!quick && !latest && !source.trim() && !target.trim() && choices.length === 0 && (

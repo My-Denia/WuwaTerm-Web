@@ -6,6 +6,9 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCHEMA_PATH = join(ROOT, 'contracts', 'schemas', 'manuscript.schema.json');
 const TS_OUT_PATH = join(ROOT, 'lib', 'generated', 'manuscript-contract.ts');
 const PY_OUT_PATH = join(ROOT, 'contracts', 'generated', 'manuscript_contract.py');
+const TERMBASE_SCHEMA_PATH = join(ROOT, 'contracts', 'termbase-v1', 'schema.json');
+const TERMBASE_TS_OUT_PATH = join(ROOT, 'lib', 'generated', 'termbase-contract.ts');
+const TERMBASE_PY_OUT_PATH = join(ROOT, 'contracts', 'generated', 'termbase_contract.py');
 
 const ENUM_DEFS = [
   ['DIRECTION_VALUES', 'Direction'],
@@ -255,6 +258,107 @@ function renderPy(schema) {
   return out.join('\n');
 }
 
+// The local user termbase has its own small schema; its constants and types are read from it by name, so a schema edit
+// that renames or drops one of these fields fails here instead of silently drifting.
+function termbaseParts(schema) {
+  const defs = schema.$defs;
+  const top = defs.TermbaseV1.properties;
+  const entry = defs.Entry.properties;
+  const limit = prop => ({ min: prop.minLength, max: prop.maxLength });
+  return {
+    format: top.format.const,
+    schemaVersion: top.schema_version.const,
+    directions: defs.Direction.enum,
+    kinds: defs.Kind.enum,
+    limits: { entries: top.entries.maxItems, id: limit(entry.id), source: limit(entry.source), target: limit(entry.target), note: limit(entry.note) },
+  };
+}
+
+function renderTermbaseTs(schema) {
+  const t = termbaseParts(schema);
+  const range = r => `{ min: ${r.min}, max: ${r.max} }`;
+  return [
+    '// GENERATED FILE — DO NOT EDIT DIRECTLY.',
+    '// Source: contracts/termbase-v1/schema.json (`npm run generate:contracts`).',
+    '',
+    `export const TERMBASE_FORMAT = '${t.format}' as const;`,
+    `export const TERMBASE_SCHEMA_VERSION = ${t.schemaVersion} as const;`,
+    `export const TERMBASE_DIRECTION_VALUES = [${t.directions.map(v => `'${v}'`).join(', ')}] as const;`,
+    'export type TermbaseDirection = (typeof TERMBASE_DIRECTION_VALUES)[number];',
+    'export const TERMBASE_KIND_VALUES = [',
+    ...t.kinds.map(v => `  '${v}',`),
+    '] as const;',
+    'export type TermbaseKind = (typeof TERMBASE_KIND_VALUES)[number];',
+    'export const TERMBASE_LIMITS = {',
+    `  entries: ${t.limits.entries},`,
+    `  id: ${range(t.limits.id)},`,
+    `  source: ${range(t.limits.source)},`,
+    `  target: ${range(t.limits.target)},`,
+    `  note: ${range(t.limits.note)},`,
+    '} as const;',
+    '',
+    'export type ContractTermbaseEntryV1 = {',
+    '  id: string;',
+    '  source: string;',
+    '  target: string;',
+    '  direction: TermbaseDirection;',
+    '  kind: TermbaseKind;',
+    '  note: string;',
+    '  updated_at: string;',
+    '};',
+    '',
+    'export type ContractTermbaseV1 = {',
+    `  format: '${t.format}';`,
+    `  schema_version: ${t.schemaVersion};`,
+    '  updated_at: string;',
+    '  entries: ContractTermbaseEntryV1[];',
+    '};',
+    '',
+  ].join('\n');
+}
+
+function renderTermbasePy(schema) {
+  const t = termbaseParts(schema);
+  return [
+    '# GENERATED FILE — DO NOT EDIT DIRECTLY.',
+    '# Source: contracts/termbase-v1/schema.json (`npm run generate:contracts`).',
+    '',
+    'from __future__ import annotations',
+    '',
+    'from typing import Literal, TypedDict',
+    '',
+    `TERMBASE_FORMAT = "${t.format}"`,
+    `TERMBASE_SCHEMA_VERSION = ${t.schemaVersion}`,
+    `TERMBASE_DIRECTION_VALUES: tuple[str, ...] = (${t.directions.map(v => `"${v}"`).join(', ')},)`,
+    `TermbaseDirection = Literal[${t.directions.map(v => `"${v}"`).join(', ')}]`,
+    `TERMBASE_KIND_VALUES: tuple[str, ...] = (${t.kinds.map(v => `"${v}"`).join(', ')},)`,
+    `TermbaseKind = Literal[${t.kinds.map(v => `"${v}"`).join(', ')}]`,
+    `TERMBASE_MAX_ENTRIES = ${t.limits.entries}`,
+    `TERMBASE_ID_SCALARS = (${t.limits.id.min}, ${t.limits.id.max})`,
+    `TERMBASE_SOURCE_SCALARS = (${t.limits.source.min}, ${t.limits.source.max})`,
+    `TERMBASE_TARGET_SCALARS = (${t.limits.target.min}, ${t.limits.target.max})`,
+    `TERMBASE_NOTE_SCALARS = (${t.limits.note.min}, ${t.limits.note.max})`,
+    '',
+    '',
+    'class ContractTermbaseEntryV1(TypedDict):',
+    '    id: str',
+    '    source: str',
+    '    target: str',
+    '    direction: TermbaseDirection',
+    '    kind: TermbaseKind',
+    '    note: str',
+    '    updated_at: str',
+    '',
+    '',
+    'class ContractTermbaseV1(TypedDict):',
+    `    format: Literal["${t.format}"]`,
+    `    schema_version: Literal[${t.schemaVersion}]`,
+    '    updated_at: str',
+    '    entries: list[ContractTermbaseEntryV1]',
+    '',
+  ].join('\n');
+}
+
 const mode = process.argv.slice(2);
 if (mode.length !== 1 || (mode[0] !== '--write' && mode[0] !== '--check')) {
   console.error('Usage: node scripts/generate-contract-types.mjs <--write|--check>');
@@ -262,9 +366,12 @@ if (mode.length !== 1 || (mode[0] !== '--write' && mode[0] !== '--check')) {
 }
 
 const schema = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8'));
+const termbaseSchema = JSON.parse(readFileSync(TERMBASE_SCHEMA_PATH, 'utf8'));
 const expected = [
   [TS_OUT_PATH, renderTs(schema)],
   [PY_OUT_PATH, renderPy(schema)],
+  [TERMBASE_TS_OUT_PATH, renderTermbaseTs(termbaseSchema)],
+  [TERMBASE_PY_OUT_PATH, renderTermbasePy(termbaseSchema)],
 ];
 
 if (mode[0] === '--write') {
@@ -272,7 +379,7 @@ if (mode[0] === '--write') {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, content, 'utf8');
   }
-  console.log('Generated TypeScript and Python contract DTOs.');
+  console.log('Generated TypeScript and Python contract DTOs (manuscript and termbase).');
 } else {
   const stale = expected.filter(([filePath, content]) => {
     try {
@@ -285,5 +392,5 @@ if (mode[0] === '--write') {
     console.error('Stale generated contract files:', stale.map(([p]) => p).join(', '));
     process.exit(1);
   }
-  console.log('Contract DTOs match manuscript.schema.json.');
+  console.log('Contract DTOs match manuscript.schema.json and termbase-v1/schema.json.');
 }
