@@ -111,7 +111,7 @@ export function sentenceRangesV2(t: readonly string[]): [ScalarOffset, ScalarOff
 
 // ---- building blocks ----
 
-function core(t: readonly string[], start: number, end: number): [ScalarOffset, ScalarOffset] {
+export function core(t: readonly string[], start: number, end: number): [ScalarOffset, ScalarOffset] {
   let a = start;
   while (a < end && WS.has(t[a])) a++;
   if (a === end) return [scalarOffset(start), scalarOffset(start)];
