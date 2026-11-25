@@ -109,6 +109,8 @@ before(async () => {
     WUWATERM_API_BASE_URL: baseUrl,
     WUWATERM_SITE_DEVICE_TOKEN: token,
     WUWATERM_LOCAL_DB_PATH: join(workdir, 'pool.sqlite3'),
+    // These cases test the protocol, not the pool: the default six upstream calls a minute would make the later ones wait.
+    WUWATERM_LOCAL_LIMIT_UPSTREAM_PER_MINUTE: '60',
   });
 });
 

@@ -791,6 +791,28 @@ test('every invalid v4 fixture: Web and Windows give its code', () => {
   assert.deepEqual(differing, []);
 });
 
+// manuscript v5 (contracts/manuscript-v5/SPEC.md "Compatibility"): the pinned Windows client predates it, so it must refuse every
+// v5 file with the code an older Web gives (legacy_error), and read every lower-format file a v5 writer writes back.
+const v5Dir = fileURLToPath(new URL('../../contracts/manuscript-v5/', import.meta.url));
+const v5Cases = JSON.parse(readFileSync(join(v5Dir, 'cases.json'), 'utf8'));
+const readV5 = file => readFileSync(join(v5Dir, file), 'utf8');
+const contentOfV5 = c => (c.pad_to_bytes ? readV5(c.file) + ' '.repeat(c.pad_to_bytes - Buffer.byteLength(readV5(c.file), 'utf8')) : readV5(c.file));
+
+test('the pinned Windows client refuses every v5 file and reads what a v5 writer writes back in a lower format', () => {
+  const differing = [];
+  for (const c of [...v5Cases.valid, ...v5Cases.invalid]) {
+    const content = contentOfV5(c);
+    const fromWindows = windows({ operation: 'parse', content });
+    if ((fromWindows.error ?? null) !== c.legacy_error) differing.push(`${c.file}: expected ${c.legacy_error}, Windows ${fromWindows.error ?? null}`);
+    if (c.legacy_error === null) {
+      assert.deepEqual(fromWindows.result, parseWorkfile(content), `${c.file}: Windows parse differs from Web parse`);
+      assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, readV5(c.canonical), `${c.file}: Windows bytes`);
+    }
+  }
+  assert.deepEqual(differing, []);
+  assert.ok(v5Cases.valid.some(c => JSON.parse(readV5(c.file)).format === 'wuwaterm-manuscript-v5' && c.legacy_error === 'workfile_unsupported_format'));
+});
+
 const operationTracesPath = fileURLToPath(new URL('../../contracts/workbench-state/operation-traces.json', import.meta.url));
 const operationTraces = JSON.parse(readFileSync(operationTracesPath, 'utf8'));
 

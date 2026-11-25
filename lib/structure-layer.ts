@@ -3,8 +3,9 @@
 // made for and disappears from view when either changes. Nothing here is written to a manuscript, to undo history or to browser
 // storage: the state lives in the controller snapshot only.
 import { segmentInputs, isAmbiguousMention } from './long-review.ts';
+import { isHandled, issueStatus } from './semantic-state.js';
 import { STRUCTURE_LIMITS, structureCheckBatches, structureFindingCovers } from './structure-check.js';
-import type { Draft, PairStatus, Report, ScalarOffset, Span } from './workbench-model.ts';
+import type { Decision, Draft, PairStatus, PairView, Placed, Region, Report, ScalarOffset, SemanticState, Span } from './workbench-model.ts';
 import { scalarOffset } from './workbench-model.ts';
 
 export type StructureRule =
@@ -115,4 +116,51 @@ export function judgedReport(report: Report): { report: Report; ambiguous: Repor
     },
     ambiguous,
   };
+}
+
+/**
+ * One semantic issue (layer 2) as the review lists it: its handling status, its segment and position, and `covered` when it is
+ * unhandled and a layer 1 finding of its segment already describes it (coveredByStructure), so the list leaves it out and says so.
+ */
+export type LayerTwoRow = {
+  placed: Placed;
+  status: string;
+  decision: Decision | null;
+  reference: Decision | null;
+  segment: number | null;
+  position: number;
+  imported: boolean;
+  covered: boolean;
+};
+
+/** The layer 2 rows of a session, in text order; the one list the semantic track and the review overview both read. */
+export function layerTwoRows(semantic: SemanticState, views: readonly PairView[], layer1: readonly StructureView[]): LayerTwoRow[] {
+  const overlaps = (a: Region, b: Region) => a.start < b.end && b.start < a.end;
+  const resultOf = (p: Placed) => semantic.results.find(r => r.id === p.resultId);
+  const segmentOf = (p: Placed): PairView | null => {
+    const span = p.live.source_span ?? p.live.target_span;
+    const found = span ? views.find(v => (p.live.source_span
+      ? v.pair.source.core_start <= span.start && span.end <= v.pair.source.core_end
+      : v.pair.target.core_start <= span.start && span.end <= v.pair.target.core_end)) : null;
+    if (found) return found;
+    const result = resultOf(p);
+    return result ? views.find(v => overlaps(result.region.source, { start: v.pair.source.core_start, end: v.pair.source.core_end })) ?? null : null;
+  };
+  return semantic.placed.map(p => {
+    const info = issueStatus(semantic, p) as { status: string; decision: Decision | null; reference: Decision | null };
+    const view = segmentOf(p);
+    const segment = view ? view.pair.index : null;
+    const position = p.live.source_span?.start ?? p.live.target_span?.start ?? resultOf(p)?.region.source.start ?? 0;
+    const covered = !isHandled(info.status) && segment !== null
+      && coveredByStructure({ category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span }, layer1[segment]);
+    return { placed: p, ...info, segment, position, imported: !!resultOf(p)?.imported, covered };
+  }).sort((a, b) => a.position - b.position || a.placed.id.localeCompare(b.placed.id));
+}
+
+/** Overview counts of layer 2: listed issues, those still to handle and how many of them are high, medium and low confidence (folded), and covered ones. */
+export function layerTwoCounts(rows: readonly LayerTwoRow[]) {
+  const listed = rows.filter(r => !r.covered);
+  const open = listed.filter(r => !isHandled(r.status) && r.status !== 'stale');
+  const by = (confidence: string) => open.filter(r => r.placed.issue.confidence === confidence).length;
+  return { listed: listed.length, pending: open.length, high: by('high'), medium: by('medium'), low: by('low'), covered: rows.length - listed.length };
 }

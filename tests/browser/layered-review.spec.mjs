@@ -79,6 +79,15 @@ test('three layers: structure findings first, semantic issues bucketed and dedup
   await low.click();
   await expect(items).toHaveCount(1);
 
+  // The overview at the top of the pane names every layer's state.
+  const overview = page.locator('.layer-overview');
+  await expect(overview.locator('[data-layer="1"]')).toHaveText(fill(L.ovL1, { n: 1 }));
+  await expect(overview.locator('[data-layer="2"]')).toHaveText(fill(S.overviewSemantic, { n: 2, pending: 2 }));
+  await expect(overview.locator('[data-buckets]')).toHaveText(fill(L.ovBuckets, { high: 0, medium: 1 }));
+  await expect(overview.locator('[data-low]')).toHaveText(fill(L.ovLow, { n: 1 }));
+  await expect(overview.locator('[data-covered]')).toHaveText(fill(L.ovCovered, { n: 1 }));
+  await expect(overview.locator('[data-layer="3"]')).toHaveText(L.ovL3Off);
+
   const layer3 = page.locator('.layer-style');
   const toggle = layer3.getByRole('checkbox', { name: L.l3Toggle });
   await expect(toggle).not.toBeChecked();
@@ -86,6 +95,7 @@ test('three layers: structure findings first, semantic issues bucketed and dedup
   const before = rec.semantic.length + rec.reviews.length + rec.structure.length + rec.translations.length;
   await toggle.check();
   await expect(layer3).toContainText(L.l3On);
+  await expect(overview.locator('[data-layer="3"]')).toHaveText(L.ovL3On);
   expect(rec.semantic.length + rec.reviews.length + rec.structure.length + rec.translations.length).toBe(before);
 });
 
@@ -101,6 +111,7 @@ test('an ambiguous single character is folded after the judged findings, not cou
   await expect(track.getByRole('button', { name: `${M.review.filters.not_evaluated} 0`, exact: true })).toBeVisible();
   const folded = track.locator('details.ambiguous-mentions');
   await expect(folded).toHaveAttribute('data-count', '1');
+  await expect(page.locator('.layer-overview [data-ambiguous]')).toHaveText(fill(S.layers.ovAmbiguous, { n: 1 }));
   await expect(folded).not.toHaveAttribute('open', '');
   await expect(folded.locator('summary')).toHaveText(fill(S.ambiguous.title, { n: 1 }));
   await folded.locator('summary').click();
@@ -150,4 +161,21 @@ test('the layered review keeps nothing in browser storage', async ({ page }) => 
     databases: typeof indexedDB.databases === 'function' ? (await indexedDB.databases()).length : 0,
   }));
   expect(stored).toEqual({ local: 0, session: 0, databases: 0 });
+});
+
+test.describe('390px phone viewport', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test('the closed issue drawer shows only its toggle; the low-confidence fold opens with the drawer, with no horizontal scroll', async ({ page }) => {
+    await open(page);
+    await fillPair(page, SOURCE, TARGET);
+    await page.locator('.layer-structure').getByRole('button', { name: fill(L.l1Run, { n: 1 }), exact: true }).click();
+    await expect(page.locator('.structure-finding')).toHaveCount(1);
+    await page.getByRole('button', { name: S.start, exact: true }).click();
+    const drawer = page.locator('.semantic-list');
+    await expect(drawer.locator('.drawer-toggle')).toBeVisible();
+    await expect(drawer.locator('.low-confidence-toggle')).toBeHidden();
+    await drawer.locator('.drawer-toggle').click();
+    await expect(drawer.locator('.low-confidence-toggle')).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  });
 });

@@ -11,7 +11,7 @@ import {
   TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, restorableHistory, sessionReviewFeatures, splitAmbiguousSegments,
   summarizeTermCandidates, termGroupCounts, termPlan, termSegments, uncheckedTermSegments,
 } from '../../lib/long-review.ts';
-import { coveredByStructure, structureViews } from '../../lib/structure-layer';
+import { layerTwoRows, structureViews } from '../../lib/structure-layer';
 import {
   CAPABILITY_SEMANTIC_REVIEW, CAPABILITY_TRANSLATION_CONTEXT, SEMANTIC_CATEGORIES,
 } from '../../lib/semantic-review.js';
@@ -144,17 +144,10 @@ export function SemanticWorkbench(props: Props) {
     const result = semantic.results.find(r => r.id === p.resultId);
     return result ? views.find(v => overlaps(result.region.source, { start: v.pair.source.core_start, end: v.pair.source.core_end })) ?? null : null;
   };
-  const placedRows = semantic.placed.map(p => {
-    const info = issueStatus(semantic, p) as { status: string; decision: Decision | null; reference: Decision | null };
-    const view = segmentOfPlaced(p);
-    const position = p.live.source_span?.start ?? p.live.target_span?.start ?? semantic.results.find(r => r.id === p.resultId)?.region.source.start ?? 0;
-    return { placed: p, ...info, segment: view ? view.pair.index : null, position, imported: !!semantic.results.find(r => r.id === p.resultId)?.imported };
-  }).sort((a, b) => a.position - b.position || a.placed.id.localeCompare(b.placed.id));
   // Layer 1 wins an overlap (Core ADR 0022): an unhandled issue that a structure finding of its segment already describes is not
   // raised again. Its decisions and the saved manuscript are untouched; only the list leaves it out, and says how many it left out.
-  const coveredRow = (r: (typeof placedRows)[number]) => !isHandled(r.status) && r.segment !== null
-    && coveredByStructure({ category: r.placed.issue.category, source_span: r.placed.live.source_span, target_span: r.placed.live.target_span }, layer1[r.segment]);
-  const rows = placedRows.filter(r => !coveredRow(r));
+  const placedRows = useMemo(() => layerTwoRows(semantic, views, layer1), [semantic, views, layer1]);
+  const rows = placedRows.filter(r => !r.covered);
   const coveredCount = placedRows.length - rows.length;
   const statusMatch = (status: string, filter: typeof statusFilter) => filter === 'all'
     || (filter === 'handled' ? isHandled(status) : filter === 'reconfirm' ? status === 'needs_reconfirmation' || status === 'previously_applied' : !isHandled(status));

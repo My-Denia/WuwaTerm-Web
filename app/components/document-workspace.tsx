@@ -13,17 +13,18 @@ import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
 import { downloadFile } from '../../lib/download-file';
-import { isAmbiguousMention, isLong } from '../../lib/long-review';
-import { judgedReport } from '../../lib/structure-layer';
+import { isAmbiguousMention, isLong, sessionReviewFeatures } from '../../lib/long-review';
+import { judgedReport, layerTwoCounts, layerTwoRows, structureSummary, structureViews } from '../../lib/structure-layer';
+import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
-import { semanticCounts } from '../../lib/semantic-state.js';
+import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import { inferDirection } from '../../lib/termbase';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
-import type { Candidate, Choice, Draft, Finding, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
+import type { Candidate, Choice, Draft, Finding, PairView, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
 import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
 import { MyTerms } from './my-terms';
 import { QuickTermLookup } from './quick-term-lookup';
@@ -95,6 +96,7 @@ export function DocumentWorkspace() {
   const quick = workspaceMode === 'quick';
 
   const [pendingImport, setPendingImport] = useState<PendingReplacement | null>(null);
+  const [styleOn, setStyleOn] = useState(false);
   const importDialog = useRef<HTMLDialogElement>(null);
   const keepImportButton = useRef<HTMLButtonElement>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
@@ -123,6 +125,13 @@ export function DocumentWorkspace() {
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
+  const reviewFeatures = useMemo(() => sessionReviewFeatures(capabilities), [capabilities]);
+  const layer1 = useMemo(() => structureViews(draft, snapshot.structure), [draft, snapshot.structure]);
+  const layer1Summary = structureSummary(layer1);
+  const layer2 = useMemo(() => {
+    const views = (semanticSegmentViews(draft, { results: semantic.results, long: semantic.long }, basis, reviewFeatures) as { items: PairView[] }).items;
+    return layerTwoCounts(layerTwoRows(semantic, views, layer1));
+  }, [draft, semantic, basis, reviewFeatures, layer1]);
   // Ambiguous one-character names (ambiguous-mention-v1) are listed apart, folded, and never counted with the judged findings.
   const judged = useMemo(() => (latest ? judgedReport(latest.report) : null), [latest]);
   const visibleFindings = judged ? filterFindings(judged.report.findings, verdictFilter) : [];
@@ -363,7 +372,12 @@ export function DocumentWorkspace() {
   const summaryParts = judged ? summarizeReviewParts(judged.report) : null;
   const comparisonGroups = ([['new', m.review.comparisonNew], ['resolved', m.review.comparisonResolved], ['pending', m.review.comparisonPending], ['incomparable', m.review.comparisonIncomparable]] as const)
     .map(([key, label]) => ({ key, label, items: comparison ? comparison[key] : [] }));
-  const semanticSummary = semanticCounts(semantic) as { total: number; pending: number; handled: number; reconfirm: number; stale: number };
+  // The review overview reads every layer from the same derivations the layers render from.
+  const structureOn = !!capabilities?.includes(CAPABILITY_STRUCTURE_CHECK);
+  const semanticOn = !!capabilities?.includes('semantic-review-v1');
+  const ambiguousTotal = (judged?.ambiguous.length ?? 0)
+    + semantic.long.records.reduce((n, r) => n + (r.result?.findings.filter(isAmbiguousMention).length ?? 0), 0);
+  const scrollTo = (selector: string) => document.querySelector(selector)?.scrollIntoView({ block: 'start' });
   const termTotal = (judged?.report.findings.length ?? 0)
     + semantic.long.records.reduce((n, r) => n + (r.result?.findings.filter(f => !isAmbiguousMention(f)).length ?? 0), 0);
   const translatePrimary = !!source.trim() && !target.trim();
@@ -637,9 +651,16 @@ export function DocumentWorkspace() {
               return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{canConfirm && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.confirmChoice(i)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
             })}
           </div>}
-          {capabilities?.includes('semantic-review-v1') && <div className="issue-overview" role="group" aria-label={sm.overviewAria}>
-            <button type="button" className="secondary-button" onClick={() => document.getElementById('term-track-title')?.scrollIntoView({ block: 'start' })}>{fill(sm.overviewTerms, { n: termTotal })}</button>
-            <button type="button" className="secondary-button" onClick={() => document.getElementById('semantic-title')?.scrollIntoView({ block: 'start' })}>{semanticSummary.total || semantic.results.length ? fill(sm.overviewSemantic, { n: semanticSummary.total, pending: semanticSummary.pending + semanticSummary.reconfirm }) : sm.overviewSemanticNone}</button>
+          {(semanticOn || structureOn) && <div className="issue-overview layer-overview" role="group" aria-label={sm.overviewAria}>
+            {structureOn && <button type="button" className="secondary-button" data-layer="1" onClick={() => scrollTo('#layer1-title')}>
+              {layer1Summary.checked ? fill(sm.layers.ovL1, { n: layer1Summary.findings + layer1Summary.omitted }) : sm.layers.ovL1None}</button>}
+            <button type="button" className="secondary-button" onClick={() => scrollTo('#term-track-title')}>{fill(sm.overviewTerms, { n: termTotal })}</button>
+            {ambiguousTotal > 0 && <button type="button" className="secondary-button" data-ambiguous={ambiguousTotal} onClick={() => scrollTo('details.ambiguous-mentions')}>{fill(sm.layers.ovAmbiguous, { n: ambiguousTotal })}</button>}
+            {semanticOn && <button type="button" className="secondary-button" data-layer="2" onClick={() => scrollTo('#semantic-title')}>{layer2.listed + layer2.covered || semantic.results.length ? fill(sm.overviewSemantic, { n: layer2.listed, pending: layer2.pending }) : sm.overviewSemanticNone}</button>}
+            {semanticOn && layer2.high + layer2.medium > 0 && <span className="overview-note" data-buckets={`${layer2.high}:${layer2.medium}`}>{fill(sm.layers.ovBuckets, { high: layer2.high, medium: layer2.medium })}</span>}
+            {semanticOn && layer2.low > 0 && <span className="overview-note" data-low={layer2.low}>{fill(sm.layers.ovLow, { n: layer2.low })}</span>}
+            {semanticOn && layer2.covered > 0 && <span className="overview-note" data-covered={layer2.covered}>{fill(sm.layers.ovCovered, { n: layer2.covered })}</span>}
+            <button type="button" className="secondary-button" data-layer="3" data-on={styleOn ? 'true' : 'false'} onClick={() => scrollTo('#layer3-title')}>{styleOn ? sm.layers.ovL3On : sm.layers.ovL3Off}</button>
           </div>}
           <StructureLayer doc={doc} snapshot={snapshot} lang={lang} pool={pool} locate={(side, span) => jumpTo(side, span)} />
           <SemanticWorkbench
@@ -650,7 +671,7 @@ export function DocumentWorkspace() {
             locate={(side, span) => jumpTo(side, span)}
             termTrack={termTrack}
           />
-          <StyleLayer lang={lang} />
+          <StyleLayer lang={lang} on={styleOn} setOn={setStyleOn} />
         </div>}
       </div>
     </div>

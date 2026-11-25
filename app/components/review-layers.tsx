@@ -3,7 +3,7 @@
 // Layer 1 (deterministic structure checks) and layer 3 (reserved style suggestions) of the layered review. Layer 2 is the semantic
 // track in semantic-workbench.tsx. Nothing here is saved: the structure results live in the controller's session state, and the
 // layer 3 switch is component state only (no browser storage).
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { compactScalarContext } from '../../lib/review-navigation.js';
 import { highlightSegments } from '../../lib/review-report.js';
 import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
@@ -96,9 +96,8 @@ export function StructureLayer({ doc, snapshot, lang, pool, locate }: {
 }
 
 /** Layer 3: a reserved place for style suggestions. Off by default; switching it on sends nothing and stores nothing. */
-export function StyleLayer({ lang }: { lang: UiLanguage }) {
+export function StyleLayer({ lang, on, setOn }: { lang: UiLanguage; on: boolean; setOn: (on: boolean) => void }) {
   const l = semanticMsg(lang).layers;
-  const [on, setOn] = useState(false);
   return <section className="layer-panel layer-style" aria-labelledby="layer3-title" data-layer="3" data-on={on ? 'true' : 'false'}>
     <div className="track-head">
       <h3 id="layer3-title">{l.l3Title}</h3>
