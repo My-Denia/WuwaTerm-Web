@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, sanitizeDuplicateChoices, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
+import { MAX_V3_WORKFILE_BYTES, MAX_WORKFILE_BYTES, WORKFILE_FORMAT_V3, basisOf, compareReports, computeMinimalScalarSplice, makeChoice, mentionId, parseWorkfile, reconcileChoice, recoverSpan, remapAlignmentsForFreeEdit, remapAlignmentsForTargetSplice, sanitizeDuplicateChoices, serializeWorkfile, validAlignments, validReport } from '../lib/manuscript.js';
 import { fixture, hash } from './fixtures/manuscript.mjs';
 const choiceFor = (s, i = 0, c = s.report.findings[i].candidates[0]) => makeChoice({ ...s, finding: s.report.findings[i], candidate: c });
 const clean = s => { const { source, target, direction, alignments, report, resolutions } = s; return { source, target, direction, alignments, report, resolutions }; };
@@ -338,4 +338,72 @@ test('sanitizeDuplicateChoices drops colliding duplicate choices while keeping v
   assert.deepEqual(cleaned.choices, [validKeep]);
   assert.deepEqual(cleaned.semantic_decisions, [decB]);
   assert.deepEqual(cleaned.segments[0].choices, [exactB]);
+});
+
+test('remapAlignmentsForFreeEdit preserves outside/shifted/inside edits and clears crossing edits across surrogates', () => {
+  const source = '😀Alpha Beta';
+  const target = '甲 乙';
+  const alignments = [
+    { source: { start: 1, end: 6, text: 'Alpha' }, target: { start: 0, end: 1, text: '甲' } },
+    { source: { start: 7, end: 11, text: 'Beta' }, target: { start: 2, end: 3, text: '乙' } },
+  ];
+
+  // Appending after an aligned region preserves alignments untouched.
+  const appended = '😀Alpha Beta!';
+  assert.deepEqual(
+    computeMinimalScalarSplice(source, appended),
+    { start: 11, oldEnd: 11, newEnd: 12, replacementLength: 1 },
+  );
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(alignments, 'source', source, target, appended, target),
+    alignments,
+  );
+
+  // Inserting before shifts later spans (including surrogate prefixes); editing inside expands span.
+  const targetShifted = '😀!Alpha Beta';
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(alignments, 'source', source, target, targetShifted, target),
+    [
+      { source: { start: 2, end: 7, text: 'Alpha' }, target: { start: 0, end: 1, text: '甲' } },
+      { source: { start: 8, end: 12, text: 'Beta' }, target: { start: 2, end: 3, text: '乙' } },
+    ],
+  );
+  const inside = '😀Al!pha Beta';
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(alignments, 'source', source, target, inside, target),
+    [
+      { source: { start: 1, end: 7, text: 'Al!pha' }, target: { start: 0, end: 1, text: '甲' } },
+      { source: { start: 8, end: 12, text: 'Beta' }, target: { start: 2, end: 3, text: '乙' } },
+    ],
+  );
+
+  // Deleting an entire aligned span or crossing a span boundary drops alignments to [].
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(alignments, 'source', source, target, '😀 Beta', target),
+    [],
+  );
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(alignments, 'source', source, target, '😀AlphaEta', target),
+    [],
+  );
+  // Deleting an aligned non-empty target span (whole document or one segment) also fails closed to [].
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(alignments, 'target', source, target, source, ' 乙'),
+    [],
+  );
+  assert.deepEqual(
+    remapAlignmentsForTargetSplice(alignments, source, ' 乙', 0, 1, 0),
+    [],
+  );
+  assert.deepEqual(
+    remapAlignmentsForFreeEdit(
+      [{ source: { start: 0, end: 3, text: '今汐。' }, target: { start: 0, end: 7, text: 'Jinhsi.' } }],
+      'target',
+      '今汐。',
+      'Jinhsi.',
+      '今汐。',
+      '',
+    ),
+    [],
+  );
 });
