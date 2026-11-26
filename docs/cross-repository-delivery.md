@@ -13,6 +13,10 @@ two commits, not arbitrary future releases. Update pins in reviewed PRs and
 record the producer and consumer SHAs. Do not replace a SHA with a moving branch.
 
 Current pins: `contracts/backend-ref.txt` is
+`2737530187f1e1c3a6b8758de357c8d32d21dfc7` (the Core `0.14.0` release preparation on `main`,
+PR #334; since the previous pin the one change to a response the Web validates is PR #331: the
+`structure-check-v1` number rule also reads numeric facts, and a number finding's span includes
+the sign, unit and comparison written with the number), raised from
 `089973fe24a0e0affbecadd6da472cffb7f222fb` (Core `main` after `v0.13.0`: PR #325, the
 `ambiguous-mention-v1` review-v2 feature and `wuwaterm-cjk-matcher-v11`, and PR #326,
 `POST /v1/structure-checks` with `structure-check-v1`, ADR 0022), raised from
@@ -29,9 +33,11 @@ review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
 `translation-context-v1` is always listed when a model is configured), which was raised from
 `7122ea7cb41e5987aac80b23fc27bd071fcfa22b`
 (Core PR #198, the contracts) by Web PR #16.
-`contracts/windows-ref.txt` is `b50abddb3ef0063fded33c1a4aff38e79d148d50`
-(WuwaTerm-Windows PR #53, on `main` after the 0.6.6 release: `wuwaterm-manuscript-v5` with
-`ambiguous-mention-v1` and `segmentation-v1-gaps`), raised from
+`contracts/windows-ref.txt` is `31fe402e316540039cdbdddfbdef6f25fa31abac`
+(WuwaTerm-Windows PR #54, on `main` after the 0.6.6 release: a test-only change), raised from
+`b50abddb3ef0063fded33c1a4aff38e79d148d50` (WuwaTerm-Windows PR #53:
+`wuwaterm-manuscript-v5` with `ambiguous-mention-v1` and `segmentation-v1-gaps`), which was
+raised from
 `a45dbf2cb000721be71d009d84413e9bc5783f74`
 (WuwaTerm-Windows PR #43, 3-pass duplicate-segment attribution, raised from
 `eaceb8bbe847f4db14f227dea274261fa2dc5784`, WuwaTerm-Windows PR #30, the 0.6.0 release that reads
@@ -100,6 +106,9 @@ where the current basis comes from a live review-v2 request
 Web 0.2.0 and Windows 0.4.2 reject v3 files; Web 0.3.1 and Windows 0.5.1 reject v4
 files; Web 0.4.5 and Windows 0.6.6 reject v5 files. Cross-client v3, v4 and v5
 interchange is verified against the Windows client pinned in `contracts/windows-ref.txt`.
+
+Web `0.5.0` is prepared with these two pins. The version bump publishes no self-host release
+and does not update the public Site; each is a separate step.
 
 ## Deployment receipt
 
