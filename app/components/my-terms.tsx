@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { FormEvent, useDeferredValue, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { downloadFile } from '../../lib/download-file';
 import { fill, msg } from '../../lib/messages';
 import {
@@ -14,25 +14,83 @@ import { useUiLanguage } from './ui-language-context';
 type Draft = { source: string; target: string; direction: TermbaseDirection | null; kind: TermbaseKind; note: string };
 type Feedback = { kind: 'notice' | 'error'; text: string } | null;
 
+export type TermbaseDraftSeed = {
+  key: number;
+  source: string;
+  target: string;
+  direction: TermbaseDirection;
+  kind: TermbaseKind;
+  note?: string;
+};
+
+export type TermbaseExternalFeedback = {
+  key: number;
+  kind: 'notice' | 'error';
+  text: string;
+};
+
+type Props = {
+  source: string;
+  direction: TermbaseDirection;
+  entries: TermbaseEntry[];
+  setEntries: Dispatch<SetStateAction<TermbaseEntry[]>>;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  draftSeed?: TermbaseDraftSeed | null;
+  externalFeedback?: TermbaseExternalFeedback | null;
+};
+
 const BLANK: Draft = { source: '', target: '', direction: null, kind: 'community_term', note: '' };
 const scalars = (text: string) => Array.from(text).length;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /**
- * The person's own term list, kept in this component's state and nowhere else: no storage, no request, no part of the
+ * The person's own term list, kept in React page memory and nowhere else: no storage, no request, no part of the
  * manuscript. It reads the current source text and the document's direction and lists which entries occur in it. Import
  * and export are explicit file actions; a reload empties the list.
  */
-export function MyTerms({ source, direction }: { source: string; direction: TermbaseDirection }) {
+export function MyTerms({ source, direction, entries, setEntries, open: controlledOpen, onOpenChange, draftSeed, externalFeedback }: Props) {
   const { lang } = useUiLanguage();
   const t = msg(lang).termbase;
-  const [open, setOpen] = useState(false);
-  const [entries, setEntries] = useState<TermbaseEntry[]>([]);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = controlledOpen ?? localOpen;
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(open) : next;
+    if (onOpenChange) onOpenChange(resolved);
+    else setLocalOpen(resolved);
+  };
   const [draft, setDraft] = useState<Draft>(BLANK);
   const [editing, setEditing] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [pending, setPending] = useState<Termbase | null>(null);
   const fileBox = useRef<HTMLInputElement>(null);
+  const sourceInput = useRef<HTMLInputElement>(null);
+  const targetInput = useRef<HTMLInputElement>(null);
+  const [seenSeed, setSeenSeed] = useState<number | null>(null);
+  const [seenFeedback, setSeenFeedback] = useState<number | null>(null);
+
+  if (draftSeed && draftSeed.key !== seenSeed) {
+    setSeenSeed(draftSeed.key);
+    setEditing(null);
+    setDraft({
+      source: draftSeed.source,
+      target: draftSeed.target,
+      direction: draftSeed.direction,
+      kind: draftSeed.kind,
+      note: draftSeed.note ?? '',
+    });
+  }
+  if (externalFeedback && externalFeedback.key !== seenFeedback) {
+    setSeenFeedback(externalFeedback.key);
+    setFeedback({ kind: externalFeedback.kind, text: externalFeedback.text });
+  }
+
+  useEffect(() => {
+    if (!draftSeed || !open) return;
+    const focusTarget = draftSeed.source && !draftSeed.target ? targetInput.current : sourceInput.current;
+    focusTarget?.focus();
+    focusTarget?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [draftSeed, open]);
 
   const deferredSource = useDeferredValue(source);
   const found = useMemo(() => matchTermbase(entries, deferredSource, direction), [entries, deferredSource, direction]);
@@ -183,9 +241,9 @@ export function MyTerms({ source, direction }: { source: string; direction: Term
       <form className="my-terms-form" onSubmit={submit} aria-labelledby="my-terms-form-title">
         <h3 id="my-terms-form-title">{editing === null ? t.addTitle : fill(t.editTitle, { id: editing })}</h3>
         <label htmlFor="my-terms-source">{t.fieldSource}</label>
-        <input id="my-terms-source" value={draft.source} autoComplete="off" onChange={e => setDraft({ ...draft, source: e.target.value })} />
+        <input ref={sourceInput} id="my-terms-source" value={draft.source} autoComplete="off" onChange={e => setDraft({ ...draft, source: e.target.value })} />
         <label htmlFor="my-terms-target">{t.fieldTarget}</label>
-        <input id="my-terms-target" value={draft.target} autoComplete="off" onChange={e => setDraft({ ...draft, target: e.target.value })} />
+        <input ref={targetInput} id="my-terms-target" value={draft.target} autoComplete="off" onChange={e => setDraft({ ...draft, target: e.target.value })} />
         <label htmlFor="my-terms-direction">{t.fieldDirection}</label>
         <select id="my-terms-direction" value={formDirection} onChange={e => setDraft({ ...draft, direction: e.target.value as TermbaseDirection })}>
           {TERMBASE_DIRECTION_VALUES.map(value => <option key={value} value={value}>{value === 'en' ? t.directionOptionEn : t.directionOptionZh}</option>)}

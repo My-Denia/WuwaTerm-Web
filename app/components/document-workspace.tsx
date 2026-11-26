@@ -20,13 +20,16 @@ import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
-import { inferDirection } from '../../lib/termbase';
+import {
+  findMatchingTermbaseEntry, inferDirection, promoteTermbaseEntry,
+  type TermbaseDirection, type TermbaseEntry, type TermbaseKind,
+} from '../../lib/termbase';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
 import type { Candidate, Choice, Draft, Finding, PairView, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
 import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
-import { MyTerms } from './my-terms';
+import { MyTerms, type TermbaseDraftSeed, type TermbaseExternalFeedback } from './my-terms';
 import { QuickTermLookup } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
 import { RuntimeStatus } from './runtime-status';
@@ -109,9 +112,18 @@ export function DocumentWorkspace() {
   const importDialog = useRef<HTMLDialogElement>(null);
   const keepImportButton = useRef<HTMLButtonElement>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
-  const [verdictFilter, setVerdictFilter] = useState<(typeof FILTERS)[number]['id']>('all');
+  const [verdictFilter, setVerdictFilter] = useState<(typeof FILTERS)[number]['id']>('actionable');
   const [canonicalFindingId, setCanonicalFindingId] = useState<string | null>(null);
   const [copied, setCopied] = useState<'done' | 'failed' | null>(null);
+  const [syncScroll, setSyncScroll] = useState(true);
+  const [markdownPreview, setMarkdownPreview] = useState(false);
+  const syncSuspended = useRef(false);
+  const syncSuspendRaf = useRef<number | null>(null);
+  const [termbaseEntries, setTermbaseEntries] = useState<TermbaseEntry[]>([]);
+  const [termbaseOpen, setTermbaseOpen] = useState(false);
+  const [termbaseDraftSeed, setTermbaseDraftSeed] = useState<TermbaseDraftSeed | null>(null);
+  const [termbaseFeedback, setTermbaseFeedback] = useState<TermbaseExternalFeedback | null>(null);
+  const termbaseSeq = useRef(0);
   const [revision, setRevision] = useState<RevisionIntent | null>(null);
   const revisionRef = useRef<RevisionIntent | null>(null);
   const revisionDialog = useRef<HTMLDialogElement>(null);
@@ -231,6 +243,95 @@ export function DocumentWorkspace() {
       choices: now.choices, imported: now.imported, finding, candidate, trigger, fragment: '', selected: null,
     });
   }
+  useEffect(() => () => {
+    if (syncSuspendRaf.current !== null) cancelAnimationFrame(syncSuspendRaf.current);
+  }, []);
+
+  const suspendScrollSync = useCallback(() => {
+    syncSuspended.current = true;
+    if (syncSuspendRaf.current !== null) cancelAnimationFrame(syncSuspendRaf.current);
+    syncSuspendRaf.current = requestAnimationFrame(() => {
+      syncSuspendRaf.current = requestAnimationFrame(() => {
+        syncSuspended.current = false;
+        syncSuspendRaf.current = null;
+      });
+    });
+  }, []);
+
+  const handleEditorScroll = useCallback((origin: 'source' | 'target', ratio: number) => {
+    if (!syncScroll || syncSuspended.current) return;
+    (origin === 'source' ? targetEditor : sourceEditor).current?.setScrollRatio(ratio);
+  }, [syncScroll]);
+
+  function toggleMarkdownPreview() {
+    const sourceRatio = sourceEditor.current?.scrollRatio() ?? null;
+    const targetRatio = targetEditor.current?.scrollRatio() ?? null;
+    setMarkdownPreview(prev => !prev);
+    requestAnimationFrame(() => {
+      if (sourceRatio !== null) sourceEditor.current?.setScrollRatio(sourceRatio);
+      if (targetRatio !== null) targetEditor.current?.setScrollRatio(targetRatio);
+    });
+  }
+
+  const effectiveTermbaseDirection: TermbaseDirection = quick && autoDirection ? inferDirection(source) : direction;
+
+  function emitTermbaseFeedback(kind: 'notice' | 'error', text: string) {
+    termbaseSeq.current += 1;
+    setTermbaseFeedback({ key: termbaseSeq.current, kind, text });
+  }
+
+  function promoteToTermbase(candidate: { source: string; target: string; direction?: TermbaseDirection; kind?: TermbaseKind; note?: string }) {
+    const targetDirection = candidate.direction ?? effectiveTermbaseDirection;
+    const outcome = promoteTermbaseEntry(termbaseEntries, {
+      source: candidate.source,
+      target: candidate.target,
+      direction: targetDirection,
+      kind: candidate.kind ?? 'preferred_term',
+      note: candidate.note,
+    });
+    if (outcome.status === 'added') {
+      setTermbaseEntries(outcome.entries);
+      emitTermbaseFeedback('notice', fill(m.termbase.notices.promoted, { source: outcome.entry.source, target: outcome.entry.target }));
+      return;
+    }
+    if (outcome.status === 'duplicate') {
+      emitTermbaseFeedback('notice', fill(m.termbase.notices.alreadyPresent, { source: outcome.entry.source, target: outcome.entry.target }));
+      return;
+    }
+    if (outcome.status === 'incomplete') {
+      termbaseSeq.current += 1;
+      const seedKey = termbaseSeq.current;
+      setTermbaseOpen(true);
+      setTermbaseDraftSeed({
+        key: seedKey,
+        source: outcome.source,
+        target: outcome.target,
+        direction: outcome.direction,
+        kind: outcome.kind,
+        note: candidate.note ?? '',
+      });
+      emitTermbaseFeedback('notice', outcome.source || outcome.target ? m.termbase.notices.prefilled : m.termbase.notices.selectHint);
+      return;
+    }
+    const fieldName = outcome.field === 'target' ? m.termbase.fieldTarget
+      : outcome.field === 'note' ? m.termbase.fieldNote : m.termbase.fieldSource;
+    if (outcome.error === 'list_full') emitTermbaseFeedback('error', m.termbase.errors.listFull);
+    else if (outcome.error === 'list_too_large') emitTermbaseFeedback('error', m.termbase.errors.listTooLarge);
+    else if (outcome.error === 'field_too_long') emitTermbaseFeedback('error', fill(m.termbase.errors.fieldTooLong, { field: fieldName, max: outcome.max ?? 0 }));
+    else emitTermbaseFeedback('error', fill(m.termbase.errors.fieldInvalid, { field: fieldName }));
+  }
+
+  function promoteSelectionToTermbase() {
+    const selectedSource = sourceEditor.current?.selection()?.text.trim() ?? '';
+    const selectedTarget = targetEditor.current?.selection()?.text.trim() ?? '';
+    promoteToTermbase({
+      source: selectedSource,
+      target: selectedTarget,
+      direction: effectiveTermbaseDirection,
+      kind: 'preferred_term',
+    });
+  }
+
   function confirmRevision() {
     const intent = revisionRef.current;
     if (!intent) return;
@@ -238,7 +339,10 @@ export function DocumentWorkspace() {
     if (outcome.status === 'stale') { cancelRevision(); return; }
     if (outcome.status !== 'applied') return;
     cancelRevision();
-    requestAnimationFrame(() => targetEditor.current?.reveal(outcome.span));
+    requestAnimationFrame(() => {
+      suspendScrollSync();
+      targetEditor.current?.reveal(outcome.span);
+    });
   }
 
   useEffect(() => {
@@ -310,6 +414,15 @@ export function DocumentWorkspace() {
     void translateInReview();
   }
   function jumpTo(side: 'source' | 'target', span: Span) {
+    suspendScrollSync();
+    if (markdownPreview) {
+      setMarkdownPreview(false);
+      requestAnimationFrame(() => {
+        suspendScrollSync();
+        (side === 'source' ? sourceEditor : targetEditor).current?.reveal(span);
+      });
+      return;
+    }
     (side === 'source' ? sourceEditor : targetEditor).current?.reveal(span);
   }
   function editSide(side: 'source' | 'target') {
@@ -416,7 +529,13 @@ export function DocumentWorkspace() {
         <p className="finding-position">{fill(m.review.position, { i: activeVisibleIndex < 0 ? 0 : activeVisibleIndex + 1, n: visibleFindings.length })}</p>
       </div>
       <div className="review-findings">{judged!.report.findings.length === 0 && <p>{m.review.noFindings}</p>}
-        {visibleFindings.length === 0 && judged!.report.findings.length > 0 && <p>{m.review.noFindingsFiltered}</p>}
+        {verdictFilter === 'actionable' && findingCounts.verified_constraint > 0 && (
+          <div className="hidden-confirmed-bar" role="status" data-hidden-confirmed={findingCounts.verified_constraint}>
+            <span>{fill(visibleFindings.length === 0 ? m.review.hiddenConfirmedAll : m.review.hiddenConfirmedNotice, { n: findingCounts.verified_constraint })}</span>
+            <button type="button" className="text-button" onClick={() => setVerdictFilter('all')}>{m.review.showAllConfirmed}</button>
+          </div>
+        )}
+        {visibleFindings.length === 0 && judged!.report.findings.length > 0 && !(verdictFilter === 'actionable' && findingCounts.verified_constraint > 0) && <p>{m.review.noFindingsFiltered}</p>}
         {visibleFindings.map((finding: Finding) => {
           const active = finding.id === activeFindingId;
           const sourceLocated = latest.source === source && highlightSegments(source, finding.source_span) !== null;
@@ -435,16 +554,22 @@ export function DocumentWorkspace() {
               <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo('source', finding.source_span)}>{m.review.jumpSource}</button>
               <button className="text-button" type="button" disabled={!targetLocated} onClick={() => { if (finding.target_span) jumpTo('target', finding.target_span); }}>{m.review.jumpTarget}</button>
             </div>
-            {finding.candidates.map((candidate: Candidate) => <div className="term-pair" key={candidate.candidate_id}><strong>{candidate.zh}</strong><span>{candidate.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, candidate.category)}</small>
-              <div className="finding-actions">
-                <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{m.review.adopt}</button>
-                {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.replaceTerm(finding, candidate)}>{m.review.replace}</button>}
-                {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !doc.isRevisionEligible(finding, candidate)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
-              </div>
-              <details className="candidate-sources"><summary>{m.review.viewSources}</summary>
-                <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
-              </details>
-            </div>)}
+            {finding.candidates.map((candidate: Candidate) => {
+              const pairSource = direction === 'en' ? candidate.zh : candidate.en;
+              const pairTarget = direction === 'en' ? candidate.en : candidate.zh;
+              const inTermbase = !!findMatchingTermbaseEntry(termbaseEntries, { source: pairSource, target: pairTarget, direction });
+              return <div className="term-pair" key={candidate.candidate_id}><strong>{candidate.zh}</strong><span>{candidate.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, candidate.category)}</small>
+                <div className="finding-actions">
+                  <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{m.review.adopt}</button>
+                  {targetLocated && <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.replaceTerm(finding, candidate)}>{m.review.replace}</button>}
+                  {finding.target_span === null && <button className="text-button" type="button" disabled={phase === 'loading' || !doc.isRevisionEligible(finding, candidate)} onClick={event => openRevision(finding, candidate, event.currentTarget)}>{m.review.revisionOpen}</button>}
+                  <button className="text-button" type="button" onClick={() => promoteToTermbase({ source: pairSource, target: pairTarget, direction })}>{inTermbase ? m.termbase.alreadyInTermbase : m.termbase.promoteButton}</button>
+                </div>
+                <details className="candidate-sources"><summary>{m.review.viewSources}</summary>
+                  <ul>{candidate.sources.map(item => <li key={`${item.source_file}\u0000${item.source_id}`}><span>{item.source_file}</span><span>{item.source_id}</span></li>)}</ul>
+                </details>
+              </div>;
+            })}
             <details className="finding-basis"><summary>{m.review.findingBasis}</summary><p>{fill(m.review.spanRange, { start: finding.source_span.start + 1, end: finding.source_span.end })}</p><p>{finding.rule_id} · {finding.id}</p></details>
             <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.choose(finding, null)}>{m.review.notTerm}</button>
           </article>;
@@ -540,12 +665,7 @@ export function DocumentWorkspace() {
         <button type="button" aria-pressed={!quick} onClick={() => doc.setWorkspaceMode('manuscript')}>{w.modeManuscript}</button>
       </div>
     </header>
-    <RuntimeStatus saveView={saveView} reportCommit={latest?.report.dictionary.source_commit ?? null} />
     <div className="workspace-grid">
-      <div className="workspace-side">
-        <QuickTermLookup quick={quick} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
-        <MyTerms source={source} direction={quick && autoDirection ? inferDirection(source) : direction} />
-      </div>
       <div className="manuscript-workspace">
         <div className="manuscript-editor-pane">
           {!quick && !latest && !source.trim() && !target.trim() && choices.length === 0 && (
@@ -554,6 +674,33 @@ export function DocumentWorkspace() {
             </ol>
           )}
           <form onSubmit={quick ? translateQuick : submit}>
+            <div className="editor-toolbar" role="group" aria-label={w.editorToolbarAria}>
+              <button
+                type="button"
+                className="secondary-button toolbar-toggle"
+                aria-pressed={syncScroll}
+                data-sync-scroll={syncScroll ? 'on' : 'off'}
+                onClick={() => setSyncScroll(value => !value)}
+              >
+                {w.syncScroll}
+              </button>
+              <button
+                type="button"
+                className="secondary-button toolbar-toggle"
+                aria-pressed={markdownPreview}
+                data-markdown-preview={markdownPreview ? 'on' : 'off'}
+                onClick={toggleMarkdownPreview}
+              >
+                {w.markdownPreview}
+              </button>
+              <button
+                type="button"
+                className="secondary-button toolbar-toggle"
+                onClick={promoteSelectionToTermbase}
+              >
+                {m.termbase.promoteSelection}
+              </button>
+            </div>
             <div className="editor-panes">
               <div className="editor-pane">
                 <div className="label-row">
@@ -568,14 +715,36 @@ export function DocumentWorkspace() {
                     <option value="zh">{quick ? m.translation.directionToZh : m.review.directionZh}</option>
                   </select>
                 </div>
-                <EditorSurfaceAdapter ref={sourceEditor} id="review-source" value={source} rows={6} placeholder={quick ? m.translation.placeholder : m.review.sourcePlaceholder} onEdit={editSide('source')} />
+                <EditorSurfaceAdapter
+                  ref={sourceEditor}
+                  id="review-source"
+                  value={source}
+                  rows={6}
+                  placeholder={quick ? m.translation.placeholder : m.review.sourcePlaceholder}
+                  preview={markdownPreview}
+                  previewEmptyText={w.markdownPreviewEmpty}
+                  previewAriaLabel={w.markdownSourcePreviewAria}
+                  onScrollRatio={ratio => handleEditorScroll('source', ratio)}
+                  onEdit={editSide('source')}
+                />
               </div>
               <div className="editor-pane">
                 <div className="label-row">
                   <label htmlFor="review-target">{quick ? w.targetLabel : m.review.targetLabel}</label>
                   {quick && !!target && <button type="button" className="text-button" onClick={() => void copyTranslation()}>{copied === 'done' ? m.translation.copied : m.translation.copy}</button>}
                 </div>
-                <EditorSurfaceAdapter ref={targetEditor} id="review-target" value={target} rows={6} placeholder={quick ? m.translation.idlePlaceholder : m.review.targetPlaceholder} onEdit={editSide('target')} />
+                <EditorSurfaceAdapter
+                  ref={targetEditor}
+                  id="review-target"
+                  value={target}
+                  rows={6}
+                  placeholder={quick ? m.translation.idlePlaceholder : m.review.targetPlaceholder}
+                  preview={markdownPreview}
+                  previewEmptyText={w.markdownPreviewEmpty}
+                  previewAriaLabel={w.markdownTargetPreviewAria}
+                  onScrollRatio={ratio => handleEditorScroll('target', ratio)}
+                  onEdit={editSide('target')}
+                />
               </div>
             </div>
             <div className="field-hint"><span>{m.review.hintSafety}</span><span aria-live="polite">{quick ? fill(m.translation.charCount, { n: sourceLength.toLocaleString(locale) }) : fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span></div>
@@ -644,6 +813,7 @@ export function DocumentWorkspace() {
               </div>
             </div>
           </>}
+          {termbaseFeedback && <p className={termbaseFeedback.kind === 'error' ? 'termbase-promote-status termbase-promote-error' : 'termbase-promote-status'} role={termbaseFeedback.kind === 'error' ? 'alert' : 'status'}>{termbaseFeedback.text}</p>}
           {notice && <p className="notice-state" role="status">{noticeText}</p>}
           {!quick && alignments !== null && alignments.length === 0 && <div className="alignment-recovery" role="region" aria-label={m.review.alignmentRecoveryAria}>
             <p>{m.review.alignmentEmptyPrompt}</p>
@@ -682,10 +852,26 @@ export function DocumentWorkspace() {
             pool={pool}
             locate={(side, span) => jumpTo(side, span)}
             termTrack={termTrack}
+            termbaseEntries={termbaseEntries}
+            onPromoteToTermbase={promoteToTermbase}
           />
           <StyleLayer lang={lang} on={styleOn} setOn={setStyleOn} />
         </div>}
       </div>
+      <div className="workspace-side">
+        <QuickTermLookup quick={quick} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+        <MyTerms
+          source={source}
+          direction={effectiveTermbaseDirection}
+          entries={termbaseEntries}
+          setEntries={setTermbaseEntries}
+          open={termbaseOpen}
+          onOpenChange={setTermbaseOpen}
+          draftSeed={termbaseDraftSeed}
+          externalFeedback={termbaseFeedback}
+        />
+      </div>
     </div>
+    <RuntimeStatus saveView={saveView} reportCommit={latest?.report.dictionary.source_commit ?? null} />
   </section>;
 }

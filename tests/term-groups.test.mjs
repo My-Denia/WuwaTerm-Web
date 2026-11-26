@@ -140,9 +140,9 @@ test('a saved result is to do until the live basis makes it current: saved, curr
   const stale = group('stale');
   assert.deepEqual([stale.status, stale.pendingCount, stale.confirmedCount, stale.savedCount], ['pending', 1, 0, 0]);
   // The filters follow the status: saved and stale are under to do with their place, only current is under confirmed.
-  assert.deepEqual(L.termGroupCounts([saved]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
-  assert.deepEqual(L.termGroupCounts([current]), { all: 1, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 1 });
-  assert.deepEqual(L.termGroupCounts([stale]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(L.termGroupCounts([saved]), { unresolved: 1, all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(L.termGroupCounts([current]), { unresolved: 0, all: 1, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 1 });
+  assert.deepEqual(L.termGroupCounts([stale]), { unresolved: 1, all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
   for (const [, g] of [['saved', saved], ['current', current], ['stale', stale]]) {
     const counts = L.termGroupCounts([g]);
     for (const f of L.TERM_GROUP_FILTERS) assert.equal(L.filterTermGroups([g], f).length, counts[f], f);
@@ -180,7 +180,7 @@ test('a saved result is to do until the live basis makes it current: saved, curr
     segment(1, 'saved', source, target, verified, [], { source: scalars(`${source}\n\n`).length, target: scalars(`${target}\n\n`).length }),
   ], docSource, docTarget, 'en');
   assert.deepEqual([mixed.status, mixed.pendingCount, mixed.confirmedCount, mixed.savedCount], ['pending', 1, 1, 1]);
-  assert.deepEqual(L.termGroupCounts([mixed]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(L.termGroupCounts([mixed]), { unresolved: 1, all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
   const under = L.filterTermGroups([mixed], 'pending');
   assert.deepEqual(under.map(g => [g.occurrences.length, g.hidden, g.occurrences[0].freshness]), [[1, 1, 'saved']]);
   assert.deepEqual(L.filterTermGroups([mixed], 'confirmed'), []);
@@ -280,7 +280,10 @@ test('the filters count groups by the traits they hold, and what a count says is
   ];
   const groups = L.groupTermOccurrences([segment(0, 'current', source, target, find)], source, target, 'en');
   assert.deepEqual(groups.map(g => [g.surface, g.status]), [['椿', 'inconsistent'], ['声骸', 'not_evaluated'], ['今汐', 'confirmed']]);
-  assert.deepEqual(L.termGroupCounts(groups), { all: 3, inconsistent: 1, pending: 1, not_evaluated: 1, confirmed: 1 });
+  assert.deepEqual(L.termGroupCounts(groups), { unresolved: 2, all: 3, inconsistent: 1, pending: 1, not_evaluated: 1, confirmed: 1 });
+  // Unresolved hides confirmed groups and collapses confirmed places inside mixed groups.
+  const unresolved = L.filterTermGroups(groups, 'unresolved');
+  assert.deepEqual(unresolved.map(g => [g.surface, g.occurrences.length, g.hidden]), [['椿', 1, 19], ['声骸', 2, 0]]);
   // Pending is not "groups whose status is pending": the group with one place to check is under it, showing that one place.
   const pending = L.filterTermGroups(groups, 'pending');
   assert.deepEqual(pending.map(g => [g.surface, g.occurrences.length, g.hidden]), [['椿', 1, 19]]);
@@ -299,7 +302,7 @@ test('the filters count groups by the traits they hold, and what a count says is
   const two = [segment(0, 'current', source, target, find), segment(1, 'current', '声骸三。', 'The Echo three.', [['声骸', 0, 'verified_constraint', 'Echo', 0, [echo]]], [], { source: 0, target: 0 })];
   const scoped = L.groupTermOccurrences(two, `${source}声骸三。`, `${target}The Echo three.`, 'en');
   const inSecond = L.termGroupCounts(scoped, 1);
-  assert.deepEqual(inSecond, { all: 1, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(inSecond, { unresolved: 0, all: 1, inconsistent: 0, pending: 0, not_evaluated: 0, confirmed: 0 });
   for (const f of L.TERM_GROUP_FILTERS) assert.equal(L.filterTermGroups(scoped, f, { segment: 1 }).length, inSecond[f], f);
 });
 
@@ -315,7 +318,7 @@ test('a ready segment without a result that holds the term keeps its group from 
   assert.deepEqual(group.unverifiedSegments, [2]);
   assert.equal(group.status, 'pending');
   assert.equal(group.pendingCount, 0, 'no place of the group needs an action: the segment has none yet');
-  assert.deepEqual(L.termGroupCounts([group]), { all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
+  assert.deepEqual(L.termGroupCounts([group]), { unresolved: 1, all: 1, inconsistent: 0, pending: 1, not_evaluated: 0, confirmed: 0 });
   assert.deepEqual(L.filterTermGroups([group], 'pending').map(g => [g.occurrences.length, g.hidden]), [[0, 2]], 'its head says why; the places open on request');
   // A segment without the term, a longer English word and the same term in another group do not count.
   const others = [{ index: 1, sourceCore: 'Nothing of interest. Tuneful sounds.' }, { index: 2, sourceCore: 'Intuners and tunerless.' }];

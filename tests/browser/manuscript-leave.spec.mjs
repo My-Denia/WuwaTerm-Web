@@ -204,6 +204,7 @@ for (const direction of ['Back', 'Forward']) {
     await page.locator('#review-target').fill('Jinhsi.');
     await page.getByRole('button', { name: '核对术语', exact: true }).click();
     await expect(page.locator('.review-current')).toBeVisible();
+    await page.getByRole('button', { name: '全部 1', exact: true }).click();
     await page.getByRole('button', { name: '采用此官方词对', exact: true }).click();
     const before = await download(page, '保存稿件');
     const parts = [];

@@ -60,8 +60,12 @@ test('the term view groups findings by term: places, segments, the translation u
   expect(rec.reviewHeaders.every(h => h['x-wuwaterm-review-features'] === 'dense-128,reason-v1')).toBe(true);
   expect(rec.reviews.every(body => body.review_version === 'review-v2')).toBe(true);
 
-  // Default view: grouped, most urgent first (an inconsistent term, one with something not evaluated, a confirmed one).
+  // Default view: grouped, unresolved filter hides confirmed groups (今汐) and collapses confirmed places of 椿.
   await expect(page.getByRole('button', { name: S.termViewGroups, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(filterButton(page, 'unresolved')).toHaveAttribute('aria-pressed', 'true');
+  await expect(groups(page)).toHaveCount(2);
+  await expect(groupOf(page, '今汐')).toHaveCount(0);
+  await filterButton(page, 'all').click();
   await expect(groups(page)).toHaveCount(3);
   expect(await groups(page).evaluateAll(list => list.map(el => [el.getAttribute('data-group-surface'), el.getAttribute('data-group-status')])))
     .toEqual([['椿', 'inconsistent'], ['声骸', 'not_evaluated'], ['今汐', 'confirmed']]);
@@ -90,7 +94,7 @@ test('the term view groups findings by term: places, segments, the translation u
   await expect(noHit.locator('.occurrence-translation')).toHaveText(S.occurrenceNoHit);
 
   // The status filter: each button counts the groups that hold a place of its kind, and what is shown is exactly that count.
-  const counts = { all: 3, inconsistent: 1, pending: 1, not_evaluated: 2, confirmed: 1 };
+  const counts = { unresolved: 2, all: 3, inconsistent: 1, pending: 1, not_evaluated: 2, confirmed: 1 };
   for (const [id, n] of Object.entries(counts)) {
     await filterButton(page, id).click();
     await expect(filterButton(page, id)).toHaveAttribute('data-group-count', String(n));
@@ -200,6 +204,7 @@ test('a place with no translation hit opens an editor for that one segment; appl
   const manuscript = camellyaManuscript();
   await load(page, manuscript, 5);
   await check(page, rec, 4);
+  await filterButton(page, 'all').click();
   const noHit = places(groupOf(page, '椿')).nth(1);
   await expect(noHit.getByRole('button', { name: S.occRevise, exact: true })).toBeVisible();
   // A place that has a translation hit offers no segment editor.
@@ -299,6 +304,8 @@ test('a segment with more than 32 findings is stored, grouped place by place and
   await expect(camellya).toHaveAttribute('data-group-status', 'inconsistent');
   await expect(camellya.locator('.term-group-meta')).toHaveText(fill(S.groupHead, { n: 52, segments: '1' }));
   await expect(camellya.locator('.term-group-renderings')).toHaveText(fill(S.groupRenderings, { items: `Camellya ×48 · ${S.renderingNone} ×4` }));
+  await expect(places(camellya)).toHaveCount(4);
+  await filterButton(page, 'all').click();
   await expect(places(camellya)).toHaveCount(52);
   const saved = parseWorkfile((await downloadFrom(page, M.review.save)).text);
   // More than 32 findings alone make the file v4 (no reason is involved).

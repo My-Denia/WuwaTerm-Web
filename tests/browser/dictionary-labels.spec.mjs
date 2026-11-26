@@ -77,6 +77,7 @@ test('lookup and review labels follow the interface language and leave unknown k
   await page.locator('#review-source').fill('声骸');
   await page.locator('#review-target').fill('Echo');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
+  await page.getByRole('button', { name: '全部 1', exact: true }).click();
   const chips = page.locator('.review-findings .term-pair small');
   await expect(chips.nth(0)).toHaveText('类别：声骸');
   await expect(chips.nth(1)).toHaveText('类别：not_a_category');

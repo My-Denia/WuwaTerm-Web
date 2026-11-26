@@ -9,8 +9,8 @@ import { buildFiles, buildGenerated } from '../scripts/build-termbase-v1-fixture
 import { validateJsonSchema } from '../scripts/validate-json-schema.mjs';
 import {
   MATCH_SPANS_PER_ENTRY, MATCH_TEXT_LIMIT, MAX_TERMBASE_BYTES, MAX_TERMBASE_ENTRIES, TERMBASE_ERROR_CODES, TermbaseError,
-  inferDirection, isTermbaseTimestamp, matchTermbase, nextEntryId, parseTermbaseBytes, parseTermbaseText, serializeTermbase,
-  termbaseNow, validateTermbase,
+  findMatchingTermbaseEntry, inferDirection, isTermbaseTimestamp, matchTermbase, nextEntryId, parseTermbaseBytes,
+  parseTermbaseText, promoteTermbaseEntry, serializeTermbase, termbaseNow, validateTermbase,
 } from '../lib/termbase.ts';
 import {
   TERMBASE_DIRECTION_VALUES, TERMBASE_FORMAT, TERMBASE_KIND_VALUES, TERMBASE_LIMITS,
@@ -208,4 +208,29 @@ test('inferDirection reads any Han character as Chinese into English', () => {
   assert.equal(inferDirection('今汐 is here'), 'en');
   assert.equal(inferDirection('plain English'), 'zh');
   assert.equal(inferDirection(''), 'zh');
+});
+
+test('promoteTermbaseEntry adds preferred_term entries, detects duplicates, and flags incomplete candidates', () => {
+  const first = promoteTermbaseEntry([], { source: ' 声骸 ', target: ' Echo ', direction: 'en' });
+  assert.equal(first.status, 'added');
+  assert.equal(first.entry.id, 'tb-001');
+  assert.equal(first.entry.source, '声骸');
+  assert.equal(first.entry.target, 'Echo');
+  assert.equal(first.entry.kind, 'preferred_term');
+  assert.equal(first.entry.direction, 'en');
+  assert.equal(first.entries.length, 1);
+
+  assert.ok(findMatchingTermbaseEntry(first.entries, { source: '声骸', target: 'Echo', direction: 'en' }));
+  assert.equal(findMatchingTermbaseEntry(first.entries, { source: '声骸', target: 'Echo', direction: 'zh' }), null);
+
+  const dup = promoteTermbaseEntry(first.entries, { source: '声骸', target: 'Echo', direction: 'en' });
+  assert.equal(dup.status, 'duplicate');
+  assert.equal(dup.entry.id, 'tb-001');
+
+  const incomplete = promoteTermbaseEntry(first.entries, { source: '今汐', target: '   ', direction: 'en' });
+  assert.deepEqual(incomplete, { status: 'incomplete', source: '今汐', target: '', direction: 'en', kind: 'preferred_term' });
+
+  const invalid = promoteTermbaseEntry(first.entries, { source: 'a\u0000b', target: 'c', direction: 'en' });
+  assert.equal(invalid.status, 'invalid');
+  assert.equal(invalid.error, 'field_invalid');
 });

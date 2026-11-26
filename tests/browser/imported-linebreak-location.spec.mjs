@@ -45,6 +45,7 @@ for (const [label, breaks] of [['CRLF', ['\r\n', '\r\n']], ['CR', ['\r', '\r']],
       history: [{ source, target, direction: 'en', alignments: null, report, resolutions: [] }] });
     await page.getByLabel('选择稿件文件').setInputFiles({ name: 'linebreaks.json', mimeType: 'application/json', buffer: Buffer.from(content) });
     await expect(page.locator('.review-summary')).toContainText('历史报告');
+    await page.getByRole('button', { name: '全部 2', exact: true }).click();
     const before = await download(page, '保存稿件');
     const findings = page.locator('.review-findings .term-result');
     for (let index = 0; index < 2; index += 1) {

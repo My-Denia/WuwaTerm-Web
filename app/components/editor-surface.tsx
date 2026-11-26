@@ -1,13 +1,14 @@
 'use client';
 
-import { forwardRef, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { highlightSegments, scalarToUtf16 } from '../../lib/review-report.js';
 import type { Span, Utf16Offset } from '../../lib/workbench-model';
+import { MarkdownPreview } from './markdown-preview';
 
 /**
  * The thin seam between the workspace and one text editor. The workspace speaks in document terms (scalar spans of the raw
  * text, edits with their IME composition state); the surface owns the DOM details (CRLF folding in a textarea, selection
- * offsets, composition events). Another editor can replace the textarea behind this handle without touching the workspace.
+ * offsets, composition events, scroll ratio sync, and read-only Markdown preview).
  */
 export type EditorSurfaceHandle = {
   focus(): void;
@@ -15,6 +16,10 @@ export type EditorSurfaceHandle = {
   reveal(span: Span): boolean;
   /** The selected range as a scalar span of the document text, or null when nothing is selected. */
   selection(): Span | null;
+  /** Current vertical scroll ratio in [0, 1], or null when the active surface cannot scroll. */
+  scrollRatio(): number | null;
+  /** Programmatically scroll the active surface to a [0, 1] ratio without firing `onScrollRatio`. */
+  setScrollRatio(ratio: number): void;
 };
 
 export type EditorEdit = { composing: boolean };
@@ -26,6 +31,11 @@ type Props = {
   rows?: number;
   disabled?: boolean;
   describedBy?: string;
+  preview?: boolean;
+  previewEmptyText?: string;
+  previewAriaLabel?: string;
+  /** Called with the [0, 1] vertical scroll ratio on user scroll (paused during IME composition and programmatic sync/reveal). */
+  onScrollRatio?: (ratio: number) => void;
   /**
    * Every change of the text. `composing` is true while an IME composition is open; its end is reported once more without
    * it, even when the committed text equals the last update, so the controller can close the composition step.
@@ -76,14 +86,45 @@ function rawOffset(text: string, offset: number): number | null {
   return raw;
 }
 
+function readScrollRatio(element: HTMLElement | null): number | null {
+  if (!element) return null;
+  const max = element.scrollHeight - element.clientHeight;
+  if (max <= 0) return null;
+  return Math.min(1, Math.max(0, element.scrollTop / max));
+}
+
 export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(function EditorSurfaceAdapter(props, ref) {
   const box = useRef<HTMLTextAreaElement>(null);
+  const previewBox = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
+  const suppressScroll = useRef(false);
+  const suppressRaf = useRef<number | null>(null);
+  const previewRef = useRef(!!props.preview);
+  previewRef.current = !!props.preview;
   const latest = useRef(props.value);
   latest.current = props.value;
+  const onScrollRatioRef = useRef(props.onScrollRatio);
+  onScrollRatioRef.current = props.onScrollRatio;
+
+  const suppressScrollBriefly = () => {
+    suppressScroll.current = true;
+    if (suppressRaf.current !== null) cancelAnimationFrame(suppressRaf.current);
+    suppressRaf.current = requestAnimationFrame(() => {
+      suppressRaf.current = requestAnimationFrame(() => {
+        suppressScroll.current = false;
+        suppressRaf.current = null;
+      });
+    });
+  };
+
+  useEffect(() => () => {
+    if (suppressRaf.current !== null) cancelAnimationFrame(suppressRaf.current);
+  }, []);
+
+  const activeScroller = (): HTMLElement | null => (previewRef.current ? previewBox.current : box.current);
 
   useImperativeHandle(ref, () => ({
-    focus() { box.current?.focus(); },
+    focus() { (previewRef.current ? previewBox.current : box.current)?.focus(); },
     reveal(span) {
       const element = box.current;
       const text = latest.current;
@@ -94,6 +135,7 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
       if (!located || start === null || end === null) return false;
       const domStart = domOffset(text, start);
       const domEnd = domOffset(text, end);
+      suppressScrollBriefly();
       element.focus({ preventScroll: true });
       element.setSelectionRange(domStart, domEnd);
       scrollSelectionIntoBox(element, domStart, domEnd);
@@ -109,24 +151,58 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
       if (start === null || end === null) return null;
       return { start: Array.from(text.slice(0, start)).length, end: Array.from(text.slice(0, end)).length, text: text.slice(start, end) };
     },
+    scrollRatio() {
+      return readScrollRatio(activeScroller());
+    },
+    setScrollRatio(ratio) {
+      if (composing.current) return;
+      const element = activeScroller();
+      if (!element) return;
+      const max = element.scrollHeight - element.clientHeight;
+      if (max <= 0) return;
+      const clamped = Math.min(1, Math.max(0, ratio));
+      const nextTop = Math.round(clamped * max);
+      if (Math.abs(element.scrollTop - nextTop) < 1) return;
+      suppressScrollBriefly();
+      element.scrollTop = nextTop;
+    },
   }), []);
 
-  return <textarea
-    ref={box}
-    id={props.id}
-    value={props.value}
-    rows={props.rows ?? 5}
-    placeholder={props.placeholder}
-    disabled={props.disabled}
-    aria-describedby={props.describedBy}
-    onCompositionStart={() => { composing.current = true; }}
-    onCompositionEnd={event => {
-      composing.current = false;
-      props.onEdit(event.currentTarget.value, { composing: false });
-    }}
-    onChange={event => {
-      const open = composing.current || (event.nativeEvent as InputEvent).isComposing === true;
-      props.onEdit(event.target.value, { composing: open });
-    }}
-  />;
+  const handleScroll = (element: HTMLElement) => {
+    if (suppressScroll.current || composing.current) return;
+    const ratio = readScrollRatio(element);
+    if (ratio !== null) onScrollRatioRef.current?.(ratio);
+  };
+
+  return <>
+    <textarea
+      ref={box}
+      id={props.id}
+      value={props.value}
+      rows={props.rows ?? 5}
+      placeholder={props.placeholder}
+      disabled={props.disabled}
+      hidden={!!props.preview}
+      aria-describedby={props.describedBy}
+      onScroll={event => handleScroll(event.currentTarget)}
+      onCompositionStart={() => { composing.current = true; }}
+      onCompositionEnd={event => {
+        composing.current = false;
+        props.onEdit(event.currentTarget.value, { composing: false });
+      }}
+      onChange={event => {
+        const open = composing.current || (event.nativeEvent as InputEvent).isComposing === true;
+        props.onEdit(event.target.value, { composing: open });
+      }}
+    />
+    {props.preview && (
+      <MarkdownPreview
+        ref={previewBox}
+        value={props.value}
+        emptyText={props.previewEmptyText ?? ''}
+        ariaLabel={props.previewAriaLabel ?? props.id}
+        onScroll={event => handleScroll(event.currentTarget)}
+      />
+    )}
+  </>;
 });

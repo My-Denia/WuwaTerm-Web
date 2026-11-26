@@ -136,6 +136,7 @@ test('adopt and not-term stay available after a check once the snapshot reaches 
   await openManuscript(page);
   await fillPair(page);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
+  await page.getByRole('button', { name: /^全部 \d+$/ }).click();
   await expect(page.getByRole('button', { name: '采用此官方词对', exact: true }).first()).toBeEnabled();
   remaining = 0;
   await page.getByRole('button', { name: '刷新额度', exact: true }).click();

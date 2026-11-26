@@ -144,7 +144,7 @@ footer div { display:flex; gap:20px; }
    right-aligned row. No target, label or touch size changes; above 1140px and
    at 540px and below the layout is what it already was. */
 @media(min-width:541px) and (max-width:1140px) { .topbar { flex-wrap:wrap; row-gap:10px; } .brand,.nav-links { flex:0 0 auto; } .brand strong,.brand small,.nav-links a,.lang-toggle button { white-space:nowrap; } .nav-links { flex-wrap:wrap; row-gap:8px; margin-left:auto; } }
-@media(max-width:540px) { .brand small { display:none; } .nav-links { gap:0; font-size:11px; margin-left:auto; } .nav-links > a { display:none; } .beta-badge { display:none; } .topbar { padding-block:14px; flex-wrap:wrap; } .section-pills { width:100%; order:3; justify-content:flex-start; margin-top:4px; } .nav-links { flex-wrap:wrap; } .workspace-card { padding:20px; } .input-row { grid-template-columns:minmax(0,1fr) auto; } form button:not(.secondary-button),.primary-button { padding-inline:14px; } footer { flex-direction:column; gap:8px; } .limits-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; } .limits-table,.limits-table tbody,.limits-table tr,.limits-table td { display:block; width:100%; } .limits-table tr { padding:12px 0; border-bottom:1px solid var(--line); } .limits-table td { border:0; padding:2px 0; } .limits-table td:first-child { color:var(--text); font-size:14px; font-weight:600; } .limits-table td:last-child { color:var(--muted); font-size:13px; } .term-pair { flex-wrap:wrap; } .term-pair span { text-align:left; } .term-actions { gap:6px; } .chip-button { min-height:40px; padding:6px 12px; } }
+@media(max-width:540px) { .brand small { display:none; } .nav-links { gap:0; font-size:11px; margin-left:0; justify-self:end; } .nav-links > a { display:none; } .beta-badge { display:none; } .topbar { padding-block:14px; display:grid; grid-template-columns:minmax(0,1fr) auto; row-gap:8px; column-gap:8px; align-items:center; } .brand { grid-column:1 / -1; justify-self:start; } .section-pills { justify-content:flex-start; } .nav-links { flex-wrap:wrap; } .workspace-card { padding:20px; } .input-row { grid-template-columns:minmax(0,1fr) auto; } form button:not(.secondary-button),.primary-button { padding-inline:14px; } footer { flex-direction:column; gap:8px; } .limits-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; } .limits-table,.limits-table tbody,.limits-table tr,.limits-table td { display:block; width:100%; } .limits-table tr { padding:12px 0; border-bottom:1px solid var(--line); } .limits-table td { border:0; padding:2px 0; } .limits-table td:first-child { color:var(--text); font-size:14px; font-weight:600; } .limits-table td:last-child { color:var(--muted); font-size:13px; } .term-pair { flex-wrap:wrap; } .term-pair span { text-align:left; } .term-actions { gap:6px; } .chip-button { min-height:40px; padding:6px 12px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
 
 /* Manuscript controls extend the existing workbench surface. */
@@ -361,8 +361,8 @@ footer div { display:flex; gap:20px; }
 .mode-switch button[aria-pressed="true"] { background:var(--surface); color:var(--text); box-shadow:0 0 0 1px var(--line-strong); }
 .mode-switch button:hover:not(:disabled):not([aria-pressed="true"]) { color:var(--text); }
 
-/* The status line keeps one height before and after the pool snapshot, so nothing below it shifts. */
-.runtime-status { display:flex; flex-wrap:wrap; align-items:center; gap:4px 18px; min-height:50px; margin-bottom:14px; padding:6px 8px 6px 14px; border:1px solid var(--line); border-radius:10px; background:var(--surface); font-size:12px; line-height:1.5; }
+/* The status line sits after the workspace in both DOM and visual order, and keeps one height before and after the pool snapshot. */
+.runtime-status { display:flex; flex-wrap:wrap; align-items:center; gap:4px 18px; min-height:50px; margin-top:14px; padding:6px 8px 6px 14px; border:1px solid var(--line); border-radius:10px; background:var(--surface); font-size:12px; line-height:1.5; }
 .status-item { display:flex; align-items:center; flex-wrap:wrap; gap:2px 8px; min-width:0; }
 .status-label { color:var(--subtle); font-size:11px; font-weight:700; letter-spacing:.5px; }
 .status-value { color:var(--text); overflow-wrap:anywhere; }
@@ -389,7 +389,7 @@ footer div { display:flex; gap:20px; }
 .drawer-notes strong { font-size:12px; color:var(--text-strong); margin-bottom:2px; }
 .drawer-notes span { font-size:12px; line-height:1.7; color:var(--muted); }
 
-.workspace-grid { display:grid; grid-template-columns:minmax(240px,300px) minmax(0,1fr); gap:16px; align-items:start; }
+.workspace-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(240px,300px); gap:16px; align-items:start; }
 .document-workspace[data-mode="manuscript"] .workspace-grid { grid-template-columns:minmax(0,1fr); gap:12px; }
 .term-lookup { min-width:0; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
 .document-workspace[data-mode="manuscript"] .term-lookup { padding:6px 14px; }
@@ -435,14 +435,40 @@ footer div { display:flex; gap:20px; }
 .manuscript-workspace { gap:16px; }
 .document-workspace[data-mode="quick"] .manuscript-workspace { grid-template-columns:minmax(0,1fr); }
 .manuscript-editor-pane,.manuscript-review-pane { padding:18px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+.editor-toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px; }
+.toolbar-toggle { min-height:34px; padding:4px 11px; font-size:11px; font-weight:600; color:var(--muted); background:var(--raised); border-color:var(--line); }
+.toolbar-toggle:hover:not(:disabled) { color:var(--text); border-color:var(--accent); background:var(--raised-hover); }
+.toolbar-toggle[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); background:var(--ok-bg); }
 .editor-panes { display:grid; grid-template-columns:minmax(0,1fr); gap:12px; }
 .document-workspace[data-mode="quick"] .editor-panes { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .editor-pane { min-width:0; }
 .editor-pane .label-row { height:40px; }
 .editor-pane .text-button { min-height:36px; padding:0; }
-.document-workspace[data-mode="quick"] .editor-pane textarea { min-height:220px; }
+.document-workspace[data-mode="quick"] .editor-pane textarea,.document-workspace[data-mode="quick"] .editor-pane .markdown-preview { min-height:220px; }
 /* A manuscript is read inside these boxes; six rows (169px) left a 5,600-character translation a sliver at a time. */
-.document-workspace[data-mode="manuscript"] .editor-pane textarea { min-height:clamp(200px,34vh,400px); }
+.document-workspace[data-mode="manuscript"] .editor-pane textarea,.document-workspace[data-mode="manuscript"] .editor-pane .markdown-preview { min-height:clamp(200px,34vh,400px); }
+.markdown-preview { width:100%; height:220px; overflow-y:auto; padding:13px 14px; border:1px solid var(--field-line); border-radius:8px; background:var(--field-bg); color:var(--text); font-size:14px; line-height:1.75; overflow-wrap:anywhere; }
+.document-workspace[data-mode="manuscript"] .editor-pane .markdown-preview { height:clamp(200px,34vh,400px); }
+.markdown-preview > :first-child { margin-top:0; }
+.markdown-preview > :last-child { margin-bottom:0; }
+.markdown-preview .md-h1 { margin:14px 0 8px; font-size:18px; line-height:1.35; color:var(--text); }
+.markdown-preview .md-h2 { margin:12px 0 6px; font-size:16px; line-height:1.4; color:var(--text); }
+.markdown-preview .md-h3,.markdown-preview .md-h4,.markdown-preview .md-h5,.markdown-preview .md-h6 { margin:10px 0 4px; font-size:14px; line-height:1.45; color:var(--text-strong); }
+.markdown-preview p { margin:0 0 10px; }
+.markdown-preview code { padding:1px 5px; border-radius:4px; background:var(--raised); border:1px solid var(--line); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; }
+.markdown-preview .md-code-block { margin:8px 0 10px; padding:10px 12px; border-radius:6px; background:var(--raised); border:1px solid var(--line); overflow-x:auto; }
+.markdown-preview .md-code-block code { padding:0; border:0; background:transparent; white-space:pre; display:block; }
+.markdown-preview .md-quote { margin:8px 0 10px; padding:4px 12px; border-left:3px solid var(--accent); color:var(--muted); }
+.markdown-preview .md-list { margin:0 0 10px; padding-left:20px; }
+.markdown-preview .md-list li { margin:3px 0; }
+.markdown-preview .md-hr { margin:12px 0; border:0; border-top:1px solid var(--line); }
+.markdown-preview a { color:var(--accent); text-decoration:underline; }
+.markdown-preview-empty { color:var(--placeholder); font-style:italic; }
+.hidden-confirmed-bar { display:flex; flex-wrap:wrap; align-items:center; gap:4px 12px; margin-top:10px; padding:8px 12px; border:1px solid var(--ok-line); border-radius:8px; background:var(--ok-bg); color:var(--ok-text); font-size:12px; line-height:1.6; }
+.hidden-confirmed-bar p { margin:0; }
+.hidden-confirmed-bar .text-button { min-height:32px; color:var(--ok-text); font-weight:600; }
+.termbase-promote-status { margin:12px 0 0; padding:10px 12px; border:1px solid var(--ok-line); border-radius:8px; background:var(--ok-bg); color:var(--ok-text); font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
+.termbase-promote-error { border-color:var(--warn-line); background:var(--warn-bg); color:var(--warn-text); }
 .document-workspace form .actions { align-items:center; }
 .review-quota p { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.7; }
 .translation-result { margin-top:14px; padding-top:12px; }
@@ -450,27 +476,21 @@ footer div { display:flex; gap:20px; }
 .manuscript-save-state { margin:16px 0 8px; font-size:12px; }
 .document-workspace .guide-steps { margin-bottom:14px; }
 @media(max-width:1040px) { .workspace-grid { grid-template-columns:minmax(0,1fr); } }
-@media(max-width:760px) { .document-workspace[data-mode="quick"] .editor-panes { grid-template-columns:minmax(0,1fr); } .document-workspace[data-mode="quick"] .editor-pane textarea { min-height:140px; } }
+@media(max-width:760px) { .document-workspace[data-mode="quick"] .editor-panes { grid-template-columns:minmax(0,1fr); } .document-workspace[data-mode="quick"] .editor-pane textarea,.document-workspace[data-mode="quick"] .editor-pane .markdown-preview { min-height:140px; height:140px; } }
 @media(max-width:540px) {
   .document-workspace { padding-top:12px; }
   .workspace-heading p { display:none; }
   .mode-switch { width:100%; }
   .mode-switch button { flex:1 1 0; padding-inline:8px; }
-  .runtime-status { gap:2px 12px; padding:6px 8px 6px 12px; }
+  .runtime-status { gap:2px 12px; margin-top:12px; padding:6px 8px 6px 12px; }
   .status-details { margin-left:0; }
   .manuscript-editor-pane,.manuscript-review-pane,.term-lookup,.my-terms { padding:14px; }
   .runtime-drawer { padding:16px; }
-  /* Quick mode on a phone opens on the text boxes and the translate button. Before, the quota line, term lookup and My terms
-     came first and pushed the source box to 732px and the button to about 1,200px of an 844px screen. The visual order now
-     differs from the reading and tab order, which still runs status, lookup, My terms, then the editor. */
-  .document-workspace[data-mode="quick"] { display:flex; flex-direction:column; }
-  .document-workspace[data-mode="quick"] > .workspace-grid { order:1; }
-  .document-workspace[data-mode="quick"] > .runtime-status { order:2; margin:12px 0 0; }
-  .document-workspace[data-mode="quick"] .workspace-side { order:2; }
-  .document-workspace[data-mode="quick"] .editor-pane textarea { min-height:120px; height:132px; }
+  /* Editors come first in DOM and visual order on every viewport; keep phone quick-mode boxes compact so source + translate fit within 844px. */
+  .document-workspace[data-mode="quick"] .editor-pane textarea,.document-workspace[data-mode="quick"] .editor-pane .markdown-preview { min-height:112px; height:120px; }
   /* Touch targets of at least 40px for the small controls a phone shows. */
   footer div a { display:inline-flex; align-items:center; min-height:40px; }
-  .runtime-status .text-button,.status-details,.editor-pane .text-button { min-height:40px; }
+  .runtime-status .text-button,.status-details,.editor-pane .text-button,.toolbar-toggle { min-height:40px; }
   .lookup-heading .text-button { min-width:40px; min-height:40px; }
   .editor-pane .label-row select,.semantic-filters select { min-height:40px; }
   .inline-check { min-height:40px; }

@@ -1632,7 +1632,7 @@ export function groupTermOccurrences(
     || a.occurrences[0].docSource.start - b.occurrences[0].docSource.start);
 }
 
-export const TERM_GROUP_FILTERS = ['all', 'inconsistent', 'pending', 'not_evaluated', 'confirmed'] as const;
+export const TERM_GROUP_FILTERS = ['unresolved', 'all', 'inconsistent', 'pending', 'not_evaluated', 'confirmed'] as const;
 export type TermGroupFilter = (typeof TERM_GROUP_FILTERS)[number];
 
 // What a status filter shows of one group: `scoped` are its places in the selected segment (all of them without one) and `focus` the
@@ -1643,6 +1643,16 @@ function groupMatch(group: TermGroup, filter: TermGroupFilter, segment: number |
   if (scoped.length === 0) return null;
   const action = scoped.filter(needsAction);
   if (filter === 'all') return { scoped, focus: scoped };
+  // Default actionable view: hide already-confirmed groups and collapse confirmed places inside mixed groups while keeping
+  // inconsistent groups with conflicting verified renderings visible so translators can resolve them.
+  if (filter === 'unresolved') {
+    if (group.status === 'confirmed') return null;
+    const unresolved = scoped.filter(o => o.attention !== 'ok' && o.attention !== 'settled');
+    if (unresolved.length > 0) return { scoped, focus: unresolved };
+    if (group.inconsistent) return { scoped, focus: scoped };
+    if (group.unverifiedSegments.length > 0) return { scoped, focus: unresolved };
+    return null;
+  }
   // The places that make a group inconsistent are the ones that need a decision; when none does, nothing narrows.
   if (filter === 'inconsistent') return group.inconsistent ? { scoped, focus: action.length > 0 ? action : scoped } : null;
   // A group that waits for a check of a segment without a result is pending though none of its places is: its head says so.

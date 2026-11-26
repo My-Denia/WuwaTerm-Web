@@ -108,6 +108,8 @@ test('an ambiguous single character is folded after the judged findings, not cou
   await expect.poll(() => rec.reviews.length).toBe(1);
   expect(rec.reviewHeaders[0]['x-wuwaterm-review-features']).toBe('dense-128,reason-v1,ambiguous-mention-v1');
   const track = page.locator('.term-track');
+  await expect(track.getByRole('button', { name: `${M.review.filters.actionable} 0`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await track.getByRole('button', { name: `${M.review.filters.all} 3`, exact: true }).click();
   await expect(track.locator('.review-findings article.term-result')).toHaveCount(3);
   await expect(track.getByRole('button', { name: `${M.review.filters.all} 3`, exact: true })).toBeVisible();
   await expect(track.getByRole('button', { name: `${M.review.filters.not_evaluated} 0`, exact: true })).toBeVisible();

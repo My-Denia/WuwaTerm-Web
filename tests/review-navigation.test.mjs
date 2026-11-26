@@ -24,6 +24,7 @@ test('verdict counts come from findings and ignore coverage', () => {
   ];
   const counts = findingVerdictCounts(findings);
   assert.deepEqual(counts, {
+    actionable: 3,
     all: 5,
     verified_constraint: 2,
     confirmed_conflict: 1,
@@ -31,6 +32,7 @@ test('verdict counts come from findings and ignore coverage', () => {
     not_evaluated: 1,
   });
   assert.notEqual(counts.not_evaluated, 7);
+  assert.equal(filterFindings(findings, 'actionable').map((item) => item.id).join(','), 'b,c,d');
   assert.equal(filterFindings(findings, 'verified_constraint').map((item) => item.id).join(','), 'a,e');
   assert.equal(filterFindings(findings, 'all').length, 5);
   assert.deepEqual(filterFindings(findings, 'confirmed_conflict').map((item) => item.id), ['b']);
