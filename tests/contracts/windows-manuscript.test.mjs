@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { WORKFILE_FORMAT, WORKFILE_FORMAT_V2, WORKFILE_FORMAT_V3, makeChoice, parseWorkfile, reconcileChoice, reconcileChoices, semanticPartsOf, serializeWorkfile } from '../../lib/manuscript.js';
 import * as L from '../../lib/long-review.ts';
+import { parseWorkfile as parseWeb045 } from '../legacy/web-0.4.5/manuscript.js';
 import { runWebTrace } from '../helpers/operation-trace-runner.mjs';
 import { FRESH_MATCHER_REVISION, dictionary, fixture, freshApiReport, hash } from '../fixtures/manuscript.mjs';
 import { requireWindowsRoot } from './windows-source.mjs';
@@ -137,6 +138,51 @@ def build_v3(module, scenario):
     parts = records.parts_of(state['payload'])
     payload = records.with_parts(state['payload'], parts._replace(progress={'current': 1, 'completed': [0, 1]}))
     return {'content': module.serialize_workfile(payload), 'edit_requests': requests}
+
+
+def build_layered(module, scenario):
+    # A long manuscript run through the Windows client's own runtime, with its own gap-tolerant pairing and
+    # the session's review features: segments 0 and 2 are checked, then one choice in segment 2.
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    payload = {'source': scenario['source'], 'target': scenario['target'], 'direction': 'en',
+               'alignments': scenario['alignments'], 'choices': [], 'history': [], 'semantic_decisions': [],
+               'semantic_texts': [], 'semantic_history': []}
+    pairs, version = segmentation.pair_segments_with_gaps(payload['source'], payload['target'],
+                                                          alignments=payload['alignments'])
+    payload = records.with_parts(payload, records.normalize(payload, pairs, version=version))
+    basis, features = None, tuple(scenario['features'])
+    for check in scenario['checks']:
+        index = check['index']
+        request = records.plan_request(payload, index, basis, features=features)
+        record = records.parts_of(payload).segments[index]
+        report = records.expand_result({**record, 'basis': scenario['basis'], 'result': check['result']},
+                                       payload['source'], payload['target'])
+        applied = records.apply_response(payload, request, {**report, 'request_id': 'windows-built'}, basis)
+        if applied.outcome != 'stored' or applied.again:
+            raise RuntimeError('unexpected outcome ' + applied.outcome)
+        payload, basis = records.with_parts(payload, applied.parts), applied.basis
+    pick = scenario['choose']
+    payload = records.with_parts(payload, records.choose(payload, pick['index'], pick['start'], pick['end'],
+                                                         pick['choice'], pick['candidate_id']))
+    parts = records.parts_of(payload)
+    parts = records.set_current(records.set_finished(records.set_finished(parts, 0, True), 2, True), 2)
+    return {'content': module.serialize_workfile(records.with_parts(payload, parts)),
+            'pairs': [pair.status for pair in pairs]}
+
+
+def reopen_layered(module, content, basis, sessions):
+    # The Windows client opening a long manuscript: parse, pair (gap-tolerantly), normalize, save again, and
+    # derive each record's state under the given session features (None: capabilities not known yet).
+    records = importlib.import_module('wuwaterm_client.segment_records')
+    segmentation = importlib.import_module('wuwaterm_client.segmentation')
+    payload = module.parse_workfile(content)
+    pairs, version = segmentation.pair_segments_with_gaps(payload['source'], payload['target'],
+                                                          alignments=payload['alignments'])
+    payload = records.with_parts(payload, records.normalize(payload, pairs, version=version))
+    states = [[records.record_view(record, payload, basis, features).state
+               for record in records.parts_of(payload).segments] for features in sessions]
+    return {'parsed': module.parse_workfile(content), 'rewritten': module.serialize_workfile(payload), 'states': states}
 
 
 def v3_runtime(operation, payload):
@@ -368,6 +414,10 @@ try:
         result = build_v2(module)
     elif request['operation'] == 'build_v3':
         result = build_v3(module, request['scenario'])
+    elif request['operation'] == 'build_layered':
+        result = build_layered(module, request['scenario'])
+    elif request['operation'] == 'reopen_layered':
+        result = reopen_layered(module, request['content'], request['basis'], request['sessions'])
     elif request['operation'] in ('alignment_inputs', 'normalize'):
         result = v3_runtime(request['operation'], request['payload'])
     elif request['operation'] == 'duplicate_case':
@@ -791,27 +841,168 @@ test('every invalid v4 fixture: Web and Windows give its code', () => {
   assert.deepEqual(differing, []);
 });
 
-// manuscript v5 (contracts/manuscript-v5/SPEC.md "Compatibility"): the pinned Windows client predates it, so it must refuse every
-// v5 file with the code an older Web gives (legacy_error), and read every lower-format file a v5 writer writes back.
+// ---- Manuscript v5: both consumers read, write and reject it alike -----------------------------------------------------------
+// Older readers still refuse v5: tests/manuscript-v5.test.mjs asserts every fixture against the frozen Web 0.4.5 reader and the v4
+// schema, and the runtime test below puts the files built here through that reader too.
+
 const v5Dir = fileURLToPath(new URL('../../contracts/manuscript-v5/', import.meta.url));
 const v5Cases = JSON.parse(readFileSync(join(v5Dir, 'cases.json'), 'utf8'));
 const readV5 = file => readFileSync(join(v5Dir, file), 'utf8');
 const contentOfV5 = c => (c.pad_to_bytes ? readV5(c.file) + ' '.repeat(c.pad_to_bytes - Buffer.byteLength(readV5(c.file), 'utf8')) : readV5(c.file));
+const formatOf = content => JSON.parse(content).format;
 
-test('the pinned Windows client refuses every v5 file and reads what a v5 writer writes back in a lower format', () => {
-  const differing = [];
-  for (const c of [...v5Cases.valid, ...v5Cases.invalid]) {
+test('every valid v5 fixture: Web and Windows read it alike and write its canonical bytes, in a lower format where one holds it', () => {
+  const written = new Set();
+  for (const c of v5Cases.valid) {
     const content = contentOfV5(c);
+    const web = parseWorkfile(content);
+    const canonical = readV5(c.canonical);
+    assert.equal(serializeWorkfile(web), canonical, `${c.file}: Web bytes`);
     const fromWindows = windows({ operation: 'parse', content });
-    if ((fromWindows.error ?? null) !== c.legacy_error) differing.push(`${c.file}: expected ${c.legacy_error}, Windows ${fromWindows.error ?? null}`);
-    if (c.legacy_error === null) {
-      assert.deepEqual(fromWindows.result, parseWorkfile(content), `${c.file}: Windows parse differs from Web parse`);
-      assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, readV5(c.canonical), `${c.file}: Windows bytes`);
-    }
+    assert.ok(fromWindows.result, `${c.file}: Windows rejected it (${fromWindows.error})`);
+    assert.deepEqual(fromWindows.result, web, `${c.file}: Windows parse differs from Web parse`);
+    assert.equal(windows({ operation: 'serialize', payload: fromWindows.result }).result, canonical, `${c.file}: Windows bytes`);
+    written.add(formatOf(canonical));
+  }
+  assert.deepEqual([...written].sort(), [1, 3, 4, 5].map(n => `wuwaterm-manuscript-v${n}`));
+});
+
+test('every invalid v5 fixture: Web and Windows give its code', () => {
+  const differing = [];
+  for (const c of v5Cases.invalid) {
+    const content = contentOfV5(c);
+    let web = null;
+    try { parseWorkfile(content); } catch (cause) { web = cause.code; }
+    const fromWindows = windows({ operation: 'parse', content }).error ?? null;
+    if (web !== c.error || fromWindows !== c.error) differing.push(`${c.file}: expected ${c.error}, Web ${web}, Windows ${fromWindows}`);
   }
   assert.deepEqual(differing, []);
-  assert.ok(v5Cases.valid.some(c => JSON.parse(readV5(c.file)).format === 'wuwaterm-manuscript-v5' && c.legacy_error === 'workfile_unsupported_format'));
 });
+
+// The same user steps run through each client's own runtime. Three paragraphs per side make a long manuscript; `aligned` lists the
+// paragraphs that keep an explicit alignment (leaving one out makes it a gap), `features` is what the session asks Core for, and
+// `reason` is the reason of the unjudged one-character name each checked paragraph reports (null: it reports none).
+const AMBIGUOUS = ['ambiguous-mention-v1'];
+const LAYERED_BASIS = { rule_version: 'review-v2', dictionary: { ...dictionary }, matcher_revision: FRESH_MATCHER_REVISION };
+const JINHSI = { candidate_id: hash('candidate-jinhsi'), zh: '今汐', en: 'Jinhsi', category: 'resonator' };
+const CAMELLYA = { candidate_id: hash('candidate-camellya'), zh: '椿', en: 'Camellya', category: 'resonator' };
+
+function layeredScenario({ aligned, features, reason }) {
+  const filler = Array.from({ length: 24 }, (_, k) => `Filler line ${k + 1} keeps this paragraph long.`).join(' ');
+  const sources = ['今汐和椿姐一起出发。', '这一段刚刚改过，还没有重新对齐。', '椿姐在今汐身边。'];
+  const targets = ['Jinhsi and Camellya set out.', 'This paragraph was just edited.', 'Camellya stayed beside Jinhsi.']
+    .map(text => `${text} ${filler}`);
+  const source = sources.join('\n\n');
+  const target = targets.join('\n\n');
+  // Every character is in the BMP, so string offsets are scalar offsets.
+  const span = (text, part) => ({ start: text.indexOf(part), end: text.indexOf(part) + part.length, text: part });
+  const alignments = aligned.map(i => ({ source: span(source, sources[i]), target: span(target, targets[i]) }));
+  const at = (text, part) => [text.indexOf(part), text.indexOf(part) + part.length];
+  const checks = [0, 2].map(index => {
+    const findings = [{ verdict: 'verified_constraint', source: at(sources[index], '今汐'), target: at(targets[index], 'Jinhsi'),
+      candidates: [JINHSI], candidates_truncated: false }];
+    // Core lists an unsettled name after the judged findings.
+    if (reason) findings.push({ verdict: 'not_evaluated', source: at(sources[index], '椿'), target: null, candidates: [CAMELLYA],
+      candidates_truncated: false, reason });
+    return { index, result: { truncated: false, evaluated: 1, not_evaluated: findings.length - 1, findings } };
+  });
+  // In the last paragraph the user adopts the unsettled name, or without one marks the judged name as not a term. No re-check
+  // follows, so that record is saved stale.
+  const [start, end] = at(sources[2], reason ? '椿' : '今汐');
+  const choose = { index: 2, start, end, choice: reason ? 'official_pair' : 'not_a_term', candidate_id: reason ? CAMELLYA.candidate_id : null };
+  return { source, target, alignments, features, basis: LAYERED_BASIS, checks, choose };
+}
+
+function webBuiltLayered({ source, target, alignments, features, basis: responseBasis, checks, choose }) {
+  const draft = { source, target, direction: 'en', alignments };
+  let long = L.longFromWorkfile({ ...draft, segments: [], segment_choice_history: [], progress: { current: null, completed: [] } });
+  let basis = null;
+  for (const { index, result } of checks) {
+    const ctx = { draft, basis, features };
+    const request = L.segmentRequest(long, index, ctx);
+    const item = L.segmentInputs(draft).items[index];
+    const report = { ...L.expandResult({ source_hash: item.sourceHash, target_hash: item.targetHash, basis: responseBasis, result },
+      item.sourceCore, item.targetCore), request_id: 'web-built' };
+    const out = L.applyResult(long, ctx, request, report);
+    assert.equal(out.error, null);
+    assert.equal(out.secondRequest, false);
+    ({ long, basis } = out);
+  }
+  const picked = L.chooseTerm(long, { index: choose.index, finding: { source: [choose.start, choose.end] },
+    candidate: choose.choice === 'official_pair' ? CAMELLYA : null }, { draft, basis, features });
+  assert.equal(picked.error, null);
+  long = L.setCurrent(L.setFinished(L.setFinished(picked.long, 0, true), 2, true), 2);
+  const content = serializeWorkfile({ ...draft, choices: [], history: [], semantic_decisions: [], semantic_texts: [], semantic_history: [],
+    ...L.workfileParts(long, draft, { basis }) });
+  return { content, pairs: L.labelledPairs(draft).pairs.map(pair => pair.status) };
+}
+
+/** The Web workbench opening a long manuscript: the same steps as reopen_layered in the bridge. */
+function webReopenLayered(content, sessions) {
+  const parsed = parseWorkfile(content);
+  const draft = draftOf(parsed);
+  const long = L.longFromWorkfile(parsed);
+  return {
+    parsed: parseWorkfile(content),
+    rewritten: serializeWorkfile({ ...parsed, ...L.workfileParts(long, draft, { basis: null }) }),
+    states: sessions.map(features => long.records.map((_, i) => L.recordView(long, i, { draft, basis: LAYERED_BASIS, features }).state)),
+  };
+}
+
+// The three session states a reopened result meets: the feature asked for, not asked for, and capabilities not known yet.
+const SESSIONS = [AMBIGUOUS, [], null];
+const GAP_PAIRS = ['ready', 'needs_manual_split', 'ready'];
+const COVERED_PAIRS = ['ready', 'ready', 'ready'];
+// First-record state per session: a result is reused only under the features it was made with.
+const MADE_WITH_FEATURE = ['current', 'stale', 'saved'];
+const MADE_WITHOUT_FEATURE = ['stale', 'current', 'saved'];
+const LAYERED_CASES = [
+  { name: 'all three v5 additions', aligned: [0, 2], features: AMBIGUOUS, reason: 'ambiguous_mention',
+    format: 5, review_features: AMBIGUOUS, label: 'segmentation-v1-gaps', pairs: GAP_PAIRS, reuse: MADE_WITH_FEATURE },
+  { name: 'gap-tolerant records alone', aligned: [0, 2], features: [], reason: null,
+    format: 5, review_features: [], label: 'segmentation-v1-gaps', pairs: GAP_PAIRS, reuse: MADE_WITHOUT_FEATURE },
+  { name: 'a recorded review feature alone', aligned: [0, 1, 2], features: AMBIGUOUS, reason: null,
+    format: 5, review_features: AMBIGUOUS, label: 'segmentation-v1', pairs: COVERED_PAIRS, reuse: MADE_WITH_FEATURE },
+  { name: 'no v5 addition, a v4 reason', aligned: [0, 1, 2], features: [], reason: 'ordinary_word',
+    format: 4, label: 'segmentation-v1', pairs: COVERED_PAIRS, reuse: MADE_WITHOUT_FEATURE },
+  { name: 'no v5 addition, no reason', aligned: [0, 1, 2], features: [], reason: null,
+    format: 3, label: 'segmentation-v1', pairs: COVERED_PAIRS, reuse: MADE_WITHOUT_FEATURE },
+];
+
+for (const c of LAYERED_CASES) {
+  test(`runtime-built long manuscript (${c.name}): Web and Windows write the same v${c.format} bytes and round-trip each other`, () => {
+    const scenario = layeredScenario(c);
+    const web = webBuiltLayered(scenario);
+    const built = windows({ operation: 'build_layered', scenario });
+    assert.ok(built.result, `Windows could not build it (${built.error})`);
+    assert.deepEqual(web.pairs, c.pairs);
+    assert.deepEqual(built.result.pairs, c.pairs);
+    assert.equal(built.result.content, web.content, 'the same runtime steps give different files');
+    const file = JSON.parse(web.content);
+    assert.equal(file.format, `wuwaterm-manuscript-v${c.format}`);
+    assert.deepEqual(file.review_features, c.review_features);
+    assert.deepEqual(file.segments.map(r => r.segmentation_version), [c.label, c.label, c.label]);
+    assert.deepEqual(file.segments.map(r => r.status), ['done', 'pending', 'stale']);
+    assert.deepEqual(file.segments[0].result.findings.map(f => f.reason ?? null), c.reason ? [null, c.reason] : [null]);
+    assert.deepEqual(file.segments[2].choices.map(x => [x.choice, x.candidate?.en ?? null, x.confirmed]),
+      [c.reason ? ['official_pair', 'Camellya', true] : ['not_a_term', null, true]]);
+    assert.deepEqual(file.progress, { current: 2, completed: [0, 2] });
+    // Each client opens the file the other wrote, parses it alike, keeps every record through its runtime, writes the same
+    // bytes back and decides reuse alike.
+    const states = c.reuse.map(first => [first, 'pending', 'stale']);
+    const onWindows = windows({ operation: 'reopen_layered', content: web.content, basis: LAYERED_BASIS, sessions: SESSIONS });
+    assert.ok(onWindows.result, `Windows rejected the Web file (${onWindows.error})`);
+    const onWeb = webReopenLayered(built.result.content, SESSIONS);
+    assert.deepEqual(onWindows.result.parsed, onWeb.parsed, 'Windows and Web parse differ');
+    assert.equal(onWindows.result.rewritten, web.content, 'Windows rewrite changes the Web file');
+    assert.equal(onWeb.rewritten, built.result.content, 'Web rewrite changes the Windows file');
+    assert.deepEqual(onWindows.result.states, states, 'Windows reuse states');
+    assert.deepEqual(onWeb.states, states, 'Web reuse states');
+    // Web 0.4.5, the older reader, refuses the v5 bytes and reads the lower formats.
+    if (c.format === 5) assert.throws(() => parseWeb045(built.result.content), { code: 'workfile_unsupported_format' });
+    else assert.deepEqual(parseWeb045(built.result.content), onWeb.parsed);
+  });
+}
 
 const operationTracesPath = fileURLToPath(new URL('../../contracts/workbench-state/operation-traces.json', import.meta.url));
 const operationTraces = JSON.parse(readFileSync(operationTracesPath, 'utf8'));
