@@ -30,6 +30,8 @@ function reviewReport(body) {
     finding(source, target, '声骸', 'Echoes', 'verified_constraint', candidate('声骸', 'Echo', 'item')),
   ].sort((a, b) => a.source_span.start - b.source_span.start);
   const ambiguous = finding(source, target, '椿', null, 'not_evaluated', candidate('椿', 'Camellya', 'resonator'), 'ambiguous_mention');
+  // The dictionary has the same pair as a resonator and as a speaker, as it has 心 / Hsin.
+  ambiguous.candidates.push({ ...candidate('椿', 'Camellya', 'speaker'), candidate_id: hash('candidate:椿:speaker') });
   return {
     request_id: 'synthetic-review', source_revision: hash(source), target_revision: hash(target), rule_version: 'review-v2', matcher_revision: FRESH_MATCHER_REVISION,
     dictionary, coverage: { evaluated: 3, not_evaluated: 1, rules: ['review.term_pair', 'review.sentence_meaning'] }, findings: [...judged, ambiguous], truncated: false,
@@ -115,7 +117,10 @@ test('an ambiguous single character is folded after the judged findings, not cou
   await expect(folded).not.toHaveAttribute('open', '');
   await expect(folded.locator('summary')).toHaveText(fill(S.ambiguous.title, { n: 1 }));
   await folded.locator('summary').click();
-  await folded.getByRole('button', { name: fill(S.ambiguous.adopt, { zh: '椿', en: 'Camellya' }), exact: true }).click();
+  // Two entries with the same pair: each button names its category rather than reading as a duplicate.
+  const adopt = category => fill(S.ambiguous.adopt, { zh: '椿', en: 'Camellya' }) + fill(S.ambiguous.adoptCategory, { category });
+  await expect(folded.getByRole('button', { name: /^采纳 椿 \/ Camellya/ })).toHaveText([adopt('共鸣者'), adopt('角色')]);
+  await folded.getByRole('button', { name: adopt('共鸣者'), exact: true }).click();
   await expect(page.locator('.choice-records')).toContainText('椿');
   // The next check sends the adoption as a resolution, with the feature still asked for.
   await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();

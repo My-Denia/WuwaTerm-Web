@@ -105,6 +105,7 @@ const zh = {
     cancelWait: '取消等待',
     idlePlaceholder: '译文会出现在这里。',
     loadingStatus: '正在翻译，请稍候。取消仅停止本页等待。',
+    loadingElapsed: '已等待 {n} 秒。',
     cancelledStatus: '已停止本页等待；服务可能继续处理，已扣额度不会返还。',
     kindExact: '官方术语精确匹配',
     kindFuzzy: '术语近似匹配',
@@ -250,7 +251,9 @@ const zh = {
     causeTimeout: '原因：等待上游服务超时。',
     causeUnavailable: '原因：上游服务暂不可用。',
     adviceTranslation: '可以稍后重试；文本较长时，可以拆成几段较短的文本，在“快速翻译”中分别翻译。',
+    adviceTranslationRun: '可以稍后点“继续翻译”重发这一段，已经译好的段会保留。',
     adviceReview: '可以稍后重试。',
+    waitedTranslation: '已等待 {n} 秒仍未得到译文；模型长时间没有回应时，服务会在超时后结束这次请求。',
     wait: '服务要求等待约 {n} 秒后再发送。',
     requestId: '请求编号：{id}',
   },
@@ -793,6 +796,7 @@ const en: typeof zh = {
     cancelWait: 'Stop waiting',
     idlePlaceholder: 'Your translation will appear here.',
     loadingStatus: 'Translating, please wait. Stopping only ends this page’s wait.',
+    loadingElapsed: 'Waited {n} s so far.',
     cancelledStatus: 'Stopped waiting on this page; the service may still be processing, and spent quota is not returned.',
     kindExact: 'Exact official-term match',
     kindFuzzy: 'Near term match',
@@ -937,7 +941,9 @@ const en: typeof zh = {
     causeTimeout: 'Cause: the upstream service timed out.',
     causeUnavailable: 'Cause: the upstream service is unavailable.',
     adviceTranslation: 'You can retry later; for a long text, split it into shorter parts and translate each in “Quick translate”.',
+    adviceTranslationRun: 'You can resend this segment later with “Continue translation”; finished segments are kept.',
     adviceReview: 'You can retry later.',
+    waitedTranslation: 'No translation after {n} seconds; when the model does not answer for a long time, the service ends the request at its timeout.',
     wait: 'The service asks to wait about {n} seconds before sending again.',
     requestId: 'Request id: {id}',
   },
@@ -1502,18 +1508,35 @@ export function fill(template: string, params: Record<string, string | number>):
 const TIMEOUT_REASONS = ['upstream_timeout'];
 const UNAVAILABLE_REASONS = ['llm_unavailable', 'upstream_unavailable', 'upstream_network_error', 'internal'];
 
+// A failed translation answered after this long: Core ends a model call that does not answer at its timeout and reports the
+// model as unavailable, with no timeout flag on the wire, so the page states the wait it measured.
+const LONG_WAIT_SECONDS = 30;
+// Up to this many characters the text is short; splitting it is no advice.
+const SHORT_TEXT = 200;
+
 /**
  * The lines under a failed translation or term check, after the reason's own text: the cause class (upstream timeout or an
- * unavailable service), what to do, the wait the service asked for, and the request id when the response carried one.
+ * unavailable service), how long a translation waited when that was long, what to do, the wait the service asked for, and the
+ * request id when the response carried one. `textLength` is the submitted text's length; `inRun` marks a segment translation run,
+ * which is continued from the run rather than split by hand.
  */
-export function failureDetails(lang: UiLanguage, { kind, reason, requestId, retryAfter }: { kind: 'translation' | 'review'; reason?: string | null; requestId?: string | null; retryAfter?: number | null }): string[] {
+export function failureDetails(lang: UiLanguage, { kind, reason, requestId, retryAfter, waitedSeconds, textLength, inRun }: {
+  kind: 'translation' | 'review'; reason?: string | null; requestId?: string | null; retryAfter?: number | null;
+  waitedSeconds?: number | null; textLength?: number | null; inRun?: boolean;
+}): string[] {
   const f = msg(lang).failure;
   const lines: string[] = [];
   const timeout = !!reason && TIMEOUT_REASONS.includes(reason);
   const unavailable = !!reason && UNAVAILABLE_REASONS.includes(reason);
   if (timeout) lines.push(f.causeTimeout);
   if (unavailable) lines.push(f.causeUnavailable);
-  if (timeout || unavailable) lines.push(kind === 'translation' ? f.adviceTranslation : f.adviceReview);
+  if (kind === 'translation' && (timeout || unavailable) && typeof waitedSeconds === 'number' && waitedSeconds >= LONG_WAIT_SECONDS) {
+    lines.push(fill(f.waitedTranslation, { n: Math.round(waitedSeconds) }));
+  }
+  if (timeout || unavailable) {
+    const short = typeof textLength === 'number' && textLength <= SHORT_TEXT;
+    lines.push(kind === 'review' ? f.adviceReview : inRun ? f.adviceTranslationRun : short ? f.adviceReview : f.adviceTranslation);
+  }
   if (typeof retryAfter === 'number' && Number.isFinite(retryAfter) && retryAfter > 0) lines.push(fill(f.wait, { n: Math.ceil(retryAfter) }));
   if (requestId) lines.push(fill(f.requestId, { id: requestId }));
   return lines;

@@ -194,6 +194,24 @@ test('language preference persists across reload with matching SSR markup and no
   expect(problems).toEqual([]);
 });
 
+// On a 390x844 phone the quota line, term lookup and My terms came first: the source box began at 732px and the translate
+// button at about 1,200px, so typing and sending each needed a scroll. Both now sit in the first screen, in either language.
+test.describe('phone quick translation', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test('the first screen holds the source box and the translate button in Chinese and English', async ({ page }) => {
+    await open(page);
+    for (const [language, submit] of [['中文', '翻译整句'], ['English', 'Translate']]) {
+      await switchTo(page, language);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const source = await page.locator('#review-source').boundingBox();
+      const button = await page.getByRole('button', { name: submit, exact: true }).boundingBox();
+      expect(source.y + source.height, language).toBeLessThanOrEqual(844);
+      expect(button.y + button.height, language).toBeLessThanOrEqual(844);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), language).toBeLessThanOrEqual(390);
+    }
+  });
+});
+
 test('document pages follow the language preference and disclose the cookie in English', async ({ page }) => {
   await open(page);
   await switchTo(page, 'English');

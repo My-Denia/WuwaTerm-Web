@@ -12,19 +12,27 @@ test('a failed translation in the review workbench says what failed, what to do 
   await openWorkbench(page, { capabilities: [], translateFailures: {
     1: failure(503, 'llm_unavailable', { request_id: 'synthetic-request-1' }),
     2: failure(504, 'upstream_timeout'),
+    3: failure(503, 'llm_unavailable'),
   } });
   await page.locator('#review-source').fill('她看见三只鸟。');
   await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
-  for (const line of [M.tMsg.llm_unavailable, M.failure.causeUnavailable, M.failure.adviceTranslation, fill(M.failure.requestId, { id: 'synthetic-request-1' })]) {
+  for (const line of [M.tMsg.llm_unavailable, M.failure.causeUnavailable, M.failure.adviceReview, fill(M.failure.requestId, { id: 'synthetic-request-1' })]) {
     await expect(panel(page)).toContainText(line);
   }
+  // A seven-character sentence is not split any further: the advice is to retry.
+  await expect(panel(page)).not.toContainText(M.failure.adviceTranslation);
   await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
   await expect(panel(page)).toContainText(M.failure.causeTimeout);
-  // The advice names a path every user has: retry, or split the text and translate the parts in quick translation.
-  await expect(panel(page)).toContainText('可以稍后重试；文本较长时，可以拆成几段较短的文本，在“快速翻译”中分别翻译。');
-  await expect(panel(page)).not.toContainText('审校工作台逐段翻译');
+  await expect(panel(page)).toContainText(M.failure.adviceReview);
+  await expect(panel(page)).not.toContainText(M.failure.adviceTranslation);
   // The site timed out waiting, so no upstream request id exists to show.
   await expect(panel(page)).not.toContainText(requestIdLabel);
+  // Over 200 characters the advice names a path every user has: retry, or split the text and translate the parts in quick
+  // translation.
+  await page.locator('#review-source').fill('她看见三只鸟。'.repeat(30));
+  await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
+  await expect(panel(page)).toContainText('可以稍后重试；文本较长时，可以拆成几段较短的文本，在“快速翻译”中分别翻译。');
+  await expect(panel(page)).not.toContainText('审校工作台逐段翻译');
 });
 
 test('a failed term check shows the request id, and a refused one the wait the service asked for', async ({ page }) => {

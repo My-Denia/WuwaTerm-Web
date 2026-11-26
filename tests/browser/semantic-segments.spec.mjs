@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 import { fixture as savedFixture } from '../fixtures/manuscript.mjs';
-import { S, fill, openWorkbench, fillPair, longPair, zhParagraph, enParagraph } from '../helpers/semantic-routes.mjs';
+import { S, failure, fill, openWorkbench, fillPair, longPair, zhParagraph, enParagraph } from '../helpers/semantic-routes.mjs';
 
 const chips = page => page.locator('.segment-chip');
 const manualChip = page => chips(page).filter({ hasText: S.segManual });
@@ -130,10 +130,54 @@ test('a failed segment stops the segment translation in order and continuing res
   // Only the first segment is in the translation: nothing after the failed one was appended.
   await expect(page.locator('#review-target')).toHaveValue(`T:${Array.from(zhParagraph(1)).slice(0, 3).join('')}\n\n`);
   expect(rec.translations).toHaveLength(2);
-  await page.getByRole('button', { name: S.resume, exact: true }).click();
+  await page.getByRole('button', { name: S.resumeTranslate, exact: true }).click();
   const expected = [1, 2, 3].map(i => `T:${Array.from(zhParagraph(i)).slice(0, 3).join('')}`).join('\n\n');
   await expect(page.locator('#review-target')).toHaveValue(expected, { timeout: 30_000 });
   expect(rec.translations.map(body => body.text)).toEqual([zhParagraph(1), zhParagraph(2), zhParagraph(2), zhParagraph(3)]);
+});
+
+// Pausing while the last open segment is in flight left nothing queued: the line said the run could continue but no button
+// did, every retranslate button was disabled, and when the request failed the pause turned into a service stop.
+test('pausing with the last segment in flight offers continue at once, a failure of that request keeps the pause, and continuing resends it', async ({ page }) => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateHold: { 3: held },
+    translateFailures: { 3: failure(503, 'llm_unavailable', { request_id: 'synthetic-held' }) }, translate: (body, n) => `T${n}.` });
+  const status = page.locator('.run-phase');
+  await page.locator('#review-source').fill(longPair(3).source);
+  await page.getByRole('button', { name: S.translateLong, exact: true }).click();
+  await expect.poll(() => rec.translations.length, { timeout: 30_000 }).toBe(3);
+  await page.getByRole('button', { name: S.pause, exact: true }).click();
+  await expect(status).toHaveAttribute('data-run-state', 'paused');
+  await expect(status).toHaveText(fill(S.phasePausedInFlight, { done: 2, total: 3, i: 3 }));
+  await expect(page.getByRole('button', { name: S.resumeTranslate, exact: true })).toBeVisible();
+  release();
+  await expect(status).toContainText(fill(S.phasePausedFailed, { done: 2, total: 3, i: 3, reason: '§' }).split('§')[0]);
+  await expect(status).toHaveAttribute('data-run-state', 'paused');
+  await expect(status).toContainText('synthetic-held');
+  // Nothing is in flight any more, so the translation buttons are usable again.
+  await expect(page.getByRole('button', { name: S.translateResume, exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: S.resumeTranslate, exact: true }).click();
+  await expect(status).toHaveAttribute('data-run-state', 'done', { timeout: 30_000 });
+  await expect(page.locator('#review-target')).toHaveValue('T1.\n\nT2.\n\nT4.');
+  expect(rec.translations.map(body => body.text)).toEqual([1, 2, 3, 3].map(i => zhParagraph(i)));
+});
+
+test('continuing while the paused request is still out sends nothing until it answers', async ({ page }) => {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateHold: { 2: held }, translate: (body, n) => `T${n}.` });
+  await page.locator('#review-source').fill(longPair(3).source);
+  await page.getByRole('button', { name: S.translateLong, exact: true }).click();
+  await expect.poll(() => rec.translations.length, { timeout: 30_000 }).toBe(2);
+  await page.getByRole('button', { name: S.pause, exact: true }).click();
+  await page.getByRole('button', { name: S.resumeTranslate, exact: true }).click();
+  await expect(page.locator('.run-phase')).toHaveAttribute('data-run-state', 'running');
+  await page.waitForTimeout(300);
+  expect(rec.translations).toHaveLength(2);
+  release();
+  await expect(page.locator('.run-phase')).toHaveAttribute('data-run-state', 'done', { timeout: 30_000 });
+  expect(rec.translations.map(body => body.text)).toEqual([1, 2, 3].map(i => zhParagraph(i)));
 });
 
 test('changing the direction during segment translation stops it and drops the reply for the old direction', async ({ page }) => {

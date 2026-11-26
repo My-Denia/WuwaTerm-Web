@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { fill, msg, summaryHeadline, summarySentence } from '../lib/messages.ts';
+import { failureDetails, fill, msg, summaryHeadline, summarySentence } from '../lib/messages.ts';
 import { htmlLang, numberLocale, ogLocale, uiLanguageOrZh } from '../lib/ui-language.ts';
 import { summarizeReview, summarizeReviewParts } from '../lib/review-report.js';
 import { compareReports, parseWorkfile } from '../lib/manuscript.js';
@@ -142,5 +142,19 @@ test('reconcile/compare/error codes are all covered by both catalogs', () => {
   for (const code of ['direction_changed', 'source_block_changed', 'scope_changed', 'awaiting_fresh_basis', 'basis_changed', 'finding_missing_or_truncated', 'imported_not_a_term', 'user_not_a_term', 'candidate_gone', 'candidate_partial_visible', 'position_basis_match', 'duplicate_position']) {
     assert.equal(typeof zhReasons[code], 'string', `choice code ${code} missing zh`);
     assert.equal(typeof enReasons[code], 'string', `choice code ${code} missing en`);
+  }
+});
+
+test('failure lines: a long wait is stated, a short text is not told to split, and a run is told to continue', () => {
+  for (const lang of ['zh', 'en']) {
+    const f = msg(lang).failure;
+    // Core reports a model that never answered as unavailable, with no timeout flag: the page states the wait it measured.
+    assert.deepEqual(failureDetails(lang, { kind: 'translation', reason: 'llm_unavailable', waitedSeconds: 47, textLength: 12 }),
+      [f.causeUnavailable, fill(f.waitedTranslation, { n: 47 }), f.adviceReview]);
+    assert.deepEqual(failureDetails(lang, { kind: 'translation', reason: 'llm_unavailable', waitedSeconds: 3, textLength: 201 }),
+      [f.causeUnavailable, f.adviceTranslation]);
+    assert.deepEqual(failureDetails(lang, { kind: 'translation', reason: 'upstream_network_error', inRun: true }), [f.causeUnavailable, f.adviceTranslationRun]);
+    // A term check calls no model: no wait line, the plain retry advice.
+    assert.deepEqual(failureDetails(lang, { kind: 'review', reason: 'llm_unavailable', waitedSeconds: 60 }), [f.causeUnavailable, f.adviceReview]);
   }
 });

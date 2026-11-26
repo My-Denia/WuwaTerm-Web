@@ -271,6 +271,10 @@ footer div { display:flex; gap:20px; }
 .compare-view { margin-top:12px; border-top:1px solid var(--line); padding-top:10px; }
 .compare-title { margin:0 0 6px; font-size:12px; color:var(--muted); }
 .compare-columns { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+/* Beside the issue list the card is about 240px wide on a 1440px desktop, and two columns left each side some 100px: one or two
+   words a line. A card narrower than 560px stacks the two sides instead. */
+.semantic-card { container-type:inline-size; }
+@container (max-width:560px) { .compare-columns { grid-template-columns:minmax(0,1fr); } }
 .compare-side { min-width:0; }
 .compare-text { max-height:32dvh; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.75; margin:4px 0 0; padding:8px; border:1px solid var(--line); border-radius:6px; }
 .compare-active { background:var(--mark-bg); color:var(--accent); outline:1px solid var(--accent); }
@@ -437,6 +441,8 @@ footer div { display:flex; gap:20px; }
 .editor-pane .label-row { height:40px; }
 .editor-pane .text-button { min-height:36px; padding:0; }
 .document-workspace[data-mode="quick"] .editor-pane textarea { min-height:220px; }
+/* A manuscript is read inside these boxes; six rows (169px) left a 5,600-character translation a sliver at a time. */
+.document-workspace[data-mode="manuscript"] .editor-pane textarea { min-height:clamp(200px,34vh,400px); }
 .document-workspace form .actions { align-items:center; }
 .review-quota p { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.7; }
 .translation-result { margin-top:14px; padding-top:12px; }
@@ -454,4 +460,21 @@ footer div { display:flex; gap:20px; }
   .status-details { margin-left:0; }
   .manuscript-editor-pane,.manuscript-review-pane,.term-lookup,.my-terms { padding:14px; }
   .runtime-drawer { padding:16px; }
+  /* Quick mode on a phone opens on the text boxes and the translate button. Before, the quota line, term lookup and My terms
+     came first and pushed the source box to 732px and the button to about 1,200px of an 844px screen. The visual order now
+     differs from the reading and tab order, which still runs status, lookup, My terms, then the editor. */
+  .document-workspace[data-mode="quick"] { display:flex; flex-direction:column; }
+  .document-workspace[data-mode="quick"] > .workspace-grid { order:1; }
+  .document-workspace[data-mode="quick"] > .runtime-status { order:2; margin:12px 0 0; }
+  .document-workspace[data-mode="quick"] .workspace-side { order:2; }
+  .document-workspace[data-mode="quick"] .editor-pane textarea { min-height:120px; height:132px; }
+  /* Touch targets of at least 40px for the small controls a phone shows. */
+  footer div a { display:inline-flex; align-items:center; min-height:40px; }
+  .runtime-status .text-button,.status-details,.editor-pane .text-button { min-height:40px; }
+  .lookup-heading .text-button { min-width:40px; min-height:40px; }
+  .editor-pane .label-row select,.semantic-filters select { min-height:40px; }
+  .inline-check { min-height:40px; }
+  details > summary { line-height:24px; padding-block:8px; }
 }
+/* Keyboard keys mean nothing on a touch screen. */
+@media(max-width:540px),(pointer:coarse) { .shortcut-hint { display:none; } }
