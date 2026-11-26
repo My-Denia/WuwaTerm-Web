@@ -264,11 +264,14 @@ test('the segment translation run shows waiting, retrying, paused and failed apa
   await expect(status(page)).toHaveAttribute('data-run-state', 'paused');
   await expect(status(page)).toHaveText(fill(S.phasePaused, { done: 2, total: 3 }));
   await shot(page, testInfo, 'translate-run-paused');
-  await page.getByRole('button', { name: S.resume, exact: true }).click();
+  // A translation run continues as a translation, not as a review.
+  await expect(page.getByRole('button', { name: S.resume, exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: S.resumeTranslate, exact: true }).click();
   await expect(status(page)).toHaveAttribute('data-run-state', 'failed');
   await expect(status(page)).toContainText(S.translateStopped);
-  // The stop says what kind of failure it was, what to do and which request failed.
-  for (const line of [M.failure.causeUnavailable, M.failure.adviceTranslation, fill(M.failure.requestId, { id: 'synthetic-request-4' })]) await expect(status(page)).toContainText(line);
+  // The stop says what kind of failure it was, what to do (continue the run, not split the text by hand) and which request failed.
+  for (const line of [M.failure.causeUnavailable, M.failure.adviceTranslationRun, fill(M.failure.requestId, { id: 'synthetic-request-4' })]) await expect(status(page)).toContainText(line);
+  await expect(status(page)).not.toContainText(M.failure.adviceTranslation);
   await shot(page, testInfo, 'translate-run-failed');
   // Finished segments stay in order; the failed one is sent first on continue (SPEC step 9 for the translation run).
   await expect(page.locator('#review-target')).toHaveValue('T1.\n\nT3.\n\n');

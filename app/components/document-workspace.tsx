@@ -31,7 +31,7 @@ import { QuickTermLookup } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
 import { RuntimeStatus } from './runtime-status';
 import { useUiLanguage } from './ui-language-context';
-import { SemanticWorkbench } from './semantic-workbench';
+import { SemanticWorkbench, ambiguousAdoptLabel } from './semantic-workbench';
 import { StructureLayer, StyleLayer } from './review-layers';
 
 type RevisionIntent = {
@@ -97,6 +97,15 @@ export function DocumentWorkspace() {
 
   const [pendingImport, setPendingImport] = useState<PendingReplacement | null>(null);
   const [styleOn, setStyleOn] = useState(false);
+  // How long the sentence translation in flight has waited, so a model that does not answer shows a growing wait.
+  const [waitTick, setWaitTick] = useState<{ since: number; now: number } | null>(null);
+  useEffect(() => {
+    if (!translating) return;
+    const since = Date.now();
+    const timer = setInterval(() => setWaitTick({ since, now: Date.now() }), 1000);
+    return () => { clearInterval(timer); setWaitTick(null); };
+  }, [translating]);
+  const waitedSeconds = translating && waitTick ? Math.floor((waitTick.now - waitTick.since) / 1000) : 0;
   const importDialog = useRef<HTMLDialogElement>(null);
   const keepImportButton = useRef<HTMLButtonElement>(null);
   const [pendingLeaveUrl, setPendingLeaveUrl] = useState<string | null>(null);
@@ -189,7 +198,7 @@ export function DocumentWorkspace() {
     : error.reason !== undefined && error.reason !== null ? ((m.rMsg as Record<string, string>)[error.reason] ?? (m.tMsg as Record<string, string>)[error.reason] ?? m.rMsg.fallback)
     : error.code && (m.errors as Record<string, string>)[error.code] ? (m.errors as Record<string, string>)[error.code]!
     : error.text ?? '';
-  const errorDetails = error?.kind ? failureDetails(lang, { kind: error.kind, reason: error.reason, requestId: error.requestId, retryAfter: error.retryAfter }) : [];
+  const errorDetails = error?.kind ? failureDetails(lang, { kind: error.kind, reason: error.reason, requestId: error.requestId, retryAfter: error.retryAfter, waitedSeconds: error.waitedSeconds, textLength: sourceLength }) : [];
 
   const cancelRevision = useCallback((message = '') => {
     const intent = revisionRef.current;
@@ -381,6 +390,8 @@ export function DocumentWorkspace() {
   const termTotal = (judged?.report.findings.length ?? 0)
     + semantic.long.records.reduce((n, r) => n + (r.result?.findings.filter(f => !isAmbiguousMention(f)).length ?? 0), 0);
   const translatePrimary = !!source.trim() && !target.trim();
+  // Over 2,000 characters the whole-text check and translation are disabled; the segment panel's run buttons are the main action.
+  const longInput = sourceLength > 2000 || targetLength > 2000;
 
   const termTrack = (longTerms: ReactNode): ReactNode => <section className="term-track" aria-labelledby="term-track-title">
     <h3 id="term-track-title">{sm.termTrackTitle}</h3>
@@ -451,7 +462,7 @@ export function DocumentWorkspace() {
               <Excerpt text={source} span={sourceLocated ? finding.source_span : null} missing={fill(m.review.excerptMissingSource, { text: finding.source_span.text })} />
             </div>
             <div className="finding-actions">
-              {finding.candidates.map((candidate: Candidate) => <button key={candidate.candidate_id} className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{fill(sm.ambiguous.adopt, { zh: candidate.zh, en: candidate.en })}</button>)}
+              {finding.candidates.map((candidate: Candidate) => <button key={candidate.candidate_id} className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading' || latest.report.truncated} onClick={() => doc.choose(finding, candidate)}>{ambiguousAdoptLabel(lang, candidate, finding.candidates)}</button>)}
               <button className="text-button" type="button" disabled={!sourceCompatible || phase === 'loading'} onClick={() => doc.choose(finding, null)}>{sm.ambiguous.ignore}</button>
               <button className="text-button" type="button" disabled={!sourceLocated} onClick={() => jumpTo('source', finding.source_span)}>{m.review.jumpSource}</button>
             </div>
@@ -594,9 +605,9 @@ export function DocumentWorkspace() {
                 <button className="secondary-button" type="button" onClick={() => fileBox.current?.click()}>{m.translation.importFile}</button>
                 <button className="secondary-button" type="button" onClick={() => doc.setWorkspaceMode('manuscript')}>{w.openManuscript}</button>
               </> : <>
-                <button type="submit" className={translatePrimary ? 'secondary-button' : undefined} disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
+                <button type="submit" className={translatePrimary || longInput ? 'secondary-button' : undefined} disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
                 <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
-                {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
+                {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary && !longInput ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
                 {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.review.cancelWait}</button>}
               </>}
               <button className="secondary-button" type="button" onClick={() => doc.undo()} disabled={!history.length}>{m.review.undo}</button>
@@ -610,6 +621,7 @@ export function DocumentWorkspace() {
             void importFile(file);
           }} />
           {quick && translating && <p className="notice-state" role="status">{m.translation.loadingStatus}</p>}
+          {quick && translating && waitedSeconds >= 2 && <p className="notice-state wait-elapsed" data-waited={waitedSeconds}>{fill(m.translation.loadingElapsed, { n: waitedSeconds })}</p>}
           {quick && quickResult && <div className="translation-result" aria-live="polite">
             <div className="result-meta">{kindLabel && <span>{kindLabel}</span>}<span>{quickResult.direction === 'en' ? m.translation.directionEn : m.translation.directionZh}</span></div>
             {quickResult.dictionaryMiss && <p className="field-hint">{m.translation.dictionaryMiss}</p>}

@@ -84,7 +84,7 @@ export type Snapshot = Draft & { report: Report; trusted: boolean; signature: st
 export type Undo = { draft: Draft; choices: Choice[]; imported: Choice[]; reports?: Snapshot[]; semantic: SemanticState; serial?: number; replacedDocument?: boolean };
 export type DocumentCheckpoint = { entry: Undo; kind: 'import' | 'replace' | 'clear'; createdAt: number };
 export type NoticeState = string | null;
-export type ErrorState = { reason?: string; code?: string; text?: string; kind?: 'translation' | 'review'; requestId?: string; retryAfter?: number; saveConflict?: boolean } | null;
+export type ErrorState = { reason?: string; code?: string; text?: string; kind?: 'translation' | 'review'; requestId?: string; retryAfter?: number; waitedSeconds?: number; saveConflict?: boolean } | null;
 export type DocumentPhase = 'idle' | 'loading' | 'success' | 'error' | 'cancelled';
 
 type Suggestion = { target_span: Span; replacement: string; term_effect: TermEffect };

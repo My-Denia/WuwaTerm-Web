@@ -1894,6 +1894,7 @@ export class WorkbenchController {
     const abort = new AbortController();
     this.docAbort = abort;
     this.setState({ translating: true, notice: null, inFlight: true });
+    const startedAt = this.clock.now();
 
     // Quick mode with automatic direction sends no target language and adopts the direction the service reports.
     const auto = this.state.workspaceMode === 'quick' && this.state.autoDirection;
@@ -1938,7 +1939,8 @@ export class WorkbenchController {
     } catch (cause) {
       if (!this.disposed && !abort.signal.aborted && this.docGeneration === mine) {
         const nextError: ErrorState = cause instanceof Error && 'gahReason' in cause
-          ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason), kind: 'translation', ...detailOf(cause) }
+          ? { reason: String((cause as Error & { gahReason?: unknown }).gahReason), kind: 'translation', ...detailOf(cause),
+            waitedSeconds: Math.max(0, Math.round((this.clock.now() - startedAt) / 1000)) }
           : { code: 'requestFailed' };
         this.setState({ translating: false, inFlight: false, error: nextError });
         this.onPoolRefresh();

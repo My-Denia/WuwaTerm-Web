@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  classifyFailure, contextBefore, diffSplice, fitRequestBody, historySnapshot, initialRun, itemDisplayState, liveIssue, mapRegion, mapSpan,
+  classifyFailure, contextBefore, diffSplice, fitRequestBody, historySnapshot, initialRun, isQuotaPause, itemDisplayState, liveIssue, mapRegion, mapSpan,
   nextQueued, placeSegmentIssues, runDisplayState, runProgress, runReducer, segmentKey, selectPrecedents, semanticExportItems,
   semanticIssuesResolved, semanticTextsWithinBudget,
 } from '../lib/semantic-run.js';
@@ -265,6 +265,23 @@ test('pause keeps the in-flight item; skip ends an item without touching streak 
   let p = runReducer(runReducer(start(), { type: 'sent', key: 'a' }), { type: 'pause' });
   p = runReducer(p, { type: 'failed', key: 'a', code: 'shared_pool_busy', classification: { action: 'wait', seconds: 5 }, now: 0 });
   assert.deepEqual([p.phase, p.waitUntil, p.items[0].status], ['paused', null, 'queued']);
+});
+
+test('a failure that answers the request sent before a user pause keeps the run paused, shows that item failed and resends it on continue', () => {
+  // The user paused while the last open item was in flight: nothing is queued, the run is still paused and can be continued.
+  let s = runReducer(runReducer(start(['a', 'b']), { type: 'sent', key: 'a' }), { type: 'done', key: 'a' });
+  s = runReducer(runReducer(s, { type: 'sent', key: 'b' }), { type: 'pause' });
+  assert.deepEqual([s.phase, statusesOf(s)], ['paused', 'done,sending']);
+  // Core gave up on the model: before, the pause turned into a stop that read as a service failure.
+  s = runReducer(s, { type: 'failed', key: 'b', code: 'llm_unavailable', requestId: 'req-b', classification: classifyFailure({ reason: 'llm_unavailable' }), now: 0 });
+  assert.deepEqual([s.phase, s.stopCode, s.stopRequestId, statusesOf(s), isQuotaPause(s.stopCode)], ['paused', 'llm_unavailable', 'req-b', 'done,queued', false]);
+  assert.deepEqual([runDisplayState(s), itemDisplayState(s, s.items[1])], ['paused', 'failed']);
+  s = runReducer(s, { type: 'resume' });
+  assert.deepEqual([s.phase, s.stopCode, nextQueued(s)?.key], ['running', null, 'b']);
+  // A used-up quota is still its own pause, and its item reads paused.
+  let q = runReducer(runReducer(start(['a']), { type: 'sent', key: 'a' }), { type: 'pause' });
+  q = runReducer(q, { type: 'failed', key: 'a', code: 'translation_pool_exhausted', classification: classifyFailure({ reason: 'translation_pool_exhausted' }), now: 0 });
+  assert.deepEqual([q.phase, isQuotaPause(q.stopCode), itemDisplayState(q, q.items[0])], ['paused', true, 'paused']);
 });
 
 // ---- issues ----

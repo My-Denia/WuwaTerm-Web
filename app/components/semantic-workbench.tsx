@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { SEGMENT_LIMIT } from '../../lib/segmentation.ts';
 import {
-  classifyFailure, itemDisplayState, runDisplayState, runProgress,
+  classifyFailure, isQuotaPause, itemDisplayState, runDisplayState, runProgress,
 } from '../../lib/semantic-run.js';
 import {
   TERM_GROUP_FILTERS, filterTermGroups, groupTermOccurrences, restorableHistory, sessionReviewFeatures, splitAmbiguousSegments,
@@ -29,6 +29,22 @@ import { isRunActive, PRECEDENTS_DEFAULT_ON, type WorkbenchController, type Work
 import type { Decision, LongCtx, Pair, PairView, Placed, RecordView, Region, SemanticDecisionKind, SemanticState, Span } from '../../lib/workbench-model';
 export { PRECEDENTS_DEFAULT_ON };
 export type { Commit, Draft, LongState, SemanticState, SessionBasis } from '../../lib/workbench-model';
+
+// "上一条（K）" as its label and its keyboard key; phones, which have no such key, hide the key.
+function withShortcut(label: string): ReactNode {
+  const parts = /^(.*?)([（(][^（）()]+[）)])$/u.exec(label);
+  return parts ? <>{parts[1]}<span className="shortcut-hint">{parts[2]}</span></> : label;
+}
+
+/**
+ * The adopt button of an ambiguous one-character name. Core can offer two entries with the same pair (心 / Hsin as a resonator
+ * and as a speaker); two identical buttons would look like a duplicate, so each then names its category.
+ */
+export function ambiguousAdoptLabel(lang: UiLanguage, c: { zh: string; en: string; category: string }, all: readonly { zh: string; en: string }[]): string {
+  const s = semanticMsg(lang);
+  const shared = all.filter(o => o.zh === c.zh && o.en === c.en).length > 1;
+  return fill(s.ambiguous.adopt, { zh: c.zh, en: c.en }) + (shared ? fill(s.ambiguous.adoptCategory, { category: categoryLabel(lang, c.category) }) : '');
+}
 
 /** Longest list of segment numbers a banner spells out. */
 const NUMBERS_SHOWN = 8;
@@ -312,10 +328,21 @@ export function SemanticWorkbench(props: Props) {
       return waited ? fill(s.phaseRetryingAfterWait, { i, a: sendingItem?.attempt ?? 2, w: waited }) : fill(s.phaseRetrying, { i, a: sendingItem?.attempt ?? 2 });
     }
     if (runState === 'waiting') return fill(s.phaseWaiting, { s: waitSeconds });
-    if (runState === 'paused') return run.stopCode ? fill(run.kind === 'term' ? s.phaseTermQuota : s.phaseQuota, { done, total }) : fill(s.phasePaused, { done, total });
+    if (runState === 'paused') {
+      if (run.stopCode && isQuotaPause(run.stopCode)) return fill(run.kind === 'term' ? s.phaseTermQuota : s.phaseQuota, { done, total });
+      if (sendingItem) return fill(s.phasePausedInFlight, { done, total, i });
+      if (run.stopCode) {
+        const failedItem = run.items.find(item => item.status === 'queued' && (item.attempt ?? 0) > 0);
+        // The paused line already says that continuing resends the segment; the run advice would say it twice.
+        const details = failureDetails(lang, { kind: run.kind === 'translate' ? 'translation' : 'review', reason: run.stopCode, requestId: run.stopRequestId, inRun: true })
+          .filter(line => line !== m.failure.adviceTranslationRun);
+        return [fill(s.phasePausedFailed, { done, total, i: (failedItem?.index ?? 0) + 1, reason: stopText(run.stopCode) }), ...details].join(' ');
+      }
+      return fill(s.phasePaused, { done, total });
+    }
     if (runState === 'failed') {
       if (run.phase !== 'stopped') return fill(s.phaseDoneFailed, { n: progress.failed });
-      const details = failureDetails(lang, { kind: run.kind === 'translate' ? 'translation' : 'review', reason: run.stopCode, requestId: run.stopRequestId });
+      const details = failureDetails(lang, { kind: run.kind === 'translate' ? 'translation' : 'review', reason: run.stopCode, requestId: run.stopRequestId, inRun: true });
       return [fill(s.phaseStopped, { reason: stopText(run.stopCode) }), ...details].join(' ');
     }
     if (run.kind === 'term') return needsRecheck > 0 ? fill(s.phaseTermDoneRecheck, { n: needsRecheck }) : s.phaseTermDone;
@@ -462,7 +489,7 @@ export function SemanticWorkbench(props: Props) {
       <p className="result-summary"><span className="verdict-badge verdict-not_evaluated">{(m.review.verdicts as Record<string, string>).not_evaluated}</span> · {fill(s.ambiguous.item, { text: finding.source_span.text, n: occ.segmentNumber })}</p>
       <div className="excerpt-labeled"><span className="excerpt-tag">{m.review.excerptSourceLabel}</span><ContextLine context={occ.sourceContext} missing={s.sourceMissing} /></div>
       <div className="finding-actions">
-        {occ.candidates.map(c => <button key={c.candidate_id} type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'adopt', segmentIndex: occ.segmentIndex, finding, candidate: c })}>{fill(s.ambiguous.adopt, { zh: c.zh, en: c.en })}</button>)}
+        {occ.candidates.map(c => <button key={c.candidate_id} type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'adopt', segmentIndex: occ.segmentIndex, finding, candidate: c })}>{ambiguousAdoptLabel(lang, c, occ.candidates)}</button>)}
         <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'not_a_term', segmentIndex: occ.segmentIndex, finding })}>{s.ambiguous.ignore}</button>
         <button type="button" className="text-button" onClick={() => locate('source', occ.docSource)}>{m.review.jumpSource}</button>
       </div>
@@ -544,19 +571,19 @@ export function SemanticWorkbench(props: Props) {
       {translateBlankLong && <div className="long-translate">
         <p>{s.translateLongHint}</p>
         <div className="actions">
-          <button type="button" className="secondary-button" disabled={runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateLong}</button>
+          <button type="button" className="primary-button" disabled={runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateLong}</button>
         </div>
       </div>}
       {translateResumable && <div className="long-translate">
         <p>{s.translateResumeHint}</p>
         <div className="actions">
-          <button type="button" className="secondary-button" disabled={pairTranslating !== null || runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateResume}</button>
+          <button type="button" className="primary-button" disabled={pairTranslating !== null || runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateResume}</button>
         </div>
       </div>}
       {!translateBlankLong && <div className="long-terms">
         <p>{s.runTermHint}</p>
         <div className="actions">
-          <button type="button" className={`secondary-button${needsRecheck > 0 && termRows.length > 0 && !runActive ? ' recheck-prominent' : ''}`} data-recheck={needsRecheck > 0 && termRows.length > 0 ? 'true' : undefined} disabled={runActive || reviewsClosed || !plan?.cost} onClick={() => doc.startTermRun()}>{runTermLabel}</button>
+          <button type="button" className={`${translateResumable ? 'secondary-button' : 'primary-button'}${needsRecheck > 0 && termRows.length > 0 && !runActive ? ' recheck-prominent' : ''}`} data-recheck={needsRecheck > 0 && termRows.length > 0 ? 'true' : undefined} disabled={runActive || reviewsClosed || !plan?.cost} onClick={() => doc.startTermRun()}>{runTermLabel}</button>
         </div>
       </div>}
       {draft.alignments !== null && <div className="actions">
@@ -582,7 +609,9 @@ export function SemanticWorkbench(props: Props) {
       {(semanticOn || contextOn) && <label className="inline-check"><input type="checkbox" checked={usePrecedents} onChange={e => doc.setUsePrecedents(e.target.checked)} />{s.precedents}</label>}
       <div className="actions">
         {(run.phase === 'running' || run.phase === 'waiting') && <button type="button" className="secondary-button" onClick={() => doc.pauseRun()}>{s.pause}</button>}
-        {(run.phase === 'paused' || run.phase === 'stopped') && run.items.some(i => i.status === 'queued') && <button type="button" className="secondary-button" onClick={() => doc.resumeRun()}>{s.resume}</button>}
+        {/* Also while the request sent before a pause is still out: continuing then sends nothing until it answers. */}
+        {(run.phase === 'paused' || run.phase === 'stopped') && run.items.some(i => i.status === 'queued' || i.status === 'sending')
+          && <button type="button" className="secondary-button" onClick={() => doc.resumeRun()}>{run.kind === 'translate' ? s.resumeTranslate : s.resume}</button>}
         {progress.failed > 0 && !runActive && <button type="button" className="secondary-button" onClick={() => doc.retryFailedRunItems()}>{s.retryFailed}</button>}
       </div>
       {manualViews.length > 0 && (singleBreaks(source) > 0 || singleBreaks(target) > 0) && <div className="split-lines">
@@ -769,9 +798,9 @@ function IssueCard({ s, m, row, source, target, view, rows, choice, setChoice, a
   const sc = chars(source); const tc = chars(target);
   return <article className="semantic-card" aria-labelledby="semantic-card-title">
     <div className="finding-nav">
-      <button type="button" className="secondary-button" onClick={prev}>{s.navPrev}</button>
-      <button type="button" className="secondary-button" onClick={next}>{s.navNext}</button>
-      <button type="button" className="secondary-button" onClick={locate}>{s.locate}</button>
+      <button type="button" className="secondary-button" onClick={prev}>{withShortcut(s.navPrev)}</button>
+      <button type="button" className="secondary-button" onClick={next}>{withShortcut(s.navNext)}</button>
+      <button type="button" className="secondary-button" onClick={locate}>{withShortcut(s.locate)}</button>
       <p className="finding-position">{position}</p>
     </div>
     <h4 id="semantic-card-title"><span className="semantic-category">{s.categories[issue.category]}</span>{row.segment === null ? '' : ` · ${fill(s.segmentLabel, { n: row.segment + 1 })}`}</h4>
