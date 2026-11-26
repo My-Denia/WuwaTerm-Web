@@ -43,6 +43,8 @@ input,textarea { width:100%; padding:13px 14px; font-size:14px; }
 input::placeholder,textarea::placeholder { color:var(--placeholder); }
 textarea { resize:vertical; min-height:126px; line-height:1.7; }
 input { min-height:48px; }
+/* A radio takes none of the 48px text-field box above; its label stays the hit target. */
+input[type="radio"] { width:auto; height:auto; min-height:0; padding:0; flex:none; accent-color:var(--accent); }
 select { padding:8px 10px; font-size:11px; }
 .input-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; }
 .input-wrap { position:relative; display:flex; align-items:center; width:100%; }
@@ -187,7 +189,7 @@ footer div { display:flex; gap:20px; }
 .revision-dialog label,.revision-dialog legend { font-size:14px; }
 .revision-occurrences { margin:12px 0; padding:10px; border:1px solid var(--line); max-height:30dvh; overflow-y:auto; min-width:0; }
 .revision-occurrence { display:flex; gap:12px; align-items:flex-start; padding:10px 0; cursor:pointer; }
-.revision-occurrence input[type=radio] { width:auto; flex:none; margin:4px 0; accent-color:var(--accent); }
+.revision-occurrence input[type=radio] { margin:4px 0; }
 .revision-occurrence > span { min-width:0; }
 .revision-occurrence .review-excerpt { margin:5px 0; }
 .revision-dialog .actions { display:flex; gap:10px; flex-wrap:wrap; }
@@ -259,8 +261,9 @@ footer div { display:flex; gap:20px; }
 .semantic-suggestion,.semantic-adjust { margin:8px 0; padding:10px; border:1px dashed var(--line); border-radius:6px; }
 .semantic-suggestion del,.semantic-adjust del,.revision-preview del { color:var(--danger); }
 .semantic-suggestion ins,.semantic-adjust ins { color:var(--accent); text-decoration:underline; }
-.suggestion-choice { display:flex; gap:14px; font-size:13px; }
-.suggestion-choice input { width:auto; accent-color:var(--accent); }
+.suggestion-choice { display:flex; flex-wrap:wrap; gap:4px 14px; font-size:13px; }
+.suggestion-choice label { display:flex; align-items:center; gap:6px; min-height:40px; margin:0; cursor:pointer; }
+.suggestion-choice input { margin:0; }
 .term-effect { color:var(--muted); font-size:12px; margin:4px 0 0; }
 .semantic-withheld { color:var(--caution-text); font-size:13px; }
 .semantic-actions { margin-top:10px; }

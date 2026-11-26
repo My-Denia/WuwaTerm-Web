@@ -465,7 +465,7 @@ const zh = {
     exportProseTxt: '已让浏览器开始下载当前原文与译文（.txt）。这不是可导入的稿件，也没有改变稿件保存状态。',
   },
   errors: {
-    workfile_too_large: '稿件文件超过大小上限（v1/v2 为 1 MiB，v3 为 44 MiB）；当前稿件未被替换。请把稿件拆成较小的几份。',
+    workfile_too_large: '稿件文件超过大小上限（v1/v2 为 1 MiB，v3、v4、v5 为 44 MiB）；当前稿件未被替换。请把稿件拆成较小的几份。',
     workfile_not_json: '无法读取 JSON 稿件文件。',
     workfile_unsupported_format: '不支持此稿件格式或版本。请导入“保存稿件”生成的文件。',
     workfile_invalid_content: '稿件内容、选择或位置依据无效；当前稿件未被替换。',
@@ -1151,7 +1151,7 @@ const en: typeof zh = {
     exportProseTxt: 'The browser was asked to download current source and translation prose (.txt). This is not an importable manuscript, and the manuscript save state is unchanged.',
   },
   errors: {
-    workfile_too_large: 'The manuscript file is over its size limit (1 MiB for v1/v2, 44 MiB for v3); the current manuscript was not replaced. Please split the manuscript into smaller parts.',
+    workfile_too_large: 'The manuscript file is over its size limit (1 MiB for v1/v2, 44 MiB for v3, v4 and v5); the current manuscript was not replaced. Please split the manuscript into smaller parts.',
     workfile_not_json: 'The JSON manuscript file cannot be read.',
     workfile_unsupported_format: 'This manuscript format or version is not supported. Please import a file produced by “Save manuscript”.',
     workfile_invalid_content: 'The manuscript content, choices or positional basis is invalid; the current manuscript was not replaced.',

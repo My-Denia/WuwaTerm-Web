@@ -95,6 +95,53 @@ renderings and per-place details are unchanged. The v3 and v4 file formats, the 
 response shape, the Core and Windows contract pins and the Core requirements are the
 same as for 0.4.0.
 
+## Version 0.5.0 and layered review
+
+Web 0.5.0 reads and writes `wuwaterm-manuscript-v5`
+([specification](../contracts/manuscript-v5/SPEC.md)). A v5 file records the review
+features a saved result was made with, so the result is reused only under the same
+features; it accepts the `ambiguous_mention` reason on a `not_evaluated` finding and can
+hold gap-tolerant segment records (`segmentation-v1-gaps`): when an edit leaves text
+outside the aligned spans, only that gap needs a manual split and the aligned segments
+keep their results. A manuscript is written
+as v5 only when it holds such content; otherwise the lowest earlier format that fits is
+written, as before. With a Core that lists `ambiguous-mention-v1`, a checked long
+manuscript is saved as v5. Web 0.4.5 and earlier, and Windows 0.6.6 and earlier, reject a
+v5 file; Windows 0.7.0 reads and writes v5.
+
+The manuscript review pane now has three layers. Layer 1 is a deterministic structure
+check that you start: empty translations, numbers, placeholders and tags, and paragraph
+and line layout, segment by segment. It calls no model, and its results are not written
+to the manuscript. The workbench shows it only when the Core API lists
+`structure-check-v1`. The BFF forwards it through `/api/structure-checks` to the Core's
+`POST /v1/structure-checks`, accepts up to 65,536 bytes there as on `/api/reviews`, and
+admits each call as one review, so structure checks count against
+`WUWATERM_LOCAL_LIMIT_REVIEWS_PER_DAY`. Without the capability the route answers 503
+`structure_check_unavailable` and admits nothing. Layer 2 is the semantic review, still
+experimental and off by default in Core: high- and medium-confidence issues come first,
+low-confidence ones are folded at the end, and an unhandled issue that a Layer 1 finding
+already describes is not raised again. Layer 3 is a reserved switch that sends and stores
+nothing.
+
+When the Core lists `ambiguous-mention-v1`, every review-v2 request asks for it with
+`X-WuwaTerm-Review-Features: dense-128,reason-v1,ambiguous-mention-v1`; the BFF forwards
+the header only as the client sent it and refuses `ambiguous-mention-v1` without
+`reason-v1`. A one-character resonator name that Core could not settle then comes back
+as `not_evaluated` with the reason `ambiguous_mention`; the workbench lists it separately,
+after the judged findings, for you to adopt or ignore, and does not count it as a conflict
+or problem.
+
+Quick translation and manuscript review are now two layouts of one document: text over
+2,000 characters on either side switches to manuscript review in place. The My terms
+panel holds a personal reference list in `wuwaterm-termbase-v1`. The list lives in page
+memory, is imported and exported only as a file you choose, and a reload empties it; it
+is not sent with translation or review requests and is not saved into manuscripts.
+
+Core [v0.14.0](https://github.com/My-Denia/WuwaTerm/releases/tag/v0.14.0) is the release
+0.5.0 is tested against, and it lists both `structure-check-v1` and
+`ambiguous-mention-v1`. With a Core that lists neither, the structure check and the
+separate single-character list stay hidden and the rest of the workbench works as before.
+
 ## Download the Linux x64 bundle
 
 The standalone release candidate contains the server, browser assets and
