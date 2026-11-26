@@ -305,6 +305,7 @@ test('findings display excerpt labels and verdict badges', async ({ page }) => {
   await page.locator('#review-source').fill('今汐在。');
   await page.locator('#review-target').fill('Jinhsi is here.');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
+  await page.getByRole('button', { name: '全部 1', exact: true }).click();
   await expect(page.locator('.review-findings .term-result')).toHaveCount(1);
   const finding = page.locator('.review-findings .term-result').first();
   await expect(finding.locator('.verdict-badge')).toBeVisible();

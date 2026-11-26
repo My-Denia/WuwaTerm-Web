@@ -298,6 +298,95 @@ export function nextEntryId(entries: readonly TermbaseEntry[]): string {
   }
 }
 
+export type PromoteCandidate = {
+  source: string;
+  target: string;
+  direction: TermbaseDirection;
+  kind?: TermbaseKind;
+  note?: string;
+};
+
+export type PromoteResult =
+  | { status: 'added'; entry: TermbaseEntry; entries: TermbaseEntry[] }
+  | { status: 'duplicate'; entry: TermbaseEntry }
+  | { status: 'incomplete'; source: string; target: string; direction: TermbaseDirection; kind: TermbaseKind }
+  | { status: 'invalid'; error: 'field_too_long' | 'field_invalid' | 'list_full' | 'list_too_large'; field?: 'source' | 'target' | 'note'; max?: number };
+
+/** Whether an identical source/target/direction pair already sits in the in-memory termbase. */
+export function findMatchingTermbaseEntry(
+  entries: readonly TermbaseEntry[],
+  candidate: { source: string; target: string; direction: TermbaseDirection },
+): TermbaseEntry | null {
+  const source = candidate.source.trim();
+  const target = candidate.target.trim();
+  if (!source || !target) return null;
+  return entries.find(e => e.direction === candidate.direction && e.source === source && e.target === target) ?? null;
+}
+
+/**
+ * Promote a reviewed/edited pair into the in-memory personal termbase without mutating any document text or homographs.
+ * Defaults `kind` to `'preferred_term'`, enforces the same strict v1 limits and size cap, and reports duplicates cleanly.
+ */
+export function promoteTermbaseEntry(
+  entries: readonly TermbaseEntry[],
+  candidate: PromoteCandidate,
+  now: Date = new Date(),
+): PromoteResult {
+  const source = candidate.source.trim();
+  const target = candidate.target.trim();
+  const note = (candidate.note ?? '').trim();
+  const kind: TermbaseKind = candidate.kind ?? 'preferred_term';
+  const direction = candidate.direction;
+
+  if (!source || !target) {
+    return { status: 'incomplete', source, target, direction, kind };
+  }
+
+  const checkField = (field: 'source' | 'target' | 'note', value: string, max: number): PromoteResult | null => {
+    if (value.includes('\u0000') || LONE_SURROGATE.test(value)) {
+      return { status: 'invalid', error: 'field_invalid', field };
+    }
+    if (scalarLength(value) > max) {
+      return { status: 'invalid', error: 'field_too_long', field, max };
+    }
+    return null;
+  };
+
+  const problem = checkField('source', source, TERMBASE_LIMITS.source.max)
+    ?? checkField('target', target, TERMBASE_LIMITS.target.max)
+    ?? checkField('note', note, TERMBASE_LIMITS.note.max);
+  if (problem) return problem;
+
+  const existing = findMatchingTermbaseEntry(entries, { source, target, direction });
+  if (existing) return { status: 'duplicate', entry: existing };
+
+  if (entries.length >= MAX_TERMBASE_ENTRIES) {
+    return { status: 'invalid', error: 'list_full' };
+  }
+
+  const stamp = termbaseNow(now);
+  const entry: TermbaseEntry = {
+    id: nextEntryId(entries),
+    source,
+    target,
+    direction,
+    kind,
+    note,
+    updated_at: stamp,
+  };
+  const next = [...entries, entry];
+  try {
+    serializeTermbase({ format: TERMBASE_FORMAT, schema_version: 1, updated_at: stamp, entries: next });
+  } catch (error) {
+    if (error instanceof TermbaseError && error.code === 'termbase_too_large') {
+      return { status: 'invalid', error: 'list_too_large' };
+    }
+    return { status: 'invalid', error: 'field_invalid', field: 'source' };
+  }
+  const validated = validateTermbase({ format: TERMBASE_FORMAT, schema_version: 1, updated_at: stamp, entries: next });
+  return { status: 'added', entry: validated.entries[validated.entries.length - 1]!, entries: validated.entries };
+}
+
 // ---- reference matching ----
 
 export type TermbaseSpan = { start: number; end: number };

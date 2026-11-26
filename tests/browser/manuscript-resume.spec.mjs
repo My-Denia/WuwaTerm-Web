@@ -70,7 +70,8 @@ test('Chinese UI: disk-save -> close session -> fresh context -> reopen from fil
   await page1.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page1.locator('.review-current')).toBeVisible();
 
-  // Adopt official choice
+  // Adopt official choice (all findings here are verified_constraint, so show all first)
+  await page1.getByRole('button', { name: '全部 2', exact: true }).click();
   await page1.getByRole('button', { name: '采用此官方词对', exact: true }).first().click();
   await expect(page1.locator('.choice-records')).toContainText('今汐 / Jinhsi');
 

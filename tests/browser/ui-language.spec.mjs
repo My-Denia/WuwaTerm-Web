@@ -118,6 +118,7 @@ test('toggling language switches copy in place, keeps workbench state, and sends
   await prepare(page);
   await page.locator('.term-lookup').getByRole('button', { name: '展开', exact: true }).click();
   await page.locator('#term-query').fill(CREDENTIAL_CANARY);
+  await page.getByRole('button', { name: '全部 2', exact: true }).click();
   await page.getByRole('button', { name: '采用此官方词对', exact: true }).first().click();
   await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
   // The staged-choice notice stays visible and re-localizes when the language

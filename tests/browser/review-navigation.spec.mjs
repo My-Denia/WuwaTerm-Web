@@ -220,8 +220,9 @@ for (const viewport of [
     test('filter-displayed finding becomes canonical on return to all', async ({ page }, info) => {
       const reviews = await open(page, preservationReportFor);
       await check(page);
-      // Explicitly select A, rather than relying on the initial derived default.
-      await page.getByRole('button', { name: '下一项', exact: true }).click();
+      // Default filter hides verified_constraint (FIRST) and selects SECOND; switch to All and move to FIRST explicitly.
+      await expect(page.getByRole('button', { name: '待处理 3', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await page.getByRole('button', { name: '全部 4', exact: true }).click();
       await page.getByRole('button', { name: '上一项', exact: true }).click();
       await expect(page.locator(`[data-mention-id="${FIRST.id}"]`)).toHaveAttribute('data-active', 'true');
       await navigationEvidence(page, info, 'canonical-before-filter', reviews);
@@ -246,6 +247,7 @@ for (const viewport of [
       await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
       await page.getByRole('button', { name: '核对术语', exact: true }).click();
       await expect(page.locator('.review-current')).toBeVisible();
+      await page.getByRole('button', { name: '全部 4', exact: true }).click();
       await page.locator(`[data-mention-id="${FIRST.id}"]`).getByRole('button', { name: '采用此官方词对', exact: true }).click();
       await page.getByRole('button', { name: '核对术语', exact: true }).click();
       await expect(page.locator('.review-current')).toBeVisible();
@@ -307,6 +309,7 @@ for (const viewport of [
         return report;
       });
       await check(page);
+      await page.getByRole('button', { name: '全部 4', exact: true }).click();
       await page.getByRole('button', { name: '下一项', exact: true }).click();
       await page.getByRole('button', { name: '冲突 1', exact: true }).click();
       await expect(page.locator(`[data-mention-id="${SECOND.id}"]`)).toHaveAttribute('data-active', 'true');
@@ -343,6 +346,10 @@ for (const viewport of [
       await check(page);
       const summary = await page.locator('.review-summary').innerText();
       expect(summary).toContain('未评估 7');
+      await expect(page.getByRole('button', { name: '待处理 3', exact: true })).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('.review-findings .term-result')).toHaveCount(3);
+      await expect(page.locator('.hidden-confirmed-bar')).toContainText('已隐藏 1 条已核条目');
+      await page.getByRole('button', { name: '全部 4', exact: true }).click();
       await expect(page.getByRole('button', { name: '全部 4', exact: true })).toHaveAttribute('aria-pressed', 'true');
       await expect(page.getByRole('button', { name: '冲突 1', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: '需核对 1', exact: true })).toBeVisible();

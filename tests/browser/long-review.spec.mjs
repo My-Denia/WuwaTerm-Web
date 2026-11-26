@@ -49,6 +49,7 @@ test('a saved long manuscript reopens with its results, choices and position; an
   // Step 6: four pending segments without choices, one request each.
   await run(page, rec, 4);
   expect(await termStates(page)).toEqual(['current', 'current', 'current', 'current']);
+  await page.locator('[data-group-filter="all"]').click();
   await findingIn(page, 1).getByRole('button', { name: M.review.adopt, exact: true }).click();
   await findingIn(page, 2).getByRole('button', { name: M.review.notTerm, exact: true }).click();
   // SPEC Writing "Choices": adding a choice to a done record makes it stale.
@@ -104,6 +105,7 @@ test('a stale resolution_context falls back to one request without resolutions a
   const { source, target } = termPair(2);
   await fillPair(page, source, target);
   await run(page, rec, 2);
+  await page.locator('[data-group-filter="all"]').click();
   await findingIn(page, 0).getByRole('button', { name: M.review.adopt, exact: true }).click();
   // Step 6 first bullet would be one request with the choice; it is rejected, so the item asks once more without
   // resolutions (which returns the basis) and stops there: at most two requests per segment item.
@@ -120,6 +122,7 @@ test('a matcher_revision change after reopen re-checks the saved results and kee
   const rec = await openWorkbench(page, { capabilities: [] });
   await fillPair(page, source, target);
   await run(page, rec, 4);
+  await page.locator('[data-group-filter="all"]').click();
   await findingIn(page, 1).getByRole('button', { name: M.review.adopt, exact: true }).click();
   await run(page, rec, 5);
   for (const i of [1, 3]) await chip(page, i).getByRole('button', { name: S.segMarkFinished, exact: true }).click();
@@ -158,6 +161,7 @@ test('an edit re-checks only that segment, in the session and after save and reo
   const rec = await openWorkbench(page, { capabilities: [] });
   await fillPair(page, source, target);
   await run(page, rec, 4);
+  await page.locator('[data-group-filter="all"]').click();
   await findingIn(page, 2).getByRole('button', { name: M.review.adopt, exact: true }).click();
   await page.locator('#review-target').fill(withTarget(n, 3, ' again'));
   // Step 6, first bullet (an in-session target-only edit): only segment 3, one request with its confirmed choice.
@@ -384,6 +388,7 @@ test('a replacement asks before discarding a workbench that holds only the segme
   const { source, target } = termPair(2);
   await fillPair(page, source, target);
   await run(page, rec, 2);
+  await page.locator('[data-group-filter="all"]').click();
   await findingIn(page, 0).getByRole('button', { name: M.review.adopt, exact: true }).click();
   // SPEC "Leaving long mode": emptying both boxes moves the choice to the segment choice history; it is still work.
   await fillPair(page, '', '');
@@ -409,6 +414,7 @@ test('a truncated segment result still takes choices on the findings it shows, a
   await expect(note).toHaveCount(1);
   await expect(note).toHaveAttribute('data-segment', '0');
   await expect(note).toHaveText(fill(S.longTermsTruncated, { n: 1, k: 1 }));
+  await page.locator('[data-group-filter="all"]').click();
   const adopt = findingIn(page, 0).getByRole('button', { name: M.review.adopt, exact: true });
   await expect(adopt).toBeEnabled();
   await adopt.click();

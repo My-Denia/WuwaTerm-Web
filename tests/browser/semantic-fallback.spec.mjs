@@ -21,6 +21,7 @@ for (const [name, capabilities] of WITHOUT) {
       await expect(page.locator('.segment-panel')).toHaveCount(0);
       await expect(page.locator('.long-tools')).toHaveCount(0);
       await page.getByRole('button', { name: '核对术语', exact: true }).click();
+      await page.getByRole('button', { name: '全部 2', exact: true }).click();
       await expect(page.locator('.review-findings .term-result')).toHaveCount(2);
       expect(rec.reviews).toHaveLength(1);
       expect(rec.semantic).toHaveLength(0);

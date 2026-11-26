@@ -27,6 +27,7 @@ for (const [name, use] of [['desktop', { viewport: { width: 1440, height: 900 } 
       await page.locator('#review-source').fill(SOURCE);
       await page.locator('#review-target').fill(TARGET);
       await page.getByRole('button', { name: '核对术语', exact: true }).click();
+      await page.getByRole('button', { name: '全部 2', exact: true }).click();
       const first = page.locator('[data-mention-id="0:2:今汐"]');
       await expect(first).toBeVisible();
       const at = Array.from(SOURCE.slice(0, SOURCE.indexOf('声骸'))).length;

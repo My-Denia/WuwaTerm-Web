@@ -107,6 +107,7 @@ async function prepare(page) {
   await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.locator('.review-current')).toBeVisible();
+  await page.getByRole('button', { name: '全部 1', exact: true }).click();
   await page.getByRole('button', { name: '采用此官方词对', exact: true }).click();
   await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
 }
@@ -436,6 +437,7 @@ test('a narrow keyboard resume fetches fresh basis before explicitly reconfirmin
   expect(reviews).toHaveLength(1);
   expect(reviews[0].resolutions).toBeUndefined();
   await expect(page.locator('.choice-records')).toContainText('0 处适用 / 1 处待确认');
+  await page.getByRole('button', { name: '全部 1', exact: true }).click();
   const confirm = page.getByRole('button', { name: '这里不是术语', exact: true });
   await confirm.focus();
   await page.keyboard.press('Enter');

@@ -27,6 +27,7 @@ import { numberLocale, type UiLanguage } from '../../lib/ui-language';
 import { longExportRows as rowsOf } from '../../lib/workbench-persistence';
 import { isRunActive, PRECEDENTS_DEFAULT_ON, type WorkbenchController, type WorkbenchSnapshot } from '../../lib/workbench-controller';
 import type { Decision, LongCtx, Pair, PairView, Placed, RecordView, Region, SemanticDecisionKind, SemanticState, Span } from '../../lib/workbench-model';
+import { findMatchingTermbaseEntry, type TermbaseDirection, type TermbaseEntry } from '../../lib/termbase';
 export { PRECEDENTS_DEFAULT_ON };
 export type { Commit, Draft, LongState, SemanticState, SessionBasis } from '../../lib/workbench-model';
 
@@ -62,6 +63,8 @@ type Props = {
   locate: (side: 'source' | 'target', span: Span) => void;
   /** The term section; long-mode term findings, choices and history are rendered into it. */
   termTrack: (longTerms: ReactNode) => ReactNode;
+  termbaseEntries: readonly TermbaseEntry[];
+  onPromoteToTermbase: (item: { source: string; target: string; direction?: TermbaseDirection }) => void;
 };
 
 const chars = (text: string) => Array.from(text);
@@ -101,7 +104,7 @@ function Snippet({ text, span, missing }: { text: string; span: Span | null; mis
 }
 
 export function SemanticWorkbench(props: Props) {
-  const { doc, snapshot, lang, pool, locate } = props;
+  const { doc, snapshot, lang, pool, locate, termbaseEntries, onPromoteToTermbase } = props;
   const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction, structure } = snapshot;
   const { source, target, direction } = draft;
   const s = semanticMsg(lang);
@@ -118,7 +121,7 @@ export function SemanticWorkbench(props: Props) {
   const [pendingCut, setPendingCut] = useState<{ side: 'source' | 'target'; offset: number; label: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [termView, setTermView] = useState<'groups' | 'segments'>('groups');
-  const [groupFilter, setGroupFilterState] = useState<GroupFilter>('all');
+  const [groupFilter, setGroupFilterState] = useState<GroupFilter>('unresolved');
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
   const setGroupFilter = (id: GroupFilter) => { setGroupFilterState(id); setOpenGroups(new Set()); };
   const toggleGroup = (key: string) => setOpenGroups(prev => { const next = new Set(prev); if (!next.delete(key)) next.add(key); return next; });
@@ -453,12 +456,18 @@ export function SemanticWorkbench(props: Props) {
             : <p className="review-excerpt">{m.review.excerptMissingTarget}</p>}
       </div>
       {(occ.translation !== null || occ.verdict !== 'not_evaluated') && <p className="occurrence-translation" data-hit={occ.translation === null ? 'false' : 'true'}>{occ.translation === null ? s.occurrenceNoHit : fill(s.occurrenceTranslation, { text: occ.translation })}</p>}
-      {occ.candidates.map(c => <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
-        <div className="finding-actions">
-          <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'adopt', segmentIndex: occ.segmentIndex, finding, candidate: c })}>{m.review.adopt}</button>
-          {live && rendering(c) !== occ.translation && <button type="button" className="text-button" title={fill(s.occReplaceAria, { n: occ.segmentNumber, term: rendering(c) })} onClick={() => doc.applyTermOccurrenceAction({ type: 'replace', docTarget: occ.docTarget, candidate: c })}>{fill(s.occReplace, { term: rendering(c) })}</button>}
-        </div>
-      </div>)}
+      {occ.candidates.map(c => {
+        const pairSource = direction === 'en' ? c.zh : c.en;
+        const pairTarget = direction === 'en' ? c.en : c.zh;
+        const inTermbase = !!findMatchingTermbaseEntry(termbaseEntries, { source: pairSource, target: pairTarget, direction });
+        return <div className="term-pair" key={c.candidate_id}><strong>{c.zh}</strong><span>{c.en}</span><small>{m.terms.category}{labelJoiner(lang)}{categoryLabel(lang, c.category)}</small>
+          <div className="finding-actions">
+            <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'adopt', segmentIndex: occ.segmentIndex, finding, candidate: c })}>{m.review.adopt}</button>
+            {live && rendering(c) !== occ.translation && <button type="button" className="text-button" title={fill(s.occReplaceAria, { n: occ.segmentNumber, term: rendering(c) })} onClick={() => doc.applyTermOccurrenceAction({ type: 'replace', docTarget: occ.docTarget, candidate: c })}>{fill(s.occReplace, { term: rendering(c) })}</button>}
+            <button type="button" className="text-button" onClick={() => onPromoteToTermbase({ source: pairSource, target: pairTarget, direction })}>{inTermbase ? m.termbase.alreadyInTermbase : m.termbase.promoteButton}</button>
+          </div>
+        </div>;
+      })}
       <div className="finding-actions">
         <button type="button" className="text-button" onClick={() => doc.applyTermOccurrenceAction({ type: 'not_a_term', segmentIndex: occ.segmentIndex, finding })}>{m.review.notTerm}</button>
         <button type="button" className="text-button" onClick={() => locate('source', occ.docSource)}>{m.review.jumpSource}</button>
@@ -515,7 +524,13 @@ export function SemanticWorkbench(props: Props) {
       {fill(s.groupFilterSummary, { label: s.groupFilters[groupFilter], groups: filteredGroups.length, places: placeCount })}{collapsedCount > 0 ? fill(termView === 'groups' ? s.groupHiddenInGroups : s.groupHiddenInSegments, { n: collapsedCount }) : ''}</p>}
     {long && truncatedRows.map(r => <p key={`${r.index}:truncated`} className="track-note long-term-truncated" data-segment={r.index}>{fill(s.longTermsTruncated, { n: r.index + 1, k: r.report.findings.length })}</p>)}
     {long && termGroups.length > 0 && uncheckedSegments > 0 && <p className="track-note groups-unchecked" role="status">{fill(s.groupsUnchecked, { n: uncheckedSegments })}</p>}
-    {long && termGroups.length > 0 && filteredGroups.length === 0 && <p className="track-note">{s.groupsNone}</p>}
+    {long && termGroups.length > 0 && groupFilter === 'unresolved' && groupCounts.confirmed > 0 && (
+      <div className="hidden-confirmed-bar" role="status" data-hidden-confirmed-groups={groupCounts.confirmed}>
+        <span>{filteredGroups.length === 0 ? fill(s.groupsAllConfirmedHidden, { n: groupCounts.confirmed }) : `${s.groupFilters.confirmed} ${groupCounts.confirmed}`}</span>
+        <button type="button" className="text-button" onClick={() => setGroupFilter('all')}>{s.groupsShowAllConfirmed}</button>
+      </div>
+    )}
+    {long && termGroups.length > 0 && filteredGroups.length === 0 && !(groupFilter === 'unresolved' && groupCounts.confirmed > 0) && <p className="track-note">{s.groupsNone}</p>}
     {long && termView === 'groups' && shownGroups.map(g => <section className="term-group" key={g.key} data-group-status={g.status} data-group-key={g.key} data-group-surface={g.surface} data-group-saved={g.savedCount} aria-label={g.surface}>
       <header className="term-group-head">
         <h5 className="term-group-title"><span className="term-surface">{g.surface}</span>{g.surfaces.length > 1 && <span className="term-variants">（{g.surfaces.slice(1).join('、')}）</span>} <span className={`group-status group-status-${g.status}`}>{s.groupStatuses[g.status]}</span></h5>
@@ -701,11 +716,12 @@ export function SemanticWorkbench(props: Props) {
             onClick={() => setLowOpen(!lowOpen)}>{fill(lowOpen ? s.layers.l2LowHide : s.layers.l2LowShow, { n: lowRows.length })}</button>}
           {visible.length === 0 && <p>{s.emptyFiltered}</p>}
         </div>
-        {active && <IssueCard s={s} m={m} row={active} source={source} target={target} view={issueRegion} rows={rows} choice={choice} setChoice={setChoice}
+        {active && <IssueCard s={s} m={m} row={active} source={source} target={target} direction={direction} view={issueRegion} rows={rows} choice={choice} setChoice={setChoice}
           adjusting={adjusting} setAdjusting={setAdjusting} decide={(kind, text) => void decide(active, kind, text)} undo={() => undoDecision(active)}
           canUndo={doc.canUndoSemanticDecision(active.placed.id)}
           position={fill(s.position, { i: activeIndex < 0 ? 1 : activeIndex + 1, n: visible.length })} prev={() => move(-1)} next={() => move(1)} locate={locateActive}
-          locateSide={locate} activeMark={activeMark} onReview={activeView && activeView.pair.status === 'ready' && semanticOn && !runActive ? () => startRun([activeView]) : null} />}
+          locateSide={locate} activeMark={activeMark} onReview={activeView && activeView.pair.status === 'ready' && semanticOn && !runActive ? () => startRun([activeView]) : null}
+          termbaseEntries={termbaseEntries} onPromoteToTermbase={onPromoteToTermbase} />}
       </div>}
       {rows.length === 0 && semantic.results.length > 0 && <p>{s.emptyAll}</p>}
     </section>}
@@ -772,13 +788,15 @@ function SplitHelper({ s, locale, source, target, view, splitAt, merge, linesAsP
 }
 
 type Row = { placed: Placed; status: string; decision: Decision | null; reference: Decision | null; segment: number | null; imported: boolean };
-function IssueCard({ s, m, row, source, target, view, rows, choice, setChoice, adjusting, setAdjusting, decide, undo, canUndo, position, prev, next, locate, locateSide, activeMark, onReview }: {
-  s: SemanticMessages; m: ReturnType<typeof msg>; row: Row; source: string; target: string; view: PairView | null; rows: Row[];
+function IssueCard({ s, m, row, source, target, direction, view, rows, choice, setChoice, adjusting, setAdjusting, decide, undo, canUndo, position, prev, next, locate, locateSide, activeMark, onReview, termbaseEntries, onPromoteToTermbase }: {
+  s: SemanticMessages; m: ReturnType<typeof msg>; row: Row; source: string; target: string; direction: TermbaseDirection; view: PairView | null; rows: Row[];
   choice: 'suggestion' | 'alternative'; setChoice: (c: 'suggestion' | 'alternative') => void;
   adjusting: { placedId: string; text: string } | null; setAdjusting: (a: { placedId: string; text: string } | null) => void;
   decide: (kind: 'accepted' | 'adjusted' | 'ignored', text?: string) => void; undo: () => void; canUndo: boolean;
   position: string; prev: () => void; next: () => void; locate: () => void; locateSide: (side: 'source' | 'target', span: Span) => void;
   activeMark: MutableRefObject<HTMLElement | null>; onReview: (() => void) | null;
+  termbaseEntries: readonly TermbaseEntry[];
+  onPromoteToTermbase: (item: { source: string; target: string; direction?: TermbaseDirection }) => void;
 }) {
   const { placed } = row;
   const issue = placed.issue;
@@ -796,6 +814,10 @@ function IssueCard({ s, m, row, source, target, view, rows, choice, setChoice, a
     ...others.flatMap(r => r.placed.live[side === 'source' ? 'source_span' : 'target_span'] ? [{ span: r.placed.live[side === 'source' ? 'source_span' : 'target_span']!, active: false }] : []),
   ];
   const sc = chars(source); const tc = chars(target);
+  const promoteSource = (placed.live.source_span?.text ?? issue.source_excerpt ?? '').trim();
+  const promoteTarget = (editing?.text.trim() || replacement.trim() || placed.live.target_span?.text || issue.target_excerpt || '').trim();
+  const issueInTermbase = !!promoteSource && !!promoteTarget
+    && !!findMatchingTermbaseEntry(termbaseEntries, { source: promoteSource, target: promoteTarget, direction });
   return <article className="semantic-card" aria-labelledby="semantic-card-title">
     <div className="finding-nav">
       <button type="button" className="secondary-button" onClick={prev}>{withShortcut(s.navPrev)}</button>
@@ -838,6 +860,7 @@ function IssueCard({ s, m, row, source, target, view, rows, choice, setChoice, a
       {placed.stale && onReview && <button type="button" className="secondary-button" onClick={onReview}>{s.segReview}</button>}
       {placed.live.source_span && <button type="button" className="text-button" onClick={() => locateSide('source', placed.live.source_span!)}>{m.review.jumpSource}</button>}
       {placed.live.target_span && <button type="button" className="text-button" onClick={() => locateSide('target', placed.live.target_span!)}>{m.review.jumpTarget}</button>}
+      {promoteSource && <button type="button" className="text-button" onClick={() => onPromoteToTermbase({ source: promoteSource, target: promoteTarget, direction })}>{issueInTermbase ? m.termbase.alreadyInTermbase : m.termbase.promoteButton}</button>}
     </div>
     {handled && !canUndo && <p className="track-note">{s.undoBlocked}</p>}
     {view && <div className="compare-view" role="group" aria-label={s.compareAria}>

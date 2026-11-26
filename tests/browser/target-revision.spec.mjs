@@ -240,6 +240,7 @@ test('null-span no-op and length excess are disabled without mutation', async ({
   await open(page, { before_request: { source, target, direction: 'en' } }, body => {
     const report = freshApiReport(fixture(body.source, body.target).report); report.findings[0].target_span = null; return report;
   });
+  await page.getByRole('button', { name: '全部 1', exact: true }).click();
   const before = await download(page, '保存稿件'); await start(page); await select(page, 'Echo');
   await expect(dialog(page)).toContainText('替换前后完全相同'); await expect(dialog(page).getByRole('button', { name: confirmName })).toBeDisabled();
   await page.keyboard.press('Escape'); expect(await download(page, '保存稿件')).toBe(before);
@@ -280,6 +281,7 @@ test('trusted located shortcut replaces one official-form span and does not adop
     report.findings[1].candidates.push(echo);
     return report;
   });
+  await page.getByRole('button', { name: '全部 2', exact: true }).click();
   await page.locator('.review-findings .term-result').nth(1).getByRole('button', { name: '替换已定位词语', exact: true }).nth(1).click();
   await expect(page.locator('#review-target')).toHaveValue('Jinhsi. Echo.');
   expect(JSON.parse(await download(page, '保存稿件')).choices).toEqual([]);
