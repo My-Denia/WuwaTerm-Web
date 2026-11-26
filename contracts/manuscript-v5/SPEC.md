@@ -1,7 +1,7 @@
 # Manuscript format v5 (`wuwaterm-manuscript-v5`)
 
-Status: contract for WuwaTerm-Web; WuwaTerm-Windows reads it once its pinned client
-implements this file. It changes [`../manuscript-v4/SPEC.md`](../manuscript-v4/SPEC.md)
+Status: contract for WuwaTerm-Web and WuwaTerm-Windows. Both parsers and both writers
+implement this file. It changes [`../manuscript-v4/SPEC.md`](../manuscript-v4/SPEC.md)
 only where this file says so, and v4 in turn changes
 [`../manuscript-v3/SPEC.md`](../manuscript-v3/SPEC.md). `cases.json` in this directory is
 the shared fixture index. Regenerate the fixtures with
@@ -187,13 +187,17 @@ the same rule, so one that a lower format holds is written in that format (fixtu
 
 ## Compatibility
 
-- **New Web clients** read v1 to v5 and write by the rule above.
-- **Older clients** (Web 0.4.5 and earlier, and the Windows client pinned in
-  `contracts/windows-ref.txt`) read a v5 file as unsupported and keep the manuscript
-  that is already open: `workfile_too_large` over 1 MiB, otherwise
-  `workfile_unsupported_format`. `cases.json` records the Web 0.4.5 code of each case as
-  `legacy_error`, and Web's test asserts it against `tests/legacy/web-0.4.5/manuscript.js`,
-  a frozen copy of that reader (tag `v0.4.5`).
+- **New clients** read v1 to v5 and write by the rule above. The Windows client pinned
+  in `contracts/windows-ref.txt` is one: `tests/contracts/windows-manuscript.test.mjs`
+  asserts that it and Web read, write and reject the cases here alike, and that long
+  manuscripts built by each client's own runtime give the same bytes and are kept
+  unchanged by the other.
+- **Older clients** (Web 0.4.5 and earlier, and Windows 0.6.6 and earlier) read a v5
+  file as unsupported and keep the manuscript that is already open:
+  `workfile_too_large` over 1 MiB, otherwise `workfile_unsupported_format`.
+  `cases.json` records the Web 0.4.5 code of each case as `legacy_error`, and Web's test
+  asserts it against `tests/legacy/web-0.4.5/manuscript.js`, a frozen copy of that
+  reader (tag `v0.4.5`).
 - **v4 contract.** `contracts/manuscript-v4/` does not change. Its case
   `invalid-v4-format-v5.json` has 13 keys under the v5 label, so a v5 reader still
   gives it `workfile_unsupported_format`.

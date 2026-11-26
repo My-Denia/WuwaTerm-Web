@@ -209,9 +209,9 @@ records the feature in `review_features`, so a result is reused only under the s
 features. v5 also holds gap-tolerant segment records: when explicit alignments leave
 text outside every span (an edit invalidated one alignment of many), the aligned
 segments keep their results and only the gap becomes a segment that needs a manual
-split, instead of the whole manuscript. Web 0.4.5 and the Windows client pinned in
-`contracts/windows-ref.txt` reject v5 files with an explicit error and keep the
-manuscript they already have open.
+split, instead of the whole manuscript. Web 0.4.5 and Windows 0.6.6 reject v5 files
+with an explicit error and keep the manuscript they already have open. The Windows
+client pinned in `contracts/windows-ref.txt` reads and writes v5.
 
 ### Term groups
 

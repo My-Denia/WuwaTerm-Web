@@ -29,7 +29,10 @@ review is experimental and off unless `WUWATERM_SEMANTIC_REVIEW_ENABLED=1`, and
 `translation-context-v1` is always listed when a model is configured), which was raised from
 `7122ea7cb41e5987aac80b23fc27bd071fcfa22b`
 (Core PR #198, the contracts) by Web PR #16.
-`contracts/windows-ref.txt` is `a45dbf2cb000721be71d009d84413e9bc5783f74`
+`contracts/windows-ref.txt` is `b50abddb3ef0063fded33c1a4aff38e79d148d50`
+(WuwaTerm-Windows PR #53, on `main` after the 0.6.6 release: `wuwaterm-manuscript-v5` with
+`ambiguous-mention-v1` and `segmentation-v1-gaps`), raised from
+`a45dbf2cb000721be71d009d84413e9bc5783f74`
 (WuwaTerm-Windows PR #43, 3-pass duplicate-segment attribution, raised from
 `eaceb8bbe847f4db14f227dea274261fa2dc5784`, WuwaTerm-Windows PR #30, the 0.6.0 release that reads
 and writes `wuwaterm-manuscript-v4`; raised from `e8880eb27b6117ff30d3bf134022303fe5f1a441`, PR #20,
@@ -41,11 +44,17 @@ directions: the Unicode v1 case, every valid `contracts/manuscript-v2/`,
 written back to its canonical bytes, every invalid fixture is rejected by both with its
 code, the explicit-alignments fixture gets the same alignment input digests, and a long
 manuscript with choices, a target-only edit and progress, built by each client's own
-runtime, gives the same v3 bytes and is kept unchanged by the other. The v4 cases carry no
-transitional expectation: the pinned consumer reads, writes and rejects the same files as
-the Web, in both directions. The pinned consumer predates `contracts/manuscript-v5/`: it
-refuses every v5 file with the code Web 0.4.5 gives (`legacy_error`), and reads and writes
-the lower-format files a v5 writer writes back exactly as the Web does.
+runtime, gives the same v3 bytes and is kept unchanged by the other. Every
+`contracts/manuscript-v5/` case is handled alike too: the same parse and canonical bytes
+for a valid file, including those written back in a lower format, and the same code for an
+invalid one. Long manuscripts built by each client's own runtime give the same v5 bytes
+with all three v5 additions, with gap-tolerant records alone and with a recorded review
+feature alone; the same steps without them give the same v3 or v4 bytes. In each of those
+cases each client keeps the other's file unchanged and derives
+the same reuse state for every record. The v4 and v5 cases carry no transitional
+expectation: the pinned consumer reads, writes and rejects the same files as the Web, in
+both directions. Rejection by older readers is asserted against the frozen Web 0.4.5
+reader and the v4 schema (`tests/manuscript-v5.test.mjs`).
 
 The structure-check and ambiguous-mention contracts also run against the live Core: a
 review sent with `ambiguous-mention-v1` returns the unsettled name last and unjudged, an
@@ -78,8 +87,8 @@ only while the paired versions remain compatible. Do not assume these two cases
 have the same deployment order.
 
 Keep the `/v1` API path, report `rule_version`, dictionary `schema_version`,
-opt-in `matcher_revision` hash and the `wuwaterm-manuscript-v1`, `-v2`, `-v3` and
-`-v4` formats distinct.
+opt-in `matcher_revision` hash and the `wuwaterm-manuscript-v1`, `-v2`, `-v3`,
+`-v4` and `-v5` formats distinct.
 The matcher hash is requested with `X-WuwaTerm-Matcher-Basis: 1`; it is not
 a report field named `matcher_basis`. Their actual validators and fixtures are the
 contracts. A document-mode import (v1 choices and history, v2 semantic data) is not
@@ -89,8 +98,8 @@ where the current basis comes from a live review-v2 request
 ([contract](../contracts/manuscript-v3/SPEC.md)).
 
 Web 0.2.0 and Windows 0.4.2 reject v3 files; Web 0.3.1 and Windows 0.5.1 reject v4
-files. Cross-client v3 and v4 interchange is verified against the Windows client pinned
-in `contracts/windows-ref.txt`.
+files; Web 0.4.5 and Windows 0.6.6 reject v5 files. Cross-client v3, v4 and v5
+interchange is verified against the Windows client pinned in `contracts/windows-ref.txt`.
 
 ## Deployment receipt
 
