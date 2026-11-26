@@ -172,9 +172,9 @@ the findings of one answer and the resolutions of one request to 128, and
 sends both on every review-v2 request, and only there. The BFF forwards the
 header only when the client sent it (an unknown or repeated token, or a token on a
 review-v1 request, is `site_invalid_request`), accepts up to 64 KiB for
-`/api/reviews` (32 KiB everywhere else) and keeps 32 findings, 32 resolutions and
-seven keys for a client that did not ask. A service that does not know the
-features answers in the old shape, which is still read.
+`/api/reviews` and `/api/structure-checks` (32 KiB everywhere else) and keeps 32
+findings, 32 resolutions and seven keys for a client that did not ask. A service
+that does not know the features answers in the old shape, which is still read.
 
 A manuscript that holds more than that, or a reason, is written as
 `wuwaterm-manuscript-v4` ([specification](../contracts/manuscript-v4/SPEC.md)); one
@@ -316,7 +316,8 @@ selects one occurrence and previews its replacement before confirming. This
 changes only that occurrence; adopting an official pair and requesting another
 service check remain separate actions. Choices and historical reports are kept,
 the report becomes stale, and explicit non-overlapping alignment ranges are remapped
-in place (only a range that the edit crosses is invalidated).
+in place (only ranges that the edit crosses, or that grow past the 2,000-scalar
+span limit, are invalidated).
 
 File reports are untrusted historical records, regardless of hashes or verdicts.
 The first explicit check after import obtains fresh authoritative candidates.
@@ -327,7 +328,8 @@ changed, deleted or duplicate blocks cannot be guessed into new positions.
 Direction, dictionary/rule basis or correspondence changes require confirmation.
 Free-form text edits make reports stale. Explicit correspondences outside an edit
 are kept or shifted and one that holds the edit is resized; only those the edit
-crosses, or whose source it empties, are invalidated. An emptied target becomes
+crosses, whose source it empties, or that grow past the 2,000-scalar span limit,
+are invalidated. An emptied target becomes
 untranslated and keeps its source range. A direction change clears every explicit
 correspondence. Undo restores them.
 Partial candidate/source display does not prevent reusing a visible specific
