@@ -217,14 +217,14 @@ build:
 ```sh
 sha=$(git rev-parse origin/main)
 gh workflow run selfhost-release-build.yml --ref main \
-  -f source_sha="$sha" -f tag=v0.5.0 -f base_path=
+  -f source_sha="$sha" -f tag=v0.5.1 -f base_path=
 gh workflow run selfhost-release-build.yml --ref main \
-  -f source_sha="$sha" -f tag=v0.5.0 -f base_path=/private
+  -f source_sha="$sha" -f tag=v0.5.1 -f base_path=/private
 ```
 
 Dispatch both while `main` is still at that commit: the provenance job requires
 `source_sha` to equal the run's own `main` SHA and a successful main-push Web CI run for
-it. `tag` must be `v` plus the `version` in `package.json` (`v0.5.0` for this release).
+it. `tag` must be `v` plus the `version` in `package.json` (`v0.5.1` for this release).
 When both runs finish, note each run id, run attempt and artifact id:
 
 ```sh
@@ -238,7 +238,7 @@ creates nothing; it also reports whether the tag already points at the source:
 
 ```sh
 gh workflow run selfhost-release-publish.yml --ref main \
-  -f mode=validate -f source_sha="$sha" -f tag=v0.5.0 \
+  -f mode=validate -f source_sha="$sha" -f tag=v0.5.1 \
   -f root_run_id=<root run id> -f root_attempt=<root attempt> \
   -f root_artifact_id=<root artifact id> \
   -f prefix_run_id=<prefix run id> -f prefix_attempt=<prefix attempt> \
@@ -248,8 +248,8 @@ gh workflow run selfhost-release-publish.yml --ref main \
 Create the tag at that exact commit, as for earlier releases:
 
 ```sh
-git tag v0.5.0 "$sha"
-git push origin v0.5.0
+git tag v0.5.1 "$sha"
+git push origin v0.5.1
 ```
 
 Run the same dispatch again with `mode=publish` and identical values. Publication creates
