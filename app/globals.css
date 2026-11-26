@@ -408,22 +408,32 @@ footer div { display:flex; gap:20px; }
 .term-lookup .term-result dl { gap:14px; flex-wrap:wrap; }
 
 .workspace-side { display:grid; gap:12px; min-width:0; align-content:start; }
-.my-terms { min-width:0; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
-.document-workspace[data-mode="manuscript"] .my-terms { padding:6px 14px; }
-.my-terms .lookup-heading h2 { margin:0; font-size:15px; font-weight:650; }
+.my-terms,.my-memory { min-width:0; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
+.document-workspace[data-mode="manuscript"] .my-terms,.document-workspace[data-mode="manuscript"] .my-memory { padding:6px 14px; }
+.my-terms .lookup-heading h2,.my-memory .lookup-heading h2 { margin:0; font-size:15px; font-weight:650; }
 .my-terms-counts { margin:4px 0 0; color:var(--muted); font-size:12px; }
-.my-terms[data-open="true"] .my-terms-counts { margin-bottom:6px; }
-.my-terms h3 { margin:18px 0 6px; font-size:13px; font-weight:650; }
+.my-terms[data-open="true"] .my-terms-counts,.my-memory[data-open="true"] .my-terms-counts { margin-bottom:6px; }
+.my-terms h3,.my-memory h3 { margin:18px 0 6px; font-size:13px; font-weight:650; }
 .my-terms-note { display:block; margin:6px 0 0; font-size:11px; }
 .my-terms-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
 .my-terms-confirm { margin-top:12px; padding:10px 12px; border:1px solid var(--warn-line); border-radius:8px; background:var(--warn-bg); color:var(--warn-text); font-size:12px; line-height:1.7; }
 .my-terms-confirm p { margin:0; }
 .my-terms-feedback { margin:12px 0 0; font-size:12px; line-height:1.7; overflow-wrap:anywhere; }
 .my-terms-error { padding:10px 12px; border:1px solid var(--warn-line); border-radius:8px; background:var(--warn-bg); color:var(--warn-text); }
-.my-terms-hit,.my-terms-list li { padding:10px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.my-terms-hit,.my-memory-hit,.my-terms-list li { padding:10px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
 .my-terms-list { margin:0; padding:0; list-style:none; }
 .my-terms .term-pair strong { font-size:15px; }
 .my-terms .term-pair span { font-size:14px; }
+.my-memory .term-pair { display:grid; gap:4px; overflow-wrap:anywhere; }
+.my-memory .term-pair strong { font-size:14px; line-height:1.5; }
+.my-memory .term-pair span { color:var(--muted); font-size:12px; text-align:left; line-height:1.5; }
+.my-memory-badges { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+.my-memory-kind-badge { margin-bottom:0; }
+.my-memory-kind-badge[data-kind="context_exact"],.my-memory-kind-badge[data-kind="exact"] { background:var(--ok-bg); border-color:var(--ok-line); color:var(--ok-text); }
+.my-memory-kind-badge[data-kind="numeric_variant"] { background:var(--caution-bg); border-color:var(--caution-line); color:var(--caution-text); }
+.my-memory-stale-badge { display:inline-flex; align-items:center; max-width:100%; padding:2px 8px; border:1px solid var(--warn-line); border-radius:8px; background:var(--warn-bg); color:var(--warn-text); font-size:11px; line-height:1.5; }
+.my-memory-recheck-hint { margin:4px 0 0; color:var(--warn-text); font-size:11px; line-height:1.6; }
+.my-memory-confirm-btn { width:100%; }
 .my-terms-meta { margin:4px 0 0; color:var(--muted); font-size:11px; line-height:1.7; }
 .my-terms-badge { display:block; width:fit-content; max-width:100%; margin-bottom:4px; padding:2px 8px; border:1px solid var(--line-strong); border-radius:8px; color:var(--text); font-size:11px; line-height:1.5; }
 .my-terms-form { margin-top:6px; }
@@ -484,7 +494,7 @@ footer div { display:flex; gap:20px; }
   .mode-switch button { flex:1 1 0; padding-inline:8px; }
   .runtime-status { gap:2px 12px; margin-top:12px; padding:6px 8px 6px 12px; }
   .status-details { margin-left:0; }
-  .manuscript-editor-pane,.manuscript-review-pane,.term-lookup,.my-terms { padding:14px; }
+  .manuscript-editor-pane,.manuscript-review-pane,.term-lookup,.my-terms,.my-memory { padding:14px; }
   .runtime-drawer { padding:16px; }
   /* Editors come first in DOM and visual order on every viewport; keep phone quick-mode boxes compact so source + translate fit within 844px. */
   .document-workspace[data-mode="quick"] .editor-pane textarea,.document-workspace[data-mode="quick"] .editor-pane .markdown-preview { min-height:112px; height:120px; }

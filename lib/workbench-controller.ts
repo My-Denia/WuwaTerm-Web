@@ -717,8 +717,9 @@ export class WorkbenchController {
    * the text before the composition; the next edit of that side without `composing` (the composition end, even with the same
    * text) closes it.
    */
-  editText(side: 'source' | 'target', value: string, options: { composing?: boolean } = {}): void {
+  editText(side: 'source' | 'target', value: string, options: { composing?: boolean; coalesce?: boolean } = {}): void {
     const composing = options.composing === true;
+    const allowCoalesce = options.coalesce !== false;
     if (this.composition && this.composition.side !== side) this.composition = null;
     const open = this.composition;
     if (open && !composing && value === this.state.draft[side]) {
@@ -745,7 +746,7 @@ export class WorkbenchController {
     const deltaLen = splice ? Math.max(splice.oldEnd - splice.start, splice.newEnd - splice.start) : 0;
     const top = this.state.history.at(-1);
     const typing = this.activeTypingTx;
-    const canCoalesce = !open && !composing && !touched
+    const canCoalesce = allowCoalesce && !open && !composing && !touched
       && typing !== null
       && typing.side === side
       && now - typing.at <= TYPING_COALESCE_MS
@@ -761,7 +762,7 @@ export class WorkbenchController {
       serial = pushed.serial;
     }
     this.future = [];
-    this.activeTypingTx = !composing && !open && !touched && deltaLen <= 1 ? { side, at: now, serial } : null;
+    this.activeTypingTx = allowCoalesce && !composing && !open && !touched && deltaLen <= 1 ? { side, at: now, serial } : null;
     this.docAbort?.abort();
     this.docAbort = null;
     this.docGeneration += 1;

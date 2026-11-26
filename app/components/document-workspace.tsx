@@ -24,11 +24,13 @@ import {
   findMatchingTermbaseEntry, inferDirection, promoteTermbaseEntry,
   type TermbaseDirection, type TermbaseEntry, type TermbaseKind,
 } from '../../lib/termbase';
+import type { TmEntry } from '../../lib/translation-memory';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
 import type { Candidate, Choice, Draft, Finding, PairView, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
 import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
+import { MyMemory } from './my-memory';
 import { MyTerms, type TermbaseDraftSeed, type TermbaseExternalFeedback } from './my-terms';
 import { QuickTermLookup } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
@@ -124,6 +126,8 @@ export function DocumentWorkspace() {
   const [termbaseDraftSeed, setTermbaseDraftSeed] = useState<TermbaseDraftSeed | null>(null);
   const [termbaseFeedback, setTermbaseFeedback] = useState<TermbaseExternalFeedback | null>(null);
   const termbaseSeq = useRef(0);
+  const [tmEntries, setTmEntries] = useState<TmEntry[]>([]);
+  const [tmOpen, setTmOpen] = useState(false);
   const [revision, setRevision] = useState<RevisionIntent | null>(null);
   const revisionRef = useRef<RevisionIntent | null>(null);
   const revisionDialog = useRef<HTMLDialogElement>(null);
@@ -319,6 +323,11 @@ export function DocumentWorkspace() {
     else if (outcome.error === 'list_too_large') emitTermbaseFeedback('error', m.termbase.errors.listTooLarge);
     else if (outcome.error === 'field_too_long') emitTermbaseFeedback('error', fill(m.termbase.errors.fieldTooLong, { field: fieldName, max: outcome.max ?? 0 }));
     else emitTermbaseFeedback('error', fill(m.termbase.errors.fieldInvalid, { field: fieldName }));
+  }
+
+  function applyMemorySuggestion(nextTarget: string) {
+    doc.editText('target', nextTarget, { coalesce: false });
+    targetEditor.current?.focus();
   }
 
   function promoteSelectionToTermbase() {
@@ -869,6 +878,17 @@ export function DocumentWorkspace() {
           onOpenChange={setTermbaseOpen}
           draftSeed={termbaseDraftSeed}
           externalFeedback={termbaseFeedback}
+        />
+        <MyMemory
+          source={source}
+          target={target}
+          direction={effectiveTermbaseDirection}
+          currentTermsDbRevision={latest?.trusted ? latest.report.dictionary.revision : null}
+          entries={tmEntries}
+          setEntries={setTmEntries}
+          onApplySuggestion={applyMemorySuggestion}
+          open={tmOpen}
+          onOpenChange={setTmOpen}
         />
       </div>
     </div>
