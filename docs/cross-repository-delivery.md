@@ -107,9 +107,6 @@ Web 0.2.0 and Windows 0.4.2 reject v3 files; Web 0.3.1 and Windows 0.5.1 reject 
 files; Web 0.4.5 and Windows 0.6.6 reject v5 files. Cross-client v3, v4 and v5
 interchange is verified against the Windows client pinned in `contracts/windows-ref.txt`.
 
-Web `0.5.0` is prepared with these two pins. The version bump publishes no self-host release
-and does not update the public Site; each is a separate step.
-
 ## Deployment receipt
 
 Reuse the existing Site source-blob receipt and backend deployment manifest.
