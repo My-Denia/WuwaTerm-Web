@@ -446,7 +446,7 @@ export function SemanticWorkbench(props: Props) {
         <label htmlFor={`revise-${occ.key}`}>{fill(s.reviseLabel, { n: occ.segmentNumber })}</label>
         <textarea id={`revise-${occ.key}`} rows={Math.min(14, Math.max(4, Math.ceil(chars(editing.text).length / 60)))} value={editing.text} onChange={e => setRevising({ ...editing, text: e.target.value })} />
         <div className="actions">
-          <button type="button" disabled={!editing.text.trim() || editing.text === editing.base} onClick={applyRevise}>{s.reviseApply}</button>
+          <button type="button" className="primary-button" disabled={!editing.text.trim() || editing.text === editing.base} onClick={applyRevise}>{s.reviseApply}</button>
           <button type="button" className="secondary-button" onClick={() => setRevising(null)}>{s.reviseCancel}</button>
         </div>
       </div>}
@@ -635,7 +635,7 @@ export function SemanticWorkbench(props: Props) {
           {poolData ? ` ${fill(s.estimateRemaining, { n: poolData.translations.remaining.toLocaleString(locale), chars: poolData.characters.remaining.toLocaleString(locale) })}` : ''}
           {poolData && (poolData.translations.remaining < pendingViews.length || poolData.characters.remaining < estimateChars) ? ` ${s.estimateShort}` : ''}</p>}
         <div className="actions">
-          <button type="button" disabled={runActive || pendingViews.length === 0 || translationClosed} onClick={() => startRun()}>{semantic.results.length ? s.startPending : s.start}</button>
+          <button type="button" className="primary-button" disabled={runActive || pendingViews.length === 0 || translationClosed} onClick={() => startRun()}>{semantic.results.length ? s.startPending : s.start}</button>
         </div>
       </>}
       {lastSemanticAction && doc.canUndoLast(lastSemanticAction.marker) && (() => {
@@ -795,13 +795,13 @@ function IssueCard({ s, m, row, source, target, view, rows, choice, setChoice, a
       <textarea id={`adjust-${placed.id}`} rows={3} value={editing.text} onChange={e => setAdjusting({ placedId: placed.id, text: e.target.value })} />
       <p className="review-excerpt">{s.adjustPreview}：<del>{range.text}</del> → <ins>{editing.text}</ins></p>
       <div className="actions">
-        <button type="button" disabled={!editing.text.trim() || editing.text === range.text} onClick={() => decide('adjusted', editing.text)}>{s.adjustApply}</button>
+        <button type="button" className="primary-button" disabled={!editing.text.trim() || editing.text === range.text} onClick={() => decide('adjusted', editing.text)}>{s.adjustApply}</button>
         <button type="button" className="secondary-button" onClick={() => setAdjusting(null)}>{s.adjustCancel}</button>
       </div>
     </div>}
     <div className="finding-actions semantic-actions">
       {!handled && <>
-        {!withheld && issue.suggestion && <button type="button" disabled={!suggestionLive || placed.stale} onClick={() => decide('accepted')}>{s.accept}</button>}
+        {!withheld && issue.suggestion && <button type="button" className="primary-button" disabled={!suggestionLive || placed.stale} onClick={() => decide('accepted')}>{s.accept}</button>}
         <button type="button" className="secondary-button" disabled={!range || placed.stale} onClick={() => setAdjusting({ placedId: placed.id, text: suggestionLive && !withheld ? replacement : range?.text ?? '' })}>{s.adjust}</button>
         <button type="button" className="secondary-button" onClick={() => decide('ignored')}>{s.ignore}</button>
       </>}

@@ -2,7 +2,7 @@
 /* Colour tokens: dark by default, light when the system asks for it. Every
    colour below this block reads a token, so both themes share one layout. */
 :root { color-scheme: dark; --bg:#0b1319; --surface:#111e26; --line:#2a3c45; --text:#edf3ef; --muted:#a1b4b8; --accent:#b1e8c6; --danger:#ffd0bc; --field-bg:#0c171d; --field-line:#3e535c; --placeholder:#80969c; --subtle:#8aa1a6; --text-strong:#d4e0de; --on-accent:#10251b; --accent-hover:#d5f5de; --line-strong:#4a6068; --raised:#13222b; --raised-hover:#182e38; --ok-bg:#173226; --ok-line:#275740; --ok-text:#9be0ba; --mark-bg:#2a4636; --warn-bg:#33281f; --warn-line:#67503b; --warn-text:#f2d1b2; --caution-bg:#352a1a; --caution-line:#5c4728; --caution-text:#f3cf8a; --caution-bg-2:#2b2a1f; --bad-bg:#3d1f1c; --bad-line:#6a342e; --bad-text:#fca595; --neutral-bg:#1d2b33; --neutral-line:#354751; --neutral-text:#9bb0b5; --backdrop:#0009; --shadow:#0008; --hover-overlay:rgba(255,255,255,0.08); }
-@media (prefers-color-scheme: light) { :root { color-scheme: light; --bg:#f4f7f6; --surface:#ffffff; --line:#d3dedb; --text:#14211d; --muted:#4f6267; --accent:#1c7148; --danger:#a3381f; --field-bg:#fbfcfc; --field-line:#b3c3bf; --placeholder:#74868a; --subtle:#62767a; --text-strong:#22302c; --on-accent:#ffffff; --accent-hover:#155c3a; --line-strong:#a4b5b1; --raised:#eef3f1; --raised-hover:#e1ebe7; --ok-bg:#e5f3ea; --ok-line:#a6d2b8; --ok-text:#1a6640; --mark-bg:#d2ecdb; --warn-bg:#fdf3e6; --warn-line:#e5c79c; --warn-text:#73440d; --caution-bg:#fcf4df; --caution-line:#e2cb8e; --caution-text:#7d5200; --caution-bg-2:#fbf5e4; --bad-bg:#fdebe8; --bad-line:#eeb6ac; --bad-text:#9c2c1b; --neutral-bg:#eef2f3; --neutral-line:#c6d1d4; --neutral-text:#4b5e64; --backdrop:#0006; --shadow:#0003; --hover-overlay:rgba(0,0,0,0.06); } }
+@media (prefers-color-scheme: light) { :root { color-scheme: light; --bg:#f4f7f6; --surface:#ffffff; --line:#d3dedb; --text:#14211d; --muted:#4f6267; --accent:#1c7148; --danger:#a3381f; --field-bg:#fbfcfc; --field-line:#b3c3bf; --placeholder:#74868a; --subtle:#5a6e72; --text-strong:#22302c; --on-accent:#ffffff; --accent-hover:#155c3a; --line-strong:#a4b5b1; --raised:#eef3f1; --raised-hover:#e1ebe7; --ok-bg:#e5f3ea; --ok-line:#a6d2b8; --ok-text:#1a6640; --mark-bg:#d2ecdb; --warn-bg:#fdf3e6; --warn-line:#e5c79c; --warn-text:#73440d; --caution-bg:#fcf4df; --caution-line:#e2cb8e; --caution-text:#7d5200; --caution-bg-2:#fbf5e4; --bad-bg:#fdebe8; --bad-line:#eeb6ac; --bad-text:#9c2c1b; --neutral-bg:#eef2f3; --neutral-line:#c6d1d4; --neutral-text:#4b5e64; --backdrop:#0006; --shadow:#0003; --hover-overlay:rgba(0,0,0,0.06); } }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif; }
 a { color:inherit; text-underline-offset:4px; }
@@ -50,8 +50,8 @@ select { padding:8px 10px; font-size:11px; }
 .input-wrap .clear-input, button.clear-input { position:absolute; right:4px; background:transparent; border:0; color:var(--placeholder); font-size:16px; width:40px; height:40px; min-height:40px; display:grid; place-items:center; border-radius:50%; padding:0; cursor:pointer; transition:color .15s, background .15s; }
 .input-wrap .clear-input:hover, button.clear-input:hover { color:var(--text); background:var(--hover-overlay); }
 .input-wrap .clear-input:focus-visible, button.clear-input:focus-visible { outline:2px solid var(--accent); }
-form button:not(.secondary-button):not(.clear-input):not(.text-button) { min-height:46px; border:0; border-radius:8px; padding:10px 20px; background:var(--accent); color:var(--on-accent); font-weight:700; font-size:13px; }
-form button:not(.secondary-button):not(.clear-input):not(.text-button):hover:not(:disabled) { background:var(--accent-hover); }
+form button:not(.secondary-button):not(.clear-input):not(.text-button),.primary-button { min-height:46px; border:0; border-radius:8px; padding:10px 20px; background:var(--accent); color:var(--on-accent); font-weight:700; font-size:13px; }
+form button:not(.secondary-button):not(.clear-input):not(.text-button):hover:not(:disabled),.primary-button:hover:not(:disabled) { background:var(--accent-hover); }
 .label-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:9px; gap:14px; }
 .label-row label { margin-bottom:0; }
 .field-hint { display:flex; justify-content:space-between; gap:12px; margin:9px 0 0; font-size:10px; color:var(--muted); line-height:1.7; }
@@ -142,7 +142,7 @@ footer div { display:flex; gap:20px; }
    right-aligned row. No target, label or touch size changes; above 1140px and
    at 540px and below the layout is what it already was. */
 @media(min-width:541px) and (max-width:1140px) { .topbar { flex-wrap:wrap; row-gap:10px; } .brand,.nav-links { flex:0 0 auto; } .brand strong,.brand small,.nav-links a,.lang-toggle button { white-space:nowrap; } .nav-links { flex-wrap:wrap; row-gap:8px; margin-left:auto; } }
-@media(max-width:540px) { .brand small { display:none; } .nav-links { gap:0; font-size:11px; margin-left:auto; } .nav-links > a { display:none; } .beta-badge { display:none; } .topbar { padding-block:14px; flex-wrap:wrap; } .section-pills { width:100%; order:3; justify-content:flex-start; margin-top:4px; } .nav-links { flex-wrap:wrap; } .workspace-card { padding:20px; } .input-row { grid-template-columns:minmax(0,1fr) auto; } form button:not(.secondary-button) { padding-inline:14px; } footer { flex-direction:column; gap:8px; } .limits-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; } .limits-table,.limits-table tbody,.limits-table tr,.limits-table td { display:block; width:100%; } .limits-table tr { padding:12px 0; border-bottom:1px solid var(--line); } .limits-table td { border:0; padding:2px 0; } .limits-table td:first-child { color:var(--text); font-size:14px; font-weight:600; } .limits-table td:last-child { color:var(--muted); font-size:13px; } .term-pair { flex-wrap:wrap; } .term-pair span { text-align:left; } .term-actions { gap:6px; } .chip-button { min-height:40px; padding:6px 12px; } }
+@media(max-width:540px) { .brand small { display:none; } .nav-links { gap:0; font-size:11px; margin-left:auto; } .nav-links > a { display:none; } .beta-badge { display:none; } .topbar { padding-block:14px; flex-wrap:wrap; } .section-pills { width:100%; order:3; justify-content:flex-start; margin-top:4px; } .nav-links { flex-wrap:wrap; } .workspace-card { padding:20px; } .input-row { grid-template-columns:minmax(0,1fr) auto; } form button:not(.secondary-button),.primary-button { padding-inline:14px; } footer { flex-direction:column; gap:8px; } .limits-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; } .limits-table,.limits-table tbody,.limits-table tr,.limits-table td { display:block; width:100%; } .limits-table tr { padding:12px 0; border-bottom:1px solid var(--line); } .limits-table td { border:0; padding:2px 0; } .limits-table td:first-child { color:var(--text); font-size:14px; font-weight:600; } .limits-table td:last-child { color:var(--muted); font-size:13px; } .term-pair { flex-wrap:wrap; } .term-pair span { text-align:left; } .term-actions { gap:6px; } .chip-button { min-height:40px; padding:6px 12px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
 
 /* Manuscript controls extend the existing workbench surface. */
@@ -234,8 +234,9 @@ footer div { display:flex; gap:20px; }
 .segment-chip[data-current="true"] { outline:2px solid var(--accent); outline-offset:1px; }
 .segment-chip .text-button[aria-pressed="true"] { color:var(--accent); }
 .segment-hint { flex:1 1 100%; margin:0; color:var(--muted); font-size:12px; line-height:1.6; }
-.inline-check { display:flex; gap:8px; align-items:flex-start; font-size:13px; line-height:1.6; margin:6px 0; }
-.inline-check input { width:auto; flex:none; margin-top:4px; accent-color:var(--accent); }
+.inline-check { display:flex; gap:8px; align-items:center; min-height:32px; font-size:13px; line-height:1.6; margin:6px 0; }
+/* The 48px text-field box from the input rule must not apply to a checkbox; the label stays the large hit target. */
+.inline-check input[type="checkbox"] { width:auto; height:auto; min-height:auto; flex:none; margin:0; padding:0; accent-color:var(--accent); }
 .semantic-body { display:grid; grid-template-columns:minmax(220px,320px) minmax(0,1fr); gap:18px; margin-top:12px; align-items:start; }
 .semantic-list { min-width:0; }
 .semantic-filters { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; }
@@ -291,7 +292,9 @@ footer div { display:flex; gap:20px; }
   .semantic-list.open { max-height:70dvh; overflow-y:auto; }
   .semantic-list:not(.open) .semantic-filters,.semantic-list:not(.open) .semantic-items,.semantic-list:not(.open) > p,.semantic-list:not(.open) .low-confidence-toggle { display:none; }
   .drawer-toggle { display:block; width:100%; }
-  .semantic-items { max-height:none; }
+  /* Room for the 6px keyboard focus outline: below the toggle, between rows, and unclipped (the drawer itself scrolls). */
+  .semantic-list.open .drawer-toggle { margin-bottom:10px; }
+  .semantic-items { max-height:none; overflow:visible; gap:8px; }
   .document-workspace[data-mode="manuscript"] { padding-bottom:72px; }
 }
 .split-lines { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px; color:var(--muted); margin:8px 0; }
