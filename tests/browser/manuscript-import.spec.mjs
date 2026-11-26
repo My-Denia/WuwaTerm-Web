@@ -268,8 +268,8 @@ test('B invalid/unreadable/oversize supersedes pending A; current manuscript ret
 
   // 3. B oversized (>1 MiB). manuscript-v3 SPEC "Limits" and "Reading" steps 1-2: the file gate is now 44 MiB, so a
   // 1 MiB + 10 file is read, and the parser rejects it: a non-v3 input over 1 MiB is workfile_too_large, with the
-  // SPEC "Error codes" message and the note that the open manuscript was kept.
-  const tooLarge = '稿件文件超过大小上限（v1/v2 为 1 MiB，v3 为 44 MiB）；当前稿件未被替换。请把稿件拆成较小的几份。';
+  // SPEC "Error codes" message extended with the v4 and v5 sizes and the note that the open manuscript was kept.
+  const tooLarge = '稿件文件超过大小上限（v1/v2 为 1 MiB，v3、v4、v5 为 44 MiB）；当前稿件未被替换。请把稿件拆成较小的几份。';
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-a3.json', mimeType: 'application/json', buffer: Buffer.from(savedManuscript(A)),
   });

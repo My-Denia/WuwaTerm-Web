@@ -191,7 +191,7 @@ test('language preference persists across reload with matching SSR markup and no
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.getByRole('heading', { level: 1 })).toContainText('准确抵达');
-  expect(problems.filter(item => !item.includes('favicon'))).toHaveLength(0);
+  expect(problems).toEqual([]);
 });
 
 test('document pages follow the language preference and disclose the cookie in English', async ({ page }) => {
