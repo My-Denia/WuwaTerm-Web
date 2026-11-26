@@ -489,7 +489,7 @@ export function DocumentWorkspace() {
         {revisionPreview?.error && <p role="alert">{(m.review as Record<string, unknown>)[revisionPreview.error] as string}</p>}
         <div className="actions">
           <button type="button" className="secondary-button" onClick={() => cancelRevision()}>{m.review.revisionCancel}</button>
-          <button type="button" disabled={!revisionPreview || !!revisionPreview.error} onClick={confirmRevision}>{m.review.revisionConfirm}</button>
+          <button type="button" className="primary-button" disabled={!revisionPreview || !!revisionPreview.error} onClick={confirmRevision}>{m.review.revisionConfirm}</button>
         </div>
       </>}
     </dialog>
@@ -502,7 +502,7 @@ export function DocumentWorkspace() {
       {error && <p role="alert">{errorTextValue}</p>}
       {error?.saveConflict && <div className="actions save-conflict-actions"><button type="button" className="secondary-button" onClick={resolveConflictsAndSave}>{m.review.resolveConflictsAndSave}</button><button type="button" className="secondary-button" onClick={exportProseTxt}>{m.review.exportProseTxt}</button></div>}
       <div className="actions">
-        <button ref={stayLeaveButton} type="button" onClick={() => setPendingLeaveUrl(null)}>{m.review.leaveStay}</button>
+        <button ref={stayLeaveButton} type="button" className="primary-button" onClick={() => setPendingLeaveUrl(null)}>{m.review.leaveStay}</button>
         <button type="button" className="secondary-button" onClick={save}>{m.review.leaveSaveStay}</button>
         <button type="button" className="secondary-button" onClick={() => { const url = pendingLeaveUrl; if (!url) { setPendingLeaveUrl(null); return; } leaveBypass.current = true; window.location.assign(url); }}>{m.review.leaveAnyway}</button>
       </div>
