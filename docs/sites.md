@@ -104,9 +104,9 @@ list is over 32 items or a finding carries a `reason` (below), or
 `wuwaterm-manuscript-v5` once it records results made with a review feature or
 gap-tolerant segment records (below). It reads all five.
 It contains source, target, direction, up to 32 occurrence-specific decisions (128
-in v4), their dictionary/rule/candidate basis, explicit scalar correspondences and
-the last two reports. Import is local and bounded to 1 MiB (44 MiB for v3 and v4);
-it never sends a request.
+in v4 and v5), their dictionary/rule/candidate basis, explicit scalar correspondences and
+the last two reports. Import is local and bounded to 1 MiB (44 MiB for v3, v4 and
+v5); it never sends a request.
 Undoing an import restores the prior manuscript and its historical reports; it still requires an explicit fresh check.
 There are no accounts, cloud manuscripts, automatic uploads or browser-storage
 history. The user must download and later import the file to resume. The page
@@ -172,9 +172,9 @@ the findings of one answer and the resolutions of one request to 128, and
 sends both on every review-v2 request, and only there. The BFF forwards the
 header only when the client sent it (an unknown or repeated token, or a token on a
 review-v1 request, is `site_invalid_request`), accepts up to 64 KiB for
-`/api/reviews` (32 KiB everywhere else) and keeps 32 findings, 32 resolutions and
-seven keys for a client that did not ask. A service that does not know the
-features answers in the old shape, which is still read.
+`/api/reviews` and `/api/structure-checks` (32 KiB everywhere else) and keeps 32
+findings, 32 resolutions and seven keys for a client that did not ask. A service
+that does not know the features answers in the old shape, which is still read.
 
 A manuscript that holds more than that, or a reason, is written as
 `wuwaterm-manuscript-v4` ([specification](../contracts/manuscript-v4/SPEC.md)); one
@@ -295,20 +295,20 @@ file immediately supersedes any prior pending file read regardless of completion
 If the latest file fails (oversize, unreadable, or invalid format), current manuscript work
 is retained and that latest error is shown; obsolete earlier files never become a hidden
 fallback. Starting an import read does not freeze editing or stop a running review. Newer
-edits, choice/alignment changes, clears, undos, accepted handoffs, or newly initiated checks
+edits, choice/alignment changes, clears, undos, accepted replacements, or newly initiated checks
 invalidate the pending read to preserve newer intent. If an existing check finishes while a
 file is reading, an accepted import captures that newly arrived report into its acceptance-time
 undo snapshot. The file picker input resets synchronously upon selection so selecting the
 same file again triggers immediate processing without interference from prior completions.
 
-Sending a translation to review accepts an empty workbench directly. Sending
-the same source, translation and direction again preserves choices, ranges,
-reports, undo history and any running check. A different manuscript asks for
-confirmation, defaulting to keeping the current work. Cancelling leaves the
-current check running; confirming preserves a snapshot before replacing the
-draft and stopping the old check. Undo restores the prior work and historical
-reports, but a new explicit check is still required. Handoff and undo do not
-send review requests automatically.
+Importing a text file or a manuscript file, or moving the term lookup query into
+the source, replaces the document. The page asks first when the current work
+cannot be restored from the manuscript imported in this visit (a matching
+download still asks, because the page cannot confirm the file reached disk), and
+the dialog defaults to keeping the current work. Keeping it leaves a running check
+alive; confirming the replacement saves a snapshot and stops the old check. Undo
+restores the prior work and historical reports, but a new explicit check is still
+required. Replacement and undo do not send review requests.
 
 When a fresh check cannot locate a target term, a visible candidate can open a
 local revision dialog. The user enters an exact translation fragment, explicitly
@@ -316,7 +316,8 @@ selects one occurrence and previews its replacement before confirming. This
 changes only that occurrence; adopting an official pair and requesting another
 service check remain separate actions. Choices and historical reports are kept,
 the report becomes stale, and explicit non-overlapping alignment ranges are remapped
-in place (failing closed only when an edit crosses an aligned boundary).
+in place (only ranges that the edit crosses, or that grow past the 2,000-scalar
+span limit, are invalidated).
 
 File reports are untrusted historical records, regardless of hashes or verdicts.
 The first explicit check after import obtains fresh authoritative candidates.
@@ -325,7 +326,12 @@ an imported `not_a_term` decision always needs user confirmation. A source edit
 can recover an occurrence only within an identical, unique whole source block;
 changed, deleted or duplicate blocks cannot be guessed into new positions.
 Direction, dictionary/rule basis or correspondence changes require confirmation.
-Free-form text edits invalidate reports and clear previously explicit correspondences.
+Free-form text edits make reports stale. Explicit correspondences outside an edit
+are kept or shifted and one that holds the edit is resized; only those the edit
+crosses, whose source it empties, or that grow past the 2,000-scalar span limit,
+are invalidated. An emptied target becomes
+untranslated and keeps its source range. A direction change clears every explicit
+correspondence. Undo restores them.
 Partial candidate/source display does not prevent reusing a visible specific
 candidate whose complete identity and fresh basis match. The next request still
 validates that identity against the server's full snapshot; globally truncated
@@ -428,7 +434,7 @@ sends no translation, review or meta request. Browser tests check that the
 language choice is the only cookie and that exercised workbench state is not
 written to browser storage. The client-secret scan checks emitted artifacts.
 
-Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`, `-v2`, `-v3` or `-v4`,
+Downloads remain local: the manuscript JSON (`wuwaterm-manuscript-v1`, `-v2`, `-v3`, `-v4` or `-v5`,
 the lowest that holds the work), the result JSON (`wuwaterm-result-v2`), the translation TXT, and a readable
 Markdown snapshot of the full report (`wuwaterm-report.md`). The Markdown is
 generated from the current workbench state without requests and without
@@ -462,7 +468,7 @@ another admission. This is not a time-based deletion promise.
 | Translation | 30 admissions and 12,000 raw Unicode characters / UTC day |
 | Optional meta | 60 admissions / UTC day |
 | Review | 60 admissions / UTC day; does not increment translation or character counters |
-| Inputs | query <=200 trimmed Unicode characters; translation <=2,000 raw characters; review source and target each <=2,000 raw characters; streamed body <=32,768 bytes |
+| Inputs | query <=200 trimmed Unicode characters; translation <=2,000 raw characters; review source and target each <=2,000 raw characters; streamed body <=32,768 bytes (65,536 for reviews and structure checks) |
 
 Terms, translations and reviews have independent daily counters. Disabling translation,
 exhausting its count or character pool, or VPS model unavailability does not
