@@ -355,6 +355,50 @@ test('context_exact requires request context and exact two-sided neighbour match
     })[0].matchKind,
     'exact',
   );
+
+  // Neighbour exceeding 2,000 scalars cannot be hashed/certified and is capped at exact.
+  const overNeighbour = '邻'.repeat(2001);
+  assert.equal(
+    matchTranslationMemory(
+      [
+        makeEntry({
+          source_text: '超长邻段测试',
+          target_text: 'Overlong neighbour match',
+          prev_source_hash: sourceHash(overNeighbour),
+          next_source_hash: sourceHash(next),
+          terms_db_revision: 'r14',
+        }),
+        makeEntry({
+          source_text: '首段超长邻段',
+          target_text: 'Leading with overlong prev',
+          prev_source_hash: null,
+          next_source_hash: sourceHash(next),
+          terms_db_revision: 'r14',
+        }),
+      ],
+      '超长邻段测试',
+      'en',
+      { prevSource: overNeighbour, nextSource: next, currentTermsDbRevision: 'r14' },
+    )[0].matchKind,
+    'exact',
+  );
+  assert.equal(
+    matchTranslationMemory(
+      [
+        makeEntry({
+          source_text: '首段超长邻段',
+          target_text: 'Leading with overlong prev',
+          prev_source_hash: null,
+          next_source_hash: sourceHash(next),
+          terms_db_revision: 'r14',
+        }),
+      ],
+      '首段超长邻段',
+      'en',
+      { prevSource: overNeighbour, nextSource: next, currentTermsDbRevision: 'r14' },
+    )[0].matchKind,
+    'exact',
+  );
 });
 
 test('three-state freshness classifies verified_fresh, known_stale, and provenance_unknown consistently with Windows', () => {

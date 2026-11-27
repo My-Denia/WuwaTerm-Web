@@ -660,8 +660,14 @@ const RANK: Record<TmMatchKind, number> = {
   [TM_MATCH_NORMALIZED_EXACT]: 3,
 };
 
-function exactKind(entry: TmEntry, prevHash: string | null, nextHash: string | null): TmMatchKind {
-  return (prevHash !== null || nextHash !== null) &&
+function exactKind(
+  entry: TmEntry,
+  prevHash: string | null,
+  nextHash: string | null,
+  allowContextExact: boolean,
+): TmMatchKind {
+  return allowContextExact &&
+    (prevHash !== null || nextHash !== null) &&
     entry.prev_source_hash === prevHash &&
     entry.next_source_hash === nextHash
     ? TM_MATCH_CONTEXT_EXACT
@@ -735,8 +741,11 @@ export function matchTranslationMemory(
   }
   const rawLimit = options.limit ?? 5;
   const limit = Math.max(1, Math.min(MAX_LOOKUP_LIMIT, Math.trunc(rawLimit)));
-  const prevHash = contextHash(options.prevSource);
-  const nextHash = contextHash(options.nextSource);
+  const neighbourTooLong = (value: string | null | undefined): boolean =>
+    typeof value === 'string' && value.trim().length > 0 && scalarLength(value) > TM_LIMITS.source.max;
+  const allowContextExact = !neighbourTooLong(options.prevSource) && !neighbourTooLong(options.nextSource);
+  const prevHash = allowContextExact ? contextHash(options.prevSource) : null;
+  const nextHash = allowContextExact ? contextHash(options.nextSource) : null;
   const currentTerms = options.currentTermsDbRevision ?? null;
   const currentGame = options.currentGameVersion ?? null;
   const masked = numericMask(source);
@@ -747,7 +756,7 @@ export function matchTranslationMemory(
     if (entry.direction !== direction) continue;
     let kind: TmMatchKind | null = null;
     if (entry.source_text === source) {
-      kind = exactKind(entry, prevHash, nextHash);
+      kind = exactKind(entry, prevHash, nextHash, allowContextExact);
     } else if (normalizeSource(entry.source_text) === norm) {
       kind = TM_MATCH_NORMALIZED_EXACT;
     } else if (numericMask(entry.source_text) === masked) {
