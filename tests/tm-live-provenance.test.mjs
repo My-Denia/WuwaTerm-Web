@@ -28,6 +28,7 @@ import {
   META_FRESH_TTL_MS,
   RuntimeStore,
 } from '../lib/runtime-store.ts';
+import { CAPABILITY_DICTIONARY_IDENTITY } from '../lib/semantic-review.js';
 
 const REVISION = 'a'.repeat(64);
 const STAMP = '2026-11-27T00:00:00Z';
@@ -426,4 +427,113 @@ test('RuntimeStore.loadDictionary checks capabilities first, caches for 10m TTL,
     currentTermsDbRevision: null,
     currentGameVersion: null,
   });
+});
+
+test('Finding #3: transient /api/capabilities 503 enters retryable error instead of permanent unsupported', async () => {
+  let clock = NOW;
+  let capStatus = 503;
+  let capCalls = 0;
+  let dictCalls = 0;
+  const store = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async path => {
+      if (path === '/api/capabilities') {
+        capCalls += 1;
+        if (capStatus !== 200) return new Response(null, { status: capStatus });
+        return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-ok' }), { status: 200 });
+      }
+      if (path === '/api/dictionary') {
+        dictCalls += 1;
+        return new Response(JSON.stringify(DICT), { status: 200 });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  // First call fails with 503 -> error (NOT unsupported!), /api/dictionary untouched.
+  await store.loadDictionary();
+  assert.equal(capCalls, 1);
+  assert.equal(dictCalls, 0);
+  assert.deepEqual(store.getSnapshot().dictionary, { kind: 'error', lastKnown: null, failedAt: NOW });
+
+  // Inside 30s cooldown: non-forced call respects cooldown.
+  clock += DICTIONARY_ERROR_RETRY_COOLDOWN_MS - 1;
+  await store.loadDictionary();
+  assert.equal(capCalls, 1);
+
+  // Service recovers; after 30s cooldown, non-forced loadDictionary retries capabilities and succeeds!
+  capStatus = 200;
+  clock += 1;
+  await store.loadDictionary();
+  assert.equal(capCalls, 2);
+  assert.equal(dictCalls, 1);
+  assert.deepEqual(store.getSnapshot().dictionary, { kind: 'success', data: DICT, fetchedAt: clock });
+
+  // Also test immediate recovery via force = true right after a 503 without waiting for cooldown.
+  let capStatus2 = 503;
+  let capCalls2 = 0;
+  let dictCalls2 = 0;
+  const store2 = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async path => {
+      if (path === '/api/capabilities') {
+        capCalls2 += 1;
+        if (capStatus2 !== 200) return new Response(null, { status: capStatus2 });
+        return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-ok-2' }), { status: 200 });
+      }
+      if (path === '/api/dictionary') {
+        dictCalls2 += 1;
+        return new Response(JSON.stringify(DICT), { status: 200 });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+  await store2.loadDictionary();
+  assert.equal(store2.getSnapshot().dictionary.kind, 'error');
+  capStatus2 = 200;
+  await store2.loadDictionary(true);
+  assert.equal(capCalls2, 2);
+  assert.equal(dictCalls2, 1);
+  assert.deepEqual(store2.getSnapshot().dictionary, { kind: 'success', data: DICT, fetchedAt: clock });
+});
+
+test('Finding #4: re-confirming an existing entry with explicit null overwrites stale revision and gameVersion', () => {
+  const first = confirmTranslationMemoryEntry([], {
+    sourceText: '共鸣效率提高 10%',
+    targetText: 'Energy Regen +10%',
+    direction: 'en',
+    termsDbRevision: REVISION,
+    gameVersion: '3.6.0',
+  }, new Date('2026-11-27T00:00:00Z'));
+  assert.equal(first.status, 'added');
+  assert.equal(first.entry.terms_db_revision, REVISION);
+  assert.equal(first.entry.game_version, '3.6.0');
+
+  // Scenario A: dictionary check failed -> explicit { termsDbRevision: null, gameVersion: null } MUST clear stale provenance!
+  const cleared = confirmTranslationMemoryEntry(first.entries, {
+    sourceText: '共鸣效率提高 10%',
+    targetText: 'Energy Regen +10%',
+    direction: 'en',
+    termsDbRevision: null,
+    gameVersion: null,
+  }, new Date('2026-11-27T01:00:00Z'));
+  assert.equal(cleared.status, 'updated');
+  assert.equal(cleared.entry.use_count, 2);
+  assert.equal(cleared.entry.terms_db_revision, null);
+  assert.equal(cleared.entry.game_version, null);
+
+  // Scenario B: live dictionary returned a new revision with gameVersion: null -> MUST NOT pair new revision with old 3.6.0!
+  const newRev = 'e'.repeat(64);
+  const newRevOnly = confirmTranslationMemoryEntry(first.entries, {
+    sourceText: '共鸣效率提高 10%',
+    targetText: 'Energy Regen +10%',
+    direction: 'en',
+    termsDbRevision: newRev,
+    gameVersion: null,
+  }, new Date('2026-11-27T02:00:00Z'));
+  assert.equal(newRevOnly.status, 'updated');
+  assert.equal(newRevOnly.entry.terms_db_revision, newRev);
+  assert.equal(newRevOnly.entry.game_version, null);
 });

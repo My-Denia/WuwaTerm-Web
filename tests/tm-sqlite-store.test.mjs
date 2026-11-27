@@ -110,7 +110,7 @@ test('/api/tm route returns 404 memory_only in public mode and persists confirme
     globalThis[NODE_ENVIRONMENT] = runtime;
 
     const initial = await (await getTm()).json();
-    assert.deepEqual(initial, { mode: 'selfhost_sqlite', entries: [] });
+    assert.deepEqual(initial, { mode: 'selfhost_sqlite', entries: [], storageVersion: '0' });
 
     // Confirm valid entry
     const rev = 'd'.repeat(64);
@@ -225,6 +225,146 @@ test('/api/tm route returns 404 memory_only in public mode and persists confirme
     }));
     assert.equal(clearRes.status, 200);
     assert.deepEqual((await clearRes.json()).entries, []);
+
+    // Finding #2: Leading-digit sources (e.g. "10% 暴击率", "100") must persist cleanly without NUL in source_masked!
+    const digitRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: '10% 暴击率',
+          targetText: '10% CRIT Rate',
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: rev,
+          gameVersion: '3.7.0',
+        },
+      }),
+    }));
+    assert.equal(digitRes.status, 200);
+    const digitBody = await digitRes.json();
+    assert.equal(digitBody.status, 'added');
+    assert.equal(digitBody.entries.length, 1);
+    assert.equal(digitBody.entries[0].source_text, '10% 暴击率');
+    assert.equal(typeof digitBody.storageVersion, 'string');
+
+    // Also verify numeric-only source "100" imports cleanly and SQLite source_masked has no NUL byte.
+    const digitMergeRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'merge',
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-27T00:00:00Z',
+          entries: [{
+            direction: 'en',
+            source_text: '100',
+            target_text: '100',
+            prev_source_hash: null,
+            next_source_hash: null,
+            origin: 'imported_confirmed',
+            terms_db_revision: rev,
+            game_version: '3.7.0',
+            note: '',
+            use_count: 1,
+            created_at: '2026-11-27T00:00:00Z',
+            updated_at: '2026-11-27T00:00:00Z',
+          }],
+        },
+      }),
+    }));
+    assert.equal(digitMergeRes.status, 200);
+    const digitMerged = await digitMergeRes.json();
+    assert.equal(digitMerged.entries.length, 2);
+
+    // Inspect SQLite directly to verify length(source_masked) > 0 and no NUL bytes.
+    const checkDb = new DatabaseSync(runtime.TM_DB.path, { readOnly: true });
+    const maskedRows = checkDb.prepare('SELECT source_text, source_masked, length(source_masked) AS mlen FROM tm_entries ORDER BY id').all();
+    checkDb.close();
+    assert.equal(maskedRows.length, 2);
+    for (const row of maskedRows) {
+      assert.ok(row.mlen > 0, `source_masked length must be > 0 for ${row.source_text}`);
+      assert.equal(row.source_masked.includes('\u0000'), false, `source_masked must not contain NUL for ${row.source_text}`);
+    }
+
+    // Finding #8: Unforced replace from a stale empty tab returns 409 Conflict with latest entries + storageVersion and preserves existing rows!
+    const getBeforeConflict = await (await getTm()).json();
+    assert.equal(getBeforeConflict.entries.length, 2);
+    assert.equal(typeof getBeforeConflict.storageVersion, 'string');
+
+    const conflictReplace = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'replace',
+        forceReplace: false,
+        expectedVersion: '0',
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-27T00:00:00Z',
+          entries: [{
+            direction: 'en',
+            source_text: '单条覆盖',
+            target_text: 'Single overwrite',
+            prev_source_hash: null,
+            next_source_hash: null,
+            origin: 'imported_confirmed',
+            terms_db_revision: null,
+            game_version: null,
+            note: '',
+            use_count: 1,
+            created_at: '2026-11-27T00:00:00Z',
+            updated_at: '2026-11-27T00:00:00Z',
+          }],
+        },
+      }),
+    }));
+    assert.equal(conflictReplace.status, 409);
+    const conflictBody = await conflictReplace.json();
+    assert.equal(conflictBody.status, 'conflict');
+    assert.equal(conflictBody.code, 'tm_storage_conflict');
+    assert.equal(conflictBody.entries.length, 2);
+    assert.equal(conflictBody.storageVersion, getBeforeConflict.storageVersion);
+
+    // Explicit forceReplace: true overwrites intentionally and bumps storageVersion.
+    const forcedReplace = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'replace',
+        forceReplace: true,
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-27T00:00:00Z',
+          entries: [{
+            direction: 'en',
+            source_text: '单条覆盖',
+            target_text: 'Single overwrite',
+            prev_source_hash: null,
+            next_source_hash: null,
+            origin: 'imported_confirmed',
+            terms_db_revision: null,
+            game_version: null,
+            note: '',
+            use_count: 1,
+            created_at: '2026-11-27T00:00:00Z',
+            updated_at: '2026-11-27T00:00:00Z',
+          }],
+        },
+      }),
+    }));
+    assert.equal(forcedReplace.status, 200);
+    const forcedBody = await forcedReplace.json();
+    assert.equal(forcedBody.entries.length, 1);
+    assert.equal(forcedBody.entries[0].source_text, '单条覆盖');
+    assert.notEqual(forcedBody.storageVersion, getBeforeConflict.storageVersion);
 
     runtime.TM_DB.close();
     runtime.DB.close();

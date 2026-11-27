@@ -149,6 +149,7 @@ export function DocumentWorkspace() {
   const [termbaseFeedback, setTermbaseFeedback] = useState<TermbaseExternalFeedback | null>(null);
   const termbaseSeq = useRef(0);
   const [tmStorageState, setTmStorageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(selfHosted ? 'loading' : 'ready');
+  const tmStorageVersionRef = useRef<string | null>(null);
   const [tmOpen, setTmOpen] = useState(false);
   const [tmCursor, setTmCursor] = useState<TmSegmentCursor | null>(null);
   const [revision, setRevision] = useState<RevisionIntent | null>(null);
@@ -185,6 +186,28 @@ export function DocumentWorkspace() {
     doc.setTmEntries(tmEntries);
   }, [doc, tmEntries]);
 
+  const loadSelfhostTm = useCallback(async () => {
+    if (!selfHosted) return;
+    setTmStorageState('loading');
+    try {
+      const response = await fetch(workbenchPath('/api/tm'), { cache: 'no-store' });
+      if (!response.ok) {
+        setTmStorageState('error');
+        return;
+      }
+      const value = await response.json() as { entries?: unknown; storageVersion?: unknown };
+      if (Array.isArray(value?.entries)) {
+        tmStorageVersionRef.current = typeof value.storageVersion === 'string' ? value.storageVersion : null;
+        setTmEntries(value.entries as TmEntry[]);
+        setTmStorageState('ready');
+      } else {
+        setTmStorageState('error');
+      }
+    } catch {
+      setTmStorageState('error');
+    }
+  }, [selfHosted]);
+
   useEffect(() => {
     if (!selfHosted) return;
     let active = true;
@@ -196,9 +219,10 @@ export function DocumentWorkspace() {
           setTmStorageState('error');
           return;
         }
-        const value = await response.json() as { entries?: unknown };
+        const value = await response.json() as { entries?: unknown; storageVersion?: unknown };
         if (!active) return;
         if (Array.isArray(value?.entries)) {
+          tmStorageVersionRef.current = typeof value.storageVersion === 'string' ? value.storageVersion : null;
           setTmEntries(value.entries as TmEntry[]);
           setTmStorageState('ready');
         } else {
@@ -494,6 +518,7 @@ export function DocumentWorkspace() {
           const response = await postTm({ action: 'confirm', candidate });
           const value = await response.json() as Record<string, unknown>;
           if (response.ok && (value.status === 'added' || value.status === 'updated') && Array.isArray(value.entries)) {
+            if (typeof value.storageVersion === 'string') tmStorageVersionRef.current = value.storageVersion;
             setTmStorageState('ready');
             return {
               status: value.status,
@@ -504,24 +529,32 @@ export function DocumentWorkspace() {
           if (value.status === 'invalid' && typeof value.error === 'string') {
             return value as unknown as TmConfirmResult;
           }
-          setTmStorageState('error');
           return { status: 'error' };
         } catch {
-          setTmStorageState('error');
           return { status: 'error' };
         }
       },
-      async replace(file: TmFile) {
+      async replace(file: TmFile, options?: { force?: boolean }) {
         try {
-          const response = await postTm({ action: 'replace', file });
+          const response = await postTm({
+            action: 'replace',
+            file,
+            forceReplace: options?.force === true,
+            expectedVersion: tmStorageVersionRef.current,
+          });
           const value = await response.json() as Record<string, unknown>;
           if (response.ok && Array.isArray(value.entries)) {
+            if (typeof value.storageVersion === 'string') tmStorageVersionRef.current = value.storageVersion;
             setTmStorageState('ready');
             return { ok: true as const, entries: value.entries as TmEntry[] };
           }
+          if (response.status === 409 && Array.isArray(value.entries)) {
+            if (typeof value.storageVersion === 'string') tmStorageVersionRef.current = value.storageVersion;
+            setTmStorageState('ready');
+            return { ok: false as const, conflict: true as const, entries: value.entries as TmEntry[] };
+          }
           return { ok: false as const, error: toTmError(value) };
         } catch {
-          setTmStorageState('error');
           return { ok: false as const };
         }
       },
@@ -530,12 +563,12 @@ export function DocumentWorkspace() {
           const response = await postTm({ action: 'merge', file });
           const value = await response.json() as Record<string, unknown>;
           if (response.ok && Array.isArray(value.entries)) {
+            if (typeof value.storageVersion === 'string') tmStorageVersionRef.current = value.storageVersion;
             setTmStorageState('ready');
             return { ok: true as const, entries: value.entries as TmEntry[] };
           }
           return { ok: false as const, error: toTmError(value) };
         } catch {
-          setTmStorageState('error');
           return { ok: false as const };
         }
       },
@@ -553,12 +586,12 @@ export function DocumentWorkspace() {
           });
           const value = await response.json() as Record<string, unknown>;
           if (response.ok && Array.isArray(value.entries)) {
+            if (typeof value.storageVersion === 'string') tmStorageVersionRef.current = value.storageVersion;
             setTmStorageState('ready');
             return { ok: true as const, entries: value.entries as TmEntry[] };
           }
           return { ok: false as const };
         } catch {
-          setTmStorageState('error');
           return { ok: false as const };
         }
       },
@@ -1023,7 +1056,7 @@ export function DocumentWorkspace() {
               </> : <>
                 <button type="submit" className={translatePrimary || longInput ? 'secondary-button' : undefined} disabled={!validInput || phase === 'loading' || translating || reviewsClosed}>{phase === 'loading' ? m.review.checkLoading : m.review.checkIdle}</button>
                 <button className="secondary-button" type="button" disabled={!validInput || phase === 'loading' || translating || reviewsClosed} onClick={() => void check(false)}>{m.review.freshBasis}</button>
-                {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary && !longInput ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || translationClosed} onClick={() => void translateInReview()}>{translating ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
+                {((!!source.trim() && (!target.trim() || sourceDirtyForTranslation)) || translating) && <button className={translatePrimary && !longInput ? undefined : 'secondary-button'} type="button" disabled={!source.trim() || sourceLength > 2000 || phase === 'loading' || translating || semanticRunActive || snapshot.tmPreparing || translationClosed} onClick={() => void translateInReview()}>{translating || snapshot.tmPreparing ? m.review.translateLoading : target.trim() ? m.review.translateUpdate : m.review.translateIdle}</button>}
                 {(phase === 'loading' || translating) && <button className="secondary-button" type="button" onClick={() => doc.cancelWait()}>{m.review.cancelWait}</button>}
               </>}
               <button className="secondary-button" type="button" onClick={() => doc.undo()} disabled={!history.length}>{m.review.undo}</button>
@@ -1133,6 +1166,7 @@ export function DocumentWorkspace() {
           dictionaryStatus={tmDictionaryStatus}
           storageMode={selfHosted ? 'selfhost_sqlite' : 'public_memory'}
           storageState={tmStorageState}
+          onRetryLoad={selfHosted ? () => void loadSelfhostTm() : undefined}
           persistence={tmPersistence}
           entries={tmEntries}
           setEntries={setTmEntries}

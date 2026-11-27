@@ -570,11 +570,18 @@ export function confirmTranslationMemoryEntry(
 
   if (existingIndex >= 0) {
     const existing = entries[existingIndex]!;
+    const nextRevision = candidate.termsDbRevision !== undefined
+      ? termsDbRevision
+      : existing.terms_db_revision;
+    const revisionChanged = nextRevision !== existing.terms_db_revision;
+    const nextGameVersion = candidate.gameVersion !== undefined
+      ? gameVersion
+      : (revisionChanged ? null : existing.game_version);
     resultEntry = {
       ...existing,
       origin: existing.origin === TM_ORIGIN_HUMAN || origin === TM_ORIGIN_HUMAN ? TM_ORIGIN_HUMAN : TM_ORIGIN_IMPORTED,
-      terms_db_revision: termsDbRevision !== null ? termsDbRevision : existing.terms_db_revision,
-      game_version: gameVersion !== null ? gameVersion : existing.game_version,
+      terms_db_revision: nextRevision,
+      game_version: nextGameVersion,
       note: note || existing.note,
       use_count: Math.min(MAX_USE_COUNT, existing.use_count + 1),
       updated_at: stamp,

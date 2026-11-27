@@ -54,7 +54,14 @@ export type TmDictionaryStatusView = {
 
 export type TmPersistenceAdapter = {
   confirm: (candidate: TmConfirmCandidate) => Promise<TmConfirmResult | { status: 'error'; message?: string }>;
-  replace: (file: TmFile) => Promise<{ ok: true; entries: TmEntry[] } | { ok: false; error?: unknown }>;
+  replace: (
+    file: TmFile,
+    options?: { force?: boolean },
+  ) => Promise<
+    | { ok: true; entries: TmEntry[] }
+    | { ok: false; conflict: true; entries: TmEntry[] }
+    | { ok: false; conflict?: false; error?: unknown }
+  >;
   merge: (file: TmFile) => Promise<{ ok: true; entries: TmEntry[] } | { ok: false; error?: unknown }>;
   remove: (entry: TmEntry) => Promise<{ ok: true; entries: TmEntry[] } | { ok: false }>;
 };
@@ -75,6 +82,7 @@ type Props = {
   dictionaryStatus?: TmDictionaryStatusView;
   storageMode?: 'public_memory' | 'selfhost_sqlite';
   storageState?: 'idle' | 'loading' | 'ready' | 'error';
+  onRetryLoad?: () => void;
   persistence?: TmPersistenceAdapter;
   entries: TmEntry[];
   setEntries: Dispatch<SetStateAction<TmEntry[]>>;
@@ -110,6 +118,7 @@ export function MyMemory({
   dictionaryStatus,
   storageMode = 'public_memory',
   storageState = 'ready',
+  onRetryLoad,
   persistence,
   entries,
   setEntries,
@@ -223,7 +232,7 @@ export function MyMemory({
     return storageState === 'loading' ? t.storageLoading : t.storageError;
   }
 
-  async function applyReplace(file: TmFile) {
+  async function applyReplace(file: TmFile, force = false) {
     if (storageNotReady) {
       failure(storageNotReadyMessage());
       setPending(null);
@@ -232,15 +241,21 @@ export function MyMemory({
     if (persistence) {
       setBusy(true);
       try {
-        const res = await persistence.replace(file);
+        const res = await persistence.replace(file, { force });
         if (!res.ok) {
+          if (res.conflict) {
+            setEntries(res.entries);
+            setPending(file);
+            failure(fill(t.storageConflict, { n: res.entries.length }));
+            return;
+          }
           failure(res.error ? errorText(res.error) : t.storageError);
           setPending(null);
           return;
         }
         setEntries(res.entries);
         setPending(null);
-        notice(fill(t.notices.imported, { n: file.entries.length }));
+        notice(fill(t.notices.imported, { n: res.entries.length }));
       } finally {
         setBusy(false);
       }
@@ -519,7 +534,17 @@ export function MyMemory({
           <p className="field-hint my-terms-note" role="status">{t.storageLoading}</p>
         )}
         {storageMode === 'selfhost_sqlite' && storageState === 'error' && (
-          <p className="my-terms-feedback my-terms-error" role="alert">{t.storageError}</p>
+          <div className="my-terms-feedback my-terms-error" role="alert">
+            <span>{t.storageError}</span>
+            {onRetryLoad && (
+              <>
+                {' '}
+                <button type="button" className="text-button" onClick={onRetryLoad}>
+                  {t.storageRetry}
+                </button>
+              </>
+            )}
+          </div>
         )}
         <p className="field-hint my-terms-note">{t.memoryNote}</p>
         <p className="field-hint my-terms-note">{t.referenceNote}</p>
@@ -605,7 +630,7 @@ export function MyMemory({
               <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyMerge(pending)}>
                 {t.mergeConfirm}
               </button>
-              <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyReplace(pending)}>
+              <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyReplace(pending, true)}>
                 {t.replaceConfirm}
               </button>
               <button type="button" className="secondary-button" disabled={busy} onClick={() => setPending(null)}>

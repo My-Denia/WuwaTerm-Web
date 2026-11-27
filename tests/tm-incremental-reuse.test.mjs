@@ -5,6 +5,7 @@ import { createWorkbenchController } from '../lib/workbench-controller.ts';
 import { confirmTranslationMemoryEntry } from '../lib/translation-memory.ts';
 import { CAPABILITY_STRUCTURE_CHECK, STRUCTURE_CHECKS } from '../lib/structure-check.js';
 import { CAPABILITY_TRANSLATION_CONTEXT } from '../lib/semantic-review.js';
+import { structureSummary, structureViews } from '../lib/structure-layer.ts';
 import { scalarOffset } from '../lib/workbench-model.ts';
 
 const REV = 'd'.repeat(64);
@@ -98,6 +99,7 @@ test('full context_exact + verified_fresh document reuses all 3 segments with 0 
     referenced: 0,
     staleOrUnknown: 0,
     retranslated: 0,
+    pendingRetranslate: 0,
     demotedByStructureCheck: 0,
     demotedSegmentIndices: [],
     modelCalls: 0,
@@ -106,6 +108,9 @@ test('full context_exact + verified_fresh document reuses all 3 segments with 0 
     gameVersion: GAME,
     structureCheckStatus: 'passed',
   });
+  const l1Views = structureViews(snap.draft, snap.structure);
+  assert.equal(l1Views.length, 3);
+  assert.deepEqual(structureSummary(l1Views), { checked: 3, withFindings: 0, findings: 0, omitted: 0, unchecked: 0 });
   // Receipt must contain ZERO segment text!
   const receiptJson = JSON.stringify(snap.tmReceipt);
   for (const text of [s1, s2, s3, 'ATK', 'CRIT', 'Energy']) {
@@ -155,6 +160,7 @@ test('edited third segment reuses untouched first segment, demotes second to exa
     referenced: 1,
     staleOrUnknown: 0,
     retranslated: 2,
+    pendingRetranslate: 0,
     demotedByStructureCheck: 0,
     demotedSegmentIndices: [],
     modelCalls: 2,
@@ -338,6 +344,270 @@ test('blank draft with short reused paragraph and 1900-scalar unreused paragraph
   assert.equal(snap.draft.target, 'First short paragraph.\n\nTranslated(1800)\n\nTranslated(100)');
   assert.equal(snap.tmReceipt?.reused, 1);
   assert.equal(snap.tmReceipt?.retranslated, 2);
+  assert.equal(snap.tmReceipt?.pendingRetranslate, 0);
   assert.equal(snap.tmReceipt?.modelCalls, 2);
   assert.equal(snap.tmReceipt?.baselineRequests, 3);
+});
+
+test('Finding #1: swapped 10%/20% findings appear in structureViews per segment, survive partial reuse completion, and 64 reused segments stay in 1 batch', async () => {
+  // Part A: Swapped 10% and 20% between paragraph 1 and paragraph 2 on a 3-para short doc.
+  // A merged whole-doc check would see both 10 and 20 and report 0 findings, but per-segment checks catch both!
+  const s1 = '首段：攻击力提高 10%。';
+  const s2 = '中段：暴击率提高 20%。';
+  const s3 = '末段：共鸣效率提高 30%。';
+  let entries = [];
+  entries = confirmTranslationMemoryEntry(entries, {
+    sourceText: s1,
+    targetText: 'Para 1: ATK +20%.', // swapped 20% instead of 10%!
+    direction: 'en',
+    prevSource: null,
+    nextSource: s2,
+    termsDbRevision: REV,
+    gameVersion: GAME,
+  }).entries;
+  entries = confirmTranslationMemoryEntry(entries, {
+    sourceText: s2,
+    targetText: 'Para 2: CRIT Rate +10%.', // swapped 10% instead of 20%!
+    direction: 'en',
+    prevSource: s1,
+    nextSource: s3,
+    termsDbRevision: REV,
+    gameVersion: GAME,
+  }).entries;
+  entries = confirmTranslationMemoryEntry(entries, {
+    sourceText: s3,
+    targetText: 'Para 3: Energy Regen +30%.',
+    direction: 'en',
+    prevSource: s2,
+    nextSource: null,
+    termsDbRevision: REV,
+    gameVersion: GAME,
+  }).entries;
+
+  const structBatches = [];
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      assert.equal(path, '/api/structure-checks');
+      structBatches.push(body);
+      return {
+        response: new Response(null, { status: 200 }),
+        value: okStructureResponse(body, {
+          'tm-0': [{ rule_id: 'number_missing', source_span: { start: 9, end: 11, text: '10' }, target_span: null }],
+          'tm-1': [{ rule_id: 'number_missing', source_span: { start: 9, end: 11, text: '20' }, target_span: null }],
+        }),
+      };
+    },
+  });
+
+  doc.editText('source', `${s1}\n\n${s2}\n\n${s3}`);
+  await doc.startTranslateRun();
+
+  const snap = doc.getSnapshot();
+  assert.equal(structBatches.length, 1);
+  assert.equal(structBatches[0].segments.length, 3, 'must send only the 3 reused segments, never an extra merged tmv-0');
+  assert.equal(snap.tmReceipt?.demotedByStructureCheck, 2);
+  assert.deepEqual(snap.tmReceipt?.demotedSegmentIndices, [0, 1]);
+
+  const views = structureViews(snap.draft, snap.structure);
+  const summary = structureSummary(views);
+  assert.equal(views.length, 3);
+  assert.deepEqual(summary, { checked: 3, withFindings: 2, findings: 2, omitted: 0, unchecked: 0 });
+  assert.equal(views[0].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(views[0].result?.findings[0].source_span?.text, '10');
+  assert.equal(views[1].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(views[1].result?.findings[0].source_span?.text, '20');
+  assert.equal(views[2].result?.findings.length, 0);
+
+  // Part B: Partial reuse where segment 0 has a finding and segments 1..2 finish translating afterwards:
+  // segment 0's Layer 1 finding MUST remain visible after translation finishes!
+  const s3Edited = '末段已改：暴伤提高 40%。';
+  const docPartial = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      if (path === '/api/structure-checks') {
+        return {
+          response: new Response(null, { status: 200 }),
+          value: okStructureResponse(body, {
+            'tm-0': [{ rule_id: 'number_missing', source_span: { start: 9, end: 11, text: '10' }, target_span: null }],
+          }),
+        };
+      }
+      if (path === '/api/translations') {
+        return {
+          response: new Response(null, { status: 200 }),
+          value: { kind: 'llm', text: 'Model translated segment.', direction: 'en', dictionary_miss: false, request_id: 'tr-p' },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+  docPartial.editText('source', `${s1}\n\n${s2}\n\n${s3Edited}`);
+  await docPartial.startTranslateRun();
+  await flushMicrotasks();
+
+  const partialSnap = docPartial.getSnapshot();
+  const partialViews = structureViews(partialSnap.draft, partialSnap.structure);
+  assert.equal(partialViews.length, 3);
+  assert.equal(partialViews[0].result?.findings.length, 1);
+  assert.equal(partialViews[0].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(partialViews[1].result, null);
+  assert.equal(partialViews[2].result, null);
+
+  // Part C: 64 reused segments stay in exactly 1 structure-checks batch of 64 (never 65 items / 2 batches)!
+  const segs64 = Array.from({ length: 64 }, (_, i) => `段${i + 1}。`);
+  let entries64 = [];
+  for (let i = 0; i < 64; i += 1) {
+    entries64 = confirmTranslationMemoryEntry(entries64, {
+      sourceText: segs64[i],
+      targetText: `S${i + 1}.`,
+      direction: 'en',
+      prevSource: i > 0 ? segs64[i - 1] : null,
+      nextSource: i + 1 < 64 ? segs64[i + 1] : null,
+      termsDbRevision: REV,
+      gameVersion: GAME,
+    }).entries;
+  }
+  const batches64 = [];
+  const doc64 = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries64,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      assert.equal(path, '/api/structure-checks');
+      batches64.push(body);
+      return { response: new Response(null, { status: 200 }), value: okStructureResponse(body) };
+    },
+  });
+  doc64.editText('source', segs64.join('\n\n'));
+  await doc64.startTranslateRun();
+  assert.equal(batches64.length, 1);
+  assert.equal(batches64[0].segments.length, 64);
+  assert.equal(doc64.getSnapshot().tmReceipt?.reused, 64);
+});
+
+test('Finding #5: unaligned short draft A/B/C vs A\'/C\' (including 1801..2000 scalars) never offers prefix resume or translates C skipping B', async () => {
+  const pA = `甲段：${'文'.repeat(640)}`;
+  const pB = `乙段：${'文'.repeat(640)}`;
+  const pC = `丙段：${'文'.repeat(600)}`;
+  const calls = [];
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    post: async (path, body) => {
+      calls.push({ path, body });
+      return {
+        response: new Response(null, { status: 200 }),
+        value: { kind: 'llm', text: 'Should never run.', direction: 'en', dictionary_miss: false, request_id: 'tr-never' },
+      };
+    },
+  });
+  doc.editText('source', `${pA}\n\n${pB}\n\n${pC}`);
+  doc.editText('target', 'Alpha translated.\n\nGamma translated.');
+  assert.equal(doc.hasResumableTranslate(), false);
+  await doc.startTranslateRun();
+  await flushMicrotasks();
+  assert.equal(calls.length, 0);
+  assert.equal(doc.getSnapshot().draft.target, 'Alpha translated.\n\nGamma translated.');
+});
+
+test('Finding #6: source-dirty update reuses untouched verified TM segments, and undo/redo/edit/editText clear tmReceipt', async () => {
+  const { s1, s2, s3, entries } = buildEntries();
+  const s3Edited = '末段修改：暴击伤害提升 50%。';
+  const calls = [];
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK, CAPABILITY_TRANSLATION_CONTEXT],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      calls.push({ path, body });
+      if (path === '/api/structure-checks') {
+        return { response: new Response(null, { status: 200 }), value: okStructureResponse(body) };
+      }
+      if (path === '/api/translations') {
+        const text = body.text === s2 ? 'Model Para 2.' : 'Model Para 3 updated.';
+        return {
+          response: new Response(null, { status: 200 }),
+          value: { kind: 'llm', text, direction: 'en', dictionary_miss: false, request_id: 'tr-upd' },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  // Start with a translated 3-paragraph manuscript, then edit paragraph 3 so sourceDirtyForTranslation becomes true.
+  doc.edit({
+    source: `${s1}\n\n${s2}\n\n${s3}`,
+    target: 'Para 1: ATK +10%.\n\nPara 2: CRIT Rate +20%.\n\nPara 3: Energy Regen +30%.',
+    direction: 'en',
+    alignments: null,
+  });
+  doc.editText('source', `${s1}\n\n${s2}\n\n${s3Edited}`);
+  assert.equal(doc.getSnapshot().sourceDirtyForTranslation, true);
+
+  await doc.translateInReview();
+  await flushMicrotasks();
+
+  const afterUpdate = doc.getSnapshot();
+  assert.equal(afterUpdate.sourceDirtyForTranslation, false);
+  assert.equal(afterUpdate.draft.target, 'Para 1: ATK +10%.\n\nModel Para 2.\n\nModel Para 3 updated.');
+  assert.deepEqual(calls.filter(c => c.path === '/api/translations').map(c => c.body.text), [s2, s3Edited]);
+  assert.equal(afterUpdate.tmReceipt?.reused, 1);
+  assert.equal(afterUpdate.tmReceipt?.retranslated, 2);
+  assert.equal(afterUpdate.tmReceipt?.pendingRetranslate, 0);
+  assert.equal(afterUpdate.tmReceipt?.modelCalls, 2);
+
+  // undo() and redo() clear tmReceipt
+  doc.undo();
+  assert.equal(doc.getSnapshot().tmReceipt, null);
+  doc.redo();
+  assert.equal(doc.getSnapshot().tmReceipt, null);
+
+  // Re-run to produce a receipt, then editText() clears it
+  doc.editText('target', '');
+  await doc.startTranslateRun();
+  await flushMicrotasks();
+  assert.notEqual(doc.getSnapshot().tmReceipt, null);
+  doc.editText('target', 'Manual edit.');
+  assert.equal(doc.getSnapshot().tmReceipt, null);
+});
+
+test('Finding #7: local pool 429/503 rejection on first remaining segment keeps modelCalls=0, retranslated=0, and pendingRetranslate accurate', async () => {
+  const { s1, s2, entries } = buildEntries();
+  const s3Edited = '第三段：暴击伤害提升 40%。';
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      if (path === '/api/structure-checks') {
+        return { response: new Response(null, { status: 200 }), value: okStructureResponse(body) };
+      }
+      if (path === '/api/translations') {
+        return {
+          response: new Response(null, { status: 429 }),
+          value: { status: 'unavailable', reason: 'translation_pool_exhausted' },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  doc.editText('source', `${s1}\n\n${s2}\n\n${s3Edited}`);
+  await doc.startTranslateRun();
+  await flushMicrotasks();
+
+  const snap = doc.getSnapshot();
+  assert.equal(snap.tmReceipt?.reused, 1);
+  assert.equal(snap.tmReceipt?.modelCalls, 0, 'locally pool-rejected 429 must not increment modelCalls');
+  assert.equal(snap.tmReceipt?.retranslated, 0, 'untranslated segments rejected by pool must not count as completed');
+  assert.equal(snap.tmReceipt?.pendingRetranslate, 2, 'both remaining segments must remain reported as pending');
 });

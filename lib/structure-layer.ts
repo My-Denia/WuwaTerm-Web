@@ -4,6 +4,8 @@
 // storage: the state lives in the controller snapshot only.
 import { segmentInputs, isAmbiguousMention } from './long-review.ts';
 import { isHandled, issueStatus } from './semantic-state.js';
+import { alignmentsLeaveGaps, core } from './segmentation.ts';
+import { sha256Hex } from './sha256.js';
 import { STRUCTURE_LIMITS, structureCheckBatches, structureFindingCovers } from './structure-check.js';
 import type { Decision, Draft, PairStatus, PairView, Placed, Region, Report, ScalarOffset, SemanticState, Span } from './workbench-model.ts';
 import { scalarOffset } from './workbench-model.ts';
@@ -32,11 +34,56 @@ export const emptyStructure = (): StructureState => ({ phase: 'idle', results: {
 const CHECKED: readonly PairStatus[] = ['ready', 'untranslated'];
 const keyOf = (sourceHash: string, targetHash: string) => `${sourceHash}:${targetHash}`;
 
+function explicitAlignmentUnits(draft: Draft): {
+  index: number;
+  key: string;
+  source: string;
+  target: string;
+  sourceStart: ScalarOffset;
+  targetStart: ScalarOffset;
+  checkable: boolean;
+}[] | null {
+  const alignments = draft.alignments;
+  if (!alignments || alignments.length <= 1) return null;
+  if (alignmentsLeaveGaps(draft.source, draft.target, alignments)) return null;
+  const sc = Array.from(draft.source);
+  const tc = Array.from(draft.target);
+  return alignments.map((entry, index) => {
+    const [sCs, sCe] = core(sc, entry.source.start, entry.source.end);
+    const sourceText = sc.slice(sCs, sCe).join('');
+    let tCs = 0;
+    let targetText = '';
+    if (entry.target !== null) {
+      const [cs, ce] = core(tc, entry.target.start, entry.target.end);
+      tCs = cs;
+      targetText = tc.slice(cs, ce).join('');
+    }
+    return {
+      index,
+      key: keyOf(sha256Hex(sourceText), sha256Hex(targetText)),
+      source: sourceText,
+      target: targetText,
+      sourceStart: scalarOffset(sCs),
+      targetStart: scalarOffset(tCs),
+      checkable: !!sourceText.trim(),
+    };
+  });
+}
+
 /**
  * The segments of a draft a structure check sends, with the key its result is stored under. `id` is the request `segment_id`.
+ * When a short draft carries explicit per-segment alignments (e.g. after incremental TM reuse), each aligned segment is
+ * checked individually so per-segment findings cannot be masked by a merged whole-document view.
  */
 export function structureItems(draft: Draft): { id: string; index: number; key: string; source: string; target: string }[] {
-  return segmentInputs(draft).items.flatMap((item, index) => (CHECKED.includes(item.pair.status) && item.sourceCore.trim()
+  const segItems = segmentInputs(draft).items;
+  const explicit = explicitAlignmentUnits(draft);
+  if (explicit && explicit.length > segItems.length) {
+    return explicit.flatMap(unit => (unit.checkable
+      ? [{ id: `s${unit.index}`, index: unit.index, key: unit.key, source: unit.source, target: unit.target }]
+      : []));
+  }
+  return segItems.flatMap((item, index) => (CHECKED.includes(item.pair.status) && item.sourceCore.trim()
     ? [{ id: `s${index}`, index, key: keyOf(item.sourceHash, item.targetHash), source: item.sourceCore, target: item.targetCore }]
     : []));
 }
@@ -62,7 +109,28 @@ const shift = (span: StructureSpan | null, by: number): Span | null =>
 
 /** The Layer 1 view of every segment of the draft under `structure`, in segment order. */
 export function structureViews(draft: Draft, structure: StructureState): StructureView[] {
-  return segmentInputs(draft).items.map((item, index) => {
+  const segItems = segmentInputs(draft).items;
+  const explicit = explicitAlignmentUnits(draft);
+  if (explicit && explicit.length > segItems.length) {
+    return explicit.map(unit => {
+      const stored = structure.results[unit.key];
+      return {
+        index: unit.index,
+        checkable: unit.checkable,
+        sourceStart: unit.sourceStart,
+        targetStart: unit.targetStart,
+        result: stored && unit.checkable ? {
+          ...stored,
+          findings: stored.findings.map(f => ({
+            ...f,
+            source_span: shift(f.source_span, unit.sourceStart),
+            target_span: shift(f.target_span, unit.targetStart),
+          })),
+        } : null,
+      };
+    });
+  }
+  return segItems.map((item, index) => {
     const stored = structure.results[keyOf(item.sourceHash, item.targetHash)];
     const checkable = CHECKED.includes(item.pair.status) && !!item.sourceCore.trim();
     return {
@@ -151,8 +219,12 @@ export function layerTwoRows(semantic: SemanticState, views: readonly PairView[]
     const view = segmentOf(p);
     const segment = view ? view.pair.index : null;
     const position = p.live.source_span?.start ?? p.live.target_span?.start ?? resultOf(p)?.region.source.start ?? 0;
-    const covered = !isHandled(info.status) && segment !== null
-      && coveredByStructure({ category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span }, layer1[segment]);
+    const issueCheck = { category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span };
+    const covered = !isHandled(info.status) && segment !== null && (
+      layer1.length === views.length
+        ? coveredByStructure(issueCheck, layer1[segment])
+        : layer1.some(v => coveredByStructure(issueCheck, v))
+    );
     return { placed: p, ...info, segment, position, imported: !!resultOf(p)?.imported, covered };
   }).sort((a, b) => a.position - b.position || a.placed.id.localeCompare(b.placed.id));
 }

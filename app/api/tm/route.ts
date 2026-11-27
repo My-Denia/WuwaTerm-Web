@@ -26,19 +26,21 @@ const JSON_HEADERS = Object.freeze({
 const MAX_TM_REQUEST_BYTES = MAX_TM_BYTES + 16_384;
 
 type TmStoreAdapter = {
+  getVersion?: () => string;
+  getSnapshot?: () => { entries: TmEntry[]; storageVersion: string };
   listEntries: () => TmEntry[];
   replaceEntries: (entries: TmEntry[]) => TmEntry[];
   runAtomic: <T>(
-    transform: (current: TmEntry[]) => { write: boolean; entries?: TmEntry[]; result: T },
-  ) => T & { entries?: TmEntry[] };
+    transform: (current: TmEntry[], currentVersion: string) => { write: boolean; entries?: TmEntry[]; result: T },
+  ) => T & { entries?: TmEntry[]; storageVersion?: string };
   deleteEntry: (identity: {
     direction: string;
     source_text: string;
     target_text: string;
     prev_source_hash: string | null;
     next_source_hash: string | null;
-  }) => { deleted: boolean; entries: TmEntry[] };
-  clearEntries: () => TmEntry[];
+  }) => { deleted: boolean; entries: TmEntry[]; storageVersion?: string };
+  clearEntries: () => TmEntry[] | { entries: TmEntry[]; storageVersion: string };
 };
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
@@ -123,7 +125,14 @@ export async function GET(): Promise<Response> {
     return jsonResponse(503, { status: 'unavailable', reason: 'tm_store_unavailable' });
   }
   try {
-    return jsonResponse(200, { mode: 'selfhost_sqlite', entries: resolved.store.listEntries() });
+    const snap = typeof resolved.store.getSnapshot === 'function'
+      ? resolved.store.getSnapshot()
+      : { entries: resolved.store.listEntries(), storageVersion: resolved.store.getVersion?.() ?? '0' };
+    return jsonResponse(200, {
+      mode: 'selfhost_sqlite',
+      entries: snap.entries,
+      storageVersion: snap.storageVersion,
+    });
   } catch {
     return jsonResponse(503, { status: 'unavailable', reason: 'tm_store_unavailable' });
   }
@@ -198,13 +207,34 @@ export async function POST(request: Request): Promise<Response> {
         status: result.status,
         entry: result.entry,
         entries: result.entries,
+        storageVersion: result.storageVersion ?? '0',
       });
     }
 
     if (action === 'replace') {
       const validated = validateFilePayload(body.file ?? body.entries);
-      const entries = resolved.store.replaceEntries(validated);
-      return jsonResponse(200, { mode: 'selfhost_sqlite', entries });
+      const forceReplace = body.forceReplace === true;
+      const expectedVersion = typeof body.expectedVersion === 'string' ? body.expectedVersion : null;
+      const outcome = resolved.store.runAtomic<{ conflict: boolean; entries: TmEntry[] }>((current, currentVersion) => {
+        if (!forceReplace && (current.length > 0 || (expectedVersion !== null && expectedVersion !== currentVersion))) {
+          return { write: false, result: { conflict: true, entries: current } };
+        }
+        return { write: true, entries: validated, result: { conflict: false, entries: validated } };
+      });
+      if (outcome.conflict) {
+        return jsonResponse(409, {
+          status: 'conflict',
+          code: 'tm_storage_conflict',
+          mode: 'selfhost_sqlite',
+          entries: outcome.entries,
+          storageVersion: outcome.storageVersion ?? '0',
+        });
+      }
+      return jsonResponse(200, {
+        mode: 'selfhost_sqlite',
+        entries: outcome.entries,
+        storageVersion: outcome.storageVersion ?? '0',
+      });
     }
 
     if (action === 'merge') {
@@ -213,7 +243,11 @@ export async function POST(request: Request): Promise<Response> {
         const merged = mergeTranslationMemoryEntries(current, incoming);
         return { write: true, entries: merged, result: { merged: incoming.length } };
       });
-      return jsonResponse(200, { mode: 'selfhost_sqlite', entries: result.entries });
+      return jsonResponse(200, {
+        mode: 'selfhost_sqlite',
+        entries: result.entries,
+        storageVersion: result.storageVersion ?? '0',
+      });
     }
 
     if (action === 'delete') {
@@ -236,12 +270,19 @@ export async function POST(request: Request): Promise<Response> {
         prev_source_hash: e.prev_source_hash,
         next_source_hash: e.next_source_hash,
       });
-      return jsonResponse(200, { mode: 'selfhost_sqlite', deleted: outcome.deleted, entries: outcome.entries });
+      return jsonResponse(200, {
+        mode: 'selfhost_sqlite',
+        deleted: outcome.deleted,
+        entries: outcome.entries,
+        storageVersion: outcome.storageVersion ?? '0',
+      });
     }
 
     if (action === 'clear') {
-      const entries = resolved.store.clearEntries();
-      return jsonResponse(200, { mode: 'selfhost_sqlite', entries });
+      const cleared = resolved.store.clearEntries();
+      const entries = Array.isArray(cleared) ? cleared : cleared.entries;
+      const storageVersion = Array.isArray(cleared) ? (resolved.store.getVersion?.() ?? '0') : cleared.storageVersion;
+      return jsonResponse(200, { mode: 'selfhost_sqlite', entries, storageVersion });
     }
 
     return jsonResponse(400, { status: 'unavailable', reason: 'site_invalid_request' });

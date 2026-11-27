@@ -146,6 +146,7 @@ export type TmRunReceipt = {
   referenced: number;
   staleOrUnknown: number;
   retranslated: number;
+  pendingRetranslate: number;
   demotedByStructureCheck: number;
   demotedSegmentIndices: number[];
   modelCalls: number;

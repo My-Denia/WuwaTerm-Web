@@ -319,7 +319,8 @@ const zh = {
   },
   tmReceipt: {
     title: '翻译记忆增量复用回执',
-    summary: '直接复用 {reused} / {baseline} 段 · 模型调用 {modelCalls} 次 · 送模型翻译 {retranslated} 段',
+    summary: '直接复用 {reused} / {baseline} 段 · 模型调用 {modelCalls} 次 · 已送译完成 {retranslated} 段',
+    pendingSuffix: ' · 待翻译 {pending} 段',
     detail: '仅作参考 {referenced} 段 · 过期或未知版本 {stale} 段',
     structurePassed: '第一层结构核查已通过全部复用段。',
     structureDemoted: '{n} 段复用未通过第一层结构核查，已降级为需复核（第 {segments} 段）。',
@@ -649,7 +650,8 @@ const en: SemanticMessages = {
   },
   tmReceipt: {
     title: 'Translation memory incremental reuse receipt',
-    summary: 'Reused {reused} / {baseline} segments · {modelCalls} model call(s) · {retranslated} sent to translation',
+    summary: 'Reused {reused} / {baseline} segments · {modelCalls} model call(s) · {retranslated} translated',
+    pendingSuffix: ' · {pending} pending',
     detail: 'Reference only: {referenced} · stale or unknown provenance: {stale}',
     structurePassed: 'Layer 1 structure checks passed for all reused segments.',
     structureDemoted: '{n} reused segment(s) did not pass Layer 1 structure checks and were demoted to needs_review (segment {segments}).',

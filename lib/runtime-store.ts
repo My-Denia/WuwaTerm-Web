@@ -129,6 +129,8 @@ export class RuntimeStore {
   private started = false;
   private poolAbort: AbortController | null = null;
   private capabilitiesPromise: Promise<string[]> | null = null;
+  private capabilitiesLoaded = false;
+  private capabilitiesFailedAt: number | null = null;
   private metaPromise: Promise<void> | null = null;
   private dictionaryPromise: Promise<void> | null = null;
 
@@ -187,31 +189,57 @@ export class RuntimeStore {
     })();
   }
 
-  /** The negotiated capabilities, read once per page and shared by every caller; a failed read counts as none. */
-  capabilities(): Promise<string[]> {
+  /**
+   * The negotiated capabilities, read once per page on HTTP 200 and shared by every caller.
+   * Transient errors (5xx / network failure) do NOT freeze capabilities forever: callers may retry after the
+   * error cooldown or immediately with `force = true`.
+   */
+  capabilities(force = false): Promise<string[]> {
+    if (this.capabilitiesLoaded) return Promise.resolve(this.state.capabilities ?? []);
     if (this.capabilitiesPromise) return this.capabilitiesPromise;
-    this.capabilitiesPromise = (async () => {
+    const now = this.now();
+    if (!force && this.capabilitiesFailedAt !== null
+      && now >= this.capabilitiesFailedAt
+      && now - this.capabilitiesFailedAt < this.dictionaryErrorRetryCooldownMs) {
+      return Promise.resolve([]);
+    }
+    const promise = (async () => {
       let list: string[] = [];
+      let succeeded = false;
       try {
         const response = await this.fetcher('/api/capabilities', { cache: 'no-store' });
         const value = await json(response) as { capabilities?: unknown } | null;
-        list = response.ok && Array.isArray(value?.capabilities)
-          ? value.capabilities.filter((x): x is string => typeof x === 'string')
-          : [];
-      } catch { list = []; }
+        if (response.ok && Array.isArray(value?.capabilities)) {
+          list = value.capabilities.filter((x): x is string => typeof x === 'string');
+          succeeded = true;
+        }
+      } catch {
+        list = [];
+      }
+      if (succeeded) {
+        this.capabilitiesLoaded = true;
+        this.capabilitiesFailedAt = null;
+      } else {
+        this.capabilitiesFailedAt = this.now();
+      }
       this.set({ capabilities: list });
       return list;
     })();
-    return this.capabilitiesPromise;
+    this.capabilitiesPromise = promise;
+    void promise.finally(() => {
+      if (this.capabilitiesPromise === promise) this.capabilitiesPromise = null;
+    });
+    return promise;
   }
 
   /**
    * Authoritative server dictionary identity (`GET /api/dictionary`, capability `dictionary-identity-v1`):
-   * - checks `capabilities()` first; sets `unsupported` without hitting `/api/dictionary` if the server does not advertise it;
+   * - checks `capabilities()` first; distinguishes a transient `/api/capabilities` error (`error`, retryable)
+   *   from a verified HTTP 200 capability list lacking `dictionary-identity-v1` (`unsupported`);
    * - in-flight reads are shared by joining the existing promise;
    * - `success` is reused within `dictionaryFreshTtlMs` and refreshed once expired;
    * - `error` respects the fixed 30s `dictionaryErrorRetryCooldownMs` and retries once elapsed;
-   * - `force = true` always performs an immediate re-read when the capability is present.
+   * - `force = true` always performs an immediate re-read (retrying capabilities first if not yet confirmed).
    */
   loadDictionary(force = false): Promise<void> {
     if (this.dictionaryPromise) return this.dictionaryPromise;
@@ -230,7 +258,12 @@ export class RuntimeStore {
     }
     const promise = (async () => {
       try {
-        const caps = await this.capabilities();
+        const caps = await this.capabilities(force);
+        if (!this.capabilitiesLoaded) {
+          const lastKnown = this.lastKnownDictionary();
+          this.set({ dictionary: { kind: 'error', lastKnown, failedAt: this.now() } });
+          return;
+        }
         if (!caps.includes(CAPABILITY_DICTIONARY_IDENTITY)) {
           this.set({ dictionary: { kind: 'unsupported' } });
           return;

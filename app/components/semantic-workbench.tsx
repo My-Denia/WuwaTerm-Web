@@ -314,8 +314,8 @@ export function SemanticWorkbench(props: Props) {
   };
   const translateBlankLong = !!source.trim() && !target.trim() && sourceChars.length > 2000;
   const translateResumable = useMemo(
-    () => !translateBlankLong && doc.hasResumableTranslate(draft, semantic, basis),
-    [translateBlankLong, doc, draft, semantic, basis],
+    () => !translateBlankLong && (long || (draft.alignments !== null && draft.alignments.length > 0)) && doc.hasResumableTranslate(draft, semantic, basis),
+    [translateBlankLong, long, doc, draft, semantic, basis],
   );
   const showSegments = pairs.length > 1 || long || semantic.results.length > 0 || pairs.some(p => p.status !== 'ready') || run.kind !== null;
   const translationClosed = !!poolData && (!poolData.translation_enabled || poolData.translations.remaining === 0 || poolData.characters.remaining === 0);
@@ -588,6 +588,8 @@ export function SemanticWorkbench(props: Props) {
         data-testid="tm-run-receipt"
         data-reused={tmReceipt.reused}
         data-model-calls={tmReceipt.modelCalls}
+        data-retranslated={tmReceipt.retranslated}
+        data-pending-retranslate={tmReceipt.pendingRetranslate}
         data-demoted={tmReceipt.demotedByStructureCheck}
         data-structure-status={tmReceipt.structureCheckStatus}
         role="status"
@@ -601,6 +603,9 @@ export function SemanticWorkbench(props: Props) {
             modelCalls: tmReceipt.modelCalls,
             retranslated: tmReceipt.retranslated,
           })}
+          {tmReceipt.pendingRetranslate > 0
+            ? fill(s.tmReceipt.pendingSuffix, { pending: tmReceipt.pendingRetranslate })
+            : ''}
         </p>
         <p className="track-note">
           {fill(s.tmReceipt.detail, {
@@ -637,13 +642,13 @@ export function SemanticWorkbench(props: Props) {
       {translateBlankLong && <div className="long-translate">
         <p>{s.translateLongHint}</p>
         <div className="actions">
-          <button type="button" className="primary-button" disabled={runActive || translationClosed} onClick={() => void doc.startTranslateRun()}>{s.translateLong}</button>
+          <button type="button" className="primary-button" disabled={runActive || snapshot.tmPreparing || translationClosed} onClick={() => void doc.startTranslateRun()}>{s.translateLong}</button>
         </div>
       </div>}
       {translateResumable && <div className="long-translate">
         <p>{s.translateResumeHint}</p>
         <div className="actions">
-          <button type="button" className="primary-button" disabled={pairTranslating !== null || runActive || translationClosed} onClick={() => void doc.startTranslateRun()}>{s.translateResume}</button>
+          <button type="button" className="primary-button" disabled={pairTranslating !== null || runActive || snapshot.tmPreparing || translationClosed} onClick={() => void doc.startTranslateRun()}>{s.translateResume}</button>
         </div>
       </div>}
       {long && !translateBlankLong && <div className="long-terms">

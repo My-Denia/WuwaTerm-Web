@@ -45,7 +45,7 @@ import {
 } from './translation-memory.ts';
 import type { TmServiceBasis } from './tm-live-provenance.ts';
 import { semanticExport, semanticFromWorkfile, semanticWorkfileParts } from './workbench-persistence.ts';
-import { emptyStructure, structureItems, structurePlan, type StructureFinding, type StructureState } from './structure-layer.ts';
+import { emptyStructure, structurePlan, type StructureFinding, type StructureState } from './structure-layer.ts';
 import { CAPABILITY_STRUCTURE_CHECK, STRUCTURE_LIMITS, structureCheckBatches, validStructureCheckResponse } from './structure-check.js';
 import { postWorkbench, REVIEW_REQUEST_LIMIT, runFailure } from './workbench-transport.ts';
 import type { UiLanguage } from './ui-language.ts';
@@ -193,6 +193,8 @@ export type WorkbenchSnapshot = {
    * counts and provenance only, never segment text, never written to manuscripts or browser storage.
    */
   tmReceipt: TmRunReceipt | null;
+  /** True while an incremental TM run is resolving dictionary identity or Layer 1 structure checks before batch translation. */
+  tmPreparing: boolean;
 };
 
 type TranslateRunStep =
@@ -381,6 +383,7 @@ export class WorkbenchController {
       redoCount: 0,
       structure: emptyStructure(),
       tmReceipt: null,
+      tmPreparing: false,
     };
   }
 
@@ -678,6 +681,7 @@ export class WorkbenchController {
       lastSemanticAction: null,
       structure: emptyStructure(),
       tmReceipt: null,
+      tmPreparing: false,
     });
     this.structureAbort?.abort();
     this.structureAbort = null;
@@ -750,6 +754,7 @@ export class WorkbenchController {
       semantic: nextSemantic,
       alignmentInvalidations: [],
       notice: message,
+      tmReceipt: null,
     });
   }
 
@@ -835,6 +840,7 @@ export class WorkbenchController {
       alignmentInvalidations: appendInvalidations(baseInvalidations, remap.invalidated),
       sourceDirtyForTranslation,
       notice: message,
+      tmReceipt: null,
     });
   }
 
@@ -898,6 +904,7 @@ export class WorkbenchController {
       ...(outcome.invalidated.length ? { invalidated: outcome.invalidated } : {}),
       notice: message,
       remember: true,
+      extraPatch: () => ({ tmReceipt: null }),
     });
     return outcome;
   }
@@ -1555,6 +1562,7 @@ export class WorkbenchController {
       generation: this.docGeneration,
       inFlight: false,
       semantic: step.semantic,
+      tmReceipt: null,
     });
   }
 
@@ -1958,27 +1966,41 @@ export class WorkbenchController {
   }
 
   async translateInReview(options: { translationClosed?: boolean } = {}): Promise<void> {
-    const { draft, phase, translating } = this.state;
+    const { draft, phase, translating, tmPreparing, run, pairTranslating, sourceDirtyForTranslation } = this.state;
     const { source, target, direction, alignments } = draft;
-    if (!source.trim() || chars(source).length > 2000 || phase === 'loading' || translating || options.translationClosed) return;
-    // In manuscript mode, a multi-paragraph blank draft with confirmed TM entries runs through the incremental
-    // batch path so trusted `context_exact` + `verified_fresh` segments can be reused with Layer 1 checks and a receipt.
+    if (
+      !source.trim()
+      || chars(source).length > 2000
+      || phase === 'loading'
+      || translating
+      || tmPreparing
+      || isRunActive(run, pairTranslating)
+      || options.translationClosed
+    ) return;
+    // In manuscript mode, a multi-paragraph blank draft or source-dirty rebuild ("按原文更新译文")
+    // with confirmed TM entries runs through the incremental batch path so trusted
+    // `context_exact` + `verified_fresh` segments can be reused with Layer 1 checks and a receipt.
+    const tmEntries = this.currentTmEntries();
     if (
       this.state.workspaceMode === 'manuscript'
-      && !target.trim()
-      && alignments === null
       && segmentParagraphs(source).length > 1
-      && this.currentTmEntries().length > 0
+      && tmEntries.length > 0
     ) {
-      await this.startTranslateRun();
-      return;
+      if (!target.trim() && alignments === null) {
+        await this.startTranslateRun();
+        return;
+      }
+      if (sourceDirtyForTranslation && !!target.trim()) {
+        const handled = await this.startIncrementalTmTranslateRun(draft, tmEntries, true, { requireReuse: true });
+        if (handled) return;
+      }
     }
 
     this.discardInFlight();
     const mine = this.docGeneration;
     const abort = new AbortController();
     this.docAbort = abort;
-    this.setState({ translating: true, notice: null, inFlight: true });
+    this.setState({ translating: true, notice: null, inFlight: true, tmReceipt: null });
     const startedAt = this.clock.now();
 
     // Quick mode with automatic direction sends no target language and adopts the direction the service reports.
@@ -2374,7 +2396,7 @@ export class WorkbenchController {
 
   private resumablePartialPrefix(d: Draft) {
     if (d.alignments !== null || !d.source.trim() || !d.target.trim()) return null;
-    if (segmentText(d.source).length < 2) return null;
+    if (!isLong(d) || segmentText(d.source).length < 2) return null;
     const sc = chars(d.source);
     const tc = chars(d.target);
     const sParas = paragraphRanges(sc);
@@ -2429,34 +2451,37 @@ export class WorkbenchController {
         items: steps.map((_, index) => ({ key: `tr#${index}`, index })),
       };
     }
-    const views = semanticSegmentViews(d, semanticState, basis, this.reviewFeatures()) as { items: PairView[] };
-    const untranslated = views.items.filter(
-      v => v.pair.status === 'untranslated' && !!v.sCore.trim() && chars(v.sCore).length <= SEGMENT_LIMIT,
-    );
-    if (untranslated.length > 0) {
-      const steps: TranslateRunStep[] = untranslated.map(v => ({
-        kind: 'pair',
-        sourceCoreStart: v.pair.source.core_start,
-        sourceCoreEnd: v.pair.source.core_end,
-      }));
-      return {
-        plan: {
-          kind: 'untranslated_pairs',
-          source: d.source,
-          direction: d.direction,
-          steps,
-          pieces: [],
-          base: d.target,
-          expectedTarget: d.target,
-          appendPrefix: '',
-          tailStart: 0,
-          initialBefore: null,
-        },
-        items: steps.map((s, index) => ({
-          key: `trp#${s.kind === 'pair' ? s.sourceCoreStart : index}:${index}`,
-          index,
-        })),
-      };
+    const hasExplicitAlignments = d.alignments !== null && d.alignments.length > 0;
+    if (hasExplicitAlignments) {
+      const views = semanticSegmentViews(d, semanticState, basis, this.reviewFeatures()) as { items: PairView[] };
+      const untranslated = views.items.filter(
+        v => v.pair.status === 'untranslated' && !!v.sCore.trim() && chars(v.sCore).length <= SEGMENT_LIMIT,
+      );
+      if (untranslated.length > 0) {
+        const steps: TranslateRunStep[] = untranslated.map(v => ({
+          kind: 'pair',
+          sourceCoreStart: v.pair.source.core_start,
+          sourceCoreEnd: v.pair.source.core_end,
+        }));
+        return {
+          plan: {
+            kind: 'untranslated_pairs',
+            source: d.source,
+            direction: d.direction,
+            steps,
+            pieces: [],
+            base: d.target,
+            expectedTarget: d.target,
+            appendPrefix: '',
+            tailStart: 0,
+            initialBefore: null,
+          },
+          items: steps.map((s, index) => ({
+            key: `trp#${s.kind === 'pair' ? s.sourceCoreStart : index}:${index}`,
+            index,
+          })),
+        };
+      }
     }
     const partial = this.resumablePartialPrefix(d);
     if (!partial) return null;
@@ -2562,19 +2587,30 @@ export class WorkbenchController {
       return;
     }
     try {
-      if (plan.trackTmModelCalls && this.state.tmReceipt) {
-        this.setState({
-          tmReceipt: {
-            ...this.state.tmReceipt,
-            modelCalls: this.state.tmReceipt.modelCalls + 1,
-          },
-        });
-      }
       const { response, value } = await this.post('/api/translations', fitted.body, { signal, allowInvalidJson: true });
       const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
       if (!live()) return;
       this.onPoolRefresh();
+      const failureReason = typeof body?.reason === 'string' ? body.reason : '';
+      const localGateRejection = !response.ok && [
+        'shared_pool_busy',
+        'translation_pool_exhausted',
+        'shared_pool_unavailable',
+        'translation_disabled',
+        'site_not_configured',
+        'site_invalid_request',
+        'body_too_large',
+      ].includes(failureReason);
+      const countModelCall = plan.trackTmModelCalls && !localGateRejection;
       if (!response.ok || typeof body?.text !== 'string') {
+        if (countModelCall && this.state.tmReceipt) {
+          this.setState({
+            tmReceipt: {
+              ...this.state.tmReceipt,
+              modelCalls: this.state.tmReceipt.modelCalls + 1,
+            },
+          });
+        }
         this.failRun({
           type: 'failed',
           key: item.key,
@@ -2657,6 +2693,16 @@ export class WorkbenchController {
         ...(fillRemap ? { invalidated: fillRemap.invalidated } : {}),
         remember: false,
         notice: lostAlignments ?? (done ? 'sem:translateRunDone' : null),
+        ...(plan.trackTmModelCalls && this.state.tmReceipt ? {
+          extraPatch: () => ({
+            tmReceipt: this.state.tmReceipt ? {
+              ...this.state.tmReceipt,
+              modelCalls: this.state.tmReceipt.modelCalls + (countModelCall ? 1 : 0),
+              retranslated: this.state.tmReceipt.retranslated + 1,
+              pendingRetranslate: Math.max(0, this.state.tmReceipt.pendingRetranslate - 1),
+            } : null,
+          }),
+        } : {}),
       });
       this.dispatchRun({ type: 'done', key: item.key });
     } catch {
@@ -2682,6 +2728,7 @@ export class WorkbenchController {
   }
 
   async startTranslateRun(): Promise<void> {
+    if (this.state.tmPreparing || isRunActive(this.state.run, this.state.pairTranslating)) return;
     const d = this.state.draft;
     if (!d.source.trim()) return;
     const tmEntries = this.currentTmEntries();
@@ -2704,9 +2751,9 @@ export class WorkbenchController {
     this.translateRun = built.plan;
     // One undo step for the whole generated translation: the state before the batch.
     if (built.plan.kind === 'blank') {
-      this.commit({ draft: { ...this.state.draft, target: '' }, remember: true, notice: null });
+      this.commit({ draft: { ...this.state.draft, target: '' }, remember: true, notice: null, extraPatch: () => ({ tmReceipt: null }) });
     } else {
-      this.commit({ remember: true, notice: null });
+      this.commit({ remember: true, notice: null, extraPatch: () => ({ tmReceipt: null }) });
     }
     this.startBatch('translate', built.items);
   }
@@ -2715,6 +2762,7 @@ export class WorkbenchController {
     startDraft: Draft,
     tmEntries: readonly TmEntry[],
     isBlankMode: boolean,
+    options: { requireReuse?: boolean } = {},
   ): Promise<boolean> {
     this.tmPrepareAbort?.abort();
     const abort = new AbortController();
@@ -2727,6 +2775,7 @@ export class WorkbenchController {
       && this.tmPrepareGeneration === prepGen
       && this.documentEpoch === epoch
       && this.state.draft === startDraft;
+    this.setState({ tmPreparing: true });
 
     try {
       if (this.state.capabilities === null && this.capabilitiesPromise) {
@@ -2836,6 +2885,10 @@ export class WorkbenchController {
             referenced += 1;
           }
         }
+      }
+
+      if (options.requireReuse && reusedUnits.length === 0) {
+        return false;
       }
 
       // Construct updated draft with explicit alignments for reused segments.
@@ -2960,27 +3013,14 @@ export class WorkbenchController {
           for (const unit of appliedReusedUnits) demotedSet.add(unit.segmentIndex);
         } else {
           const checkItems: { id: string; key: string; source: string; target: string; segmentIndex?: number }[] = [];
-          const seenKeys = new Set<string>();
           for (const unit of appliedReusedUnits) {
             const key = `${sha256Hex(unit.sourceText)}:${sha256Hex(unit.targetText)}`;
-            seenKeys.add(key);
             checkItems.push({
               id: `tm-${unit.segmentIndex}`,
               key,
               source: unit.sourceText,
               target: unit.targetText,
               segmentIndex: unit.segmentIndex,
-            });
-          }
-          // Also include any merged ready pair in `updatedDraft` so Layer 1 UI shows findings immediately.
-          for (const viewItem of structureItems(updatedDraft)) {
-            if (!viewItem.target.trim() || seenKeys.has(viewItem.key)) continue;
-            seenKeys.add(viewItem.key);
-            checkItems.push({
-              id: `tmv-${viewItem.index}`,
-              key: viewItem.key,
-              source: viewItem.source,
-              target: viewItem.target,
             });
           }
           const byId = new Map(checkItems.map(item => [item.id, item]));
@@ -3064,7 +3104,8 @@ export class WorkbenchController {
         reused: appliedReusedUnits.length,
         referenced,
         staleOrUnknown,
-        retranslated: remainingCount,
+        retranslated: 0,
+        pendingRetranslate: remainingCount,
         demotedByStructureCheck: demotedSegmentIndices.length,
         demotedSegmentIndices,
         modelCalls: 0,
@@ -3129,6 +3170,9 @@ export class WorkbenchController {
       return true;
     } finally {
       if (this.tmPrepareAbort === abort) this.tmPrepareAbort = null;
+      if (!this.disposed && this.tmPrepareGeneration === prepGen && this.state.tmPreparing) {
+        this.setState({ tmPreparing: false });
+      }
     }
   }
 
