@@ -105,12 +105,14 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
   previewRef.current = !!props.preview;
   const latest = useRef(props.value);
   latest.current = props.value;
+  const submitted = useRef(props.value);
+  submitted.current = props.value;
   const onScrollRatioRef = useRef(props.onScrollRatio);
   onScrollRatioRef.current = props.onScrollRatio;
   const onCursorChangeRef = useRef(props.onCursorChange);
   onCursorChangeRef.current = props.onCursorChange;
 
-  const reportCursor = (element: HTMLTextAreaElement, text = element.value) => {
+  const reportCursor = (element: HTMLTextAreaElement, text: string) => {
     const callback = onCursorChangeRef.current;
     if (!callback) return;
     const raw = rawOffset(text, element.selectionStart);
@@ -197,19 +199,21 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
       hidden={!!props.preview}
       aria-describedby={props.describedBy}
       onScroll={event => handleScroll(event.currentTarget)}
-      onClick={event => reportCursor(event.currentTarget)}
-      onKeyUp={event => reportCursor(event.currentTarget)}
-      onSelect={event => reportCursor(event.currentTarget)}
+      onClick={event => reportCursor(event.currentTarget, submitted.current)}
+      onKeyUp={event => reportCursor(event.currentTarget, submitted.current)}
+      onSelect={event => reportCursor(event.currentTarget, submitted.current)}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={event => {
         composing.current = false;
+        submitted.current = event.currentTarget.value;
         props.onEdit(event.currentTarget.value, { composing: false });
-        reportCursor(event.currentTarget);
+        reportCursor(event.currentTarget, event.currentTarget.value);
       }}
       onChange={event => {
         const open = composing.current || (event.nativeEvent as InputEvent).isComposing === true;
+        submitted.current = event.target.value;
         props.onEdit(event.target.value, { composing: open });
-        reportCursor(event.target);
+        reportCursor(event.target, event.target.value);
       }}
     />
     {props.preview && (

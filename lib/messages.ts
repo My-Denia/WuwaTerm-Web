@@ -272,6 +272,8 @@ const zh = {
       listFull: '本页翻译记忆已满，最多 10,000 条。',
       listTooLarge: '本页翻译记忆已接近 8 MiB 上限，不能再添加。',
       segmentUnaligned: '译文段数（{targetTotal}）多于原文段数（{sourceTotal}），为避免误覆盖已有译文，未替换当前内容。',
+      segmentAlignmentRequired: '当前段落没有明确的一一对应译文位置（例如分段已清空、合并、拆分或跨过多段），为避免误覆盖其他段落，未自动替换。',
+      multiParagraphSuggestion: '该记忆建议包含空行并会拆成多段；当前多段稿没有显式分段对应，为避免挤错后续段落，未自动采用。',
     },
   },
   workspace: {
@@ -1064,6 +1066,8 @@ const en: typeof zh = {
       listFull: 'The page translation memory is full (at most 10,000 entries).',
       listTooLarge: 'The page translation memory is near the 8 MiB limit and cannot take another entry.',
       segmentUnaligned: 'Target has {targetTotal} paragraphs while source has {sourceTotal}; skipped applying to avoid overwriting other segments.',
+      segmentAlignmentRequired: 'The active segment has no unambiguous target alignment (cleared, merged, split, or too many segments to auto-align); skipped applying to avoid overwriting other paragraphs.',
+      multiParagraphSuggestion: 'This memory suggestion contains blank lines and splits into multiple paragraphs; skipped applying because no explicit segment alignment protects following paragraphs.',
     },
   },
   workspace: {

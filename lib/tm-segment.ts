@@ -1,9 +1,11 @@
 // Deterministic per-segment TM slicing, active-segment resolution, and single-segment target application (MY-491).
 //
-// Reuses core's `paragraphRanges` and `core` from `lib/segmentation.ts` so TM paragraph boundaries never diverge
-// from the manuscript segmentation rules. All offsets are Unicode scalar indices (`Array.from`).
+// Reuses core's `paragraphRanges` and `core` from `lib/segmentation.ts` and alignment remap helpers from
+// `lib/manuscript.js` so TM paragraph boundaries and explicit alignments stay consistent across the workbench.
+// All offsets are Unicode scalar indices (`Array.from`).
+import { remapForSplice, remapForTargetFill, validAlignments, type InvalidatedAlignment } from './manuscript.js';
 import { core, paragraphRanges } from './segmentation.ts';
-import { scalarOffset, type ScalarOffset } from './workbench-model.ts';
+import { scalarOffset, type Alignment, type ScalarOffset, type Span, type Splice } from './workbench-model.ts';
 
 export type TmSegment = {
   index: number;
@@ -29,11 +31,21 @@ export type TmSegmentCursor =
   | { kind: 'index'; index: number }
   | { kind: 'offset'; side: 'source' | 'target'; offset: number };
 
+export type TmApplySegmentOptions = {
+  source?: string;
+  alignments?: readonly Alignment[] | null;
+};
+
 export type TmApplySegmentResult = {
   target: string;
+  alignments: Alignment[] | null;
+  splice: Splice | null;
+  invalidated: InvalidatedAlignment[];
   applied: boolean;
-  reason: 'replaced' | 'inserted' | 'unaligned_target';
+  reason: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion';
 };
+
+const MAX_AUTO_ALIGNMENTS = 64;
 
 /** Splits `text` into deterministic paragraph segments using `lib/segmentation.ts` rules. */
 export function segmentParagraphs(text: string): TmSegment[] {
@@ -60,32 +72,32 @@ function countNewlines(chars: readonly string[], start: number, end: number): nu
   return count;
 }
 
-function leadingBlankSlots(
-  targetChars: readonly string[],
-  targetSegments: readonly TmSegment[],
-  sourceTotal: number,
-): number {
-  if (targetSegments.length === 0 || targetSegments.length >= sourceTotal) return 0;
-  const newlines = countNewlines(targetChars, 0, targetSegments[0]!.coreStart);
-  if (newlines < 2) return 0;
-  return Math.min(sourceTotal - targetSegments.length, Math.floor(newlines / 2));
+function indexAfterNthNewline(chars: readonly string[], start: number, end: number, targetCount: number): number {
+  let seen = 0;
+  for (let i = start; i < end; i += 1) {
+    if (chars[i] === '\n') {
+      seen += 1;
+      if (seen === targetCount) return i + 1;
+    }
+  }
+  return end;
+}
+
+function clampIndex(index: number, total: number): number {
+  if (total <= 0) return 0;
+  if (!Number.isFinite(index)) return 0;
+  return Math.max(0, Math.min(total - 1, Math.trunc(index)));
 }
 
 function segmentIndexAtOffset(
   text: string,
   segments: readonly TmSegment[],
   offset: number,
-  options: { allowTrailingNewParagraph?: boolean; leadingSlots?: number } = {},
+  options: { allowTrailingNewParagraph?: boolean } = {},
 ): number {
   if (segments.length === 0) return 0;
   const chars = Array.from(text);
   const clamped = Math.max(0, Math.min(chars.length, Math.trunc(offset)));
-  const leadingSlots = options.leadingSlots ?? 0;
-
-  if (leadingSlots > 0 && clamped < segments[0]!.coreStart) {
-    const newlinesBeforeCaret = countNewlines(chars, 0, clamped);
-    return Math.min(leadingSlots, Math.floor(newlinesBeforeCaret / 2));
-  }
 
   for (let i = 0; i < segments.length; i += 1) {
     const seg = segments[i]!;
@@ -96,33 +108,78 @@ function segmentIndexAtOffset(
         clamped > seg.coreEnd &&
         countNewlines(chars, seg.coreEnd, clamped) >= 2
       ) {
-        return leadingSlots + segments.length;
+        return segments.length;
       }
-      return leadingSlots + i;
+      return i;
     }
   }
 
   const last = segments[segments.length - 1]!;
   if (options.allowTrailingNewParagraph && clamped > last.coreEnd && countNewlines(chars, last.coreEnd, clamped) >= 2) {
-    return leadingSlots + segments.length;
+    return segments.length;
   }
-  return leadingSlots + segments.length - 1;
+  return segments.length - 1;
 }
 
-function clampIndex(index: number, total: number): number {
-  if (total <= 0) return 0;
-  if (!Number.isFinite(index)) return 0;
-  return Math.max(0, Math.min(total - 1, Math.trunc(index)));
+type AlignedLookup =
+  | { kind: 'aligned'; entry: Alignment; alignmentIndex: number }
+  | { kind: 'ambiguous' };
+
+function locateAlignmentForSourceSegment(
+  sourceChars: readonly string[],
+  seg: TmSegment,
+  alignments: readonly Alignment[],
+): AlignedLookup {
+  const overlapping: { entry: Alignment; alignmentIndex: number }[] = [];
+  for (let i = 0; i < alignments.length; i += 1) {
+    const entry = alignments[i]!;
+    if (entry.source.start < seg.coreEnd && entry.source.end > seg.coreStart) {
+      overlapping.push({ entry, alignmentIndex: i });
+    }
+  }
+  if (overlapping.length !== 1) return { kind: 'ambiguous' };
+  const { entry, alignmentIndex } = overlapping[0]!;
+  if (entry.source.start < seg.start || entry.source.end > seg.end) {
+    return { kind: 'ambiguous' };
+  }
+  const [eCoreStart, eCoreEnd] = core(sourceChars, entry.source.start, entry.source.end);
+  if (eCoreStart !== seg.coreStart || eCoreEnd !== seg.coreEnd) {
+    return { kind: 'ambiguous' };
+  }
+  return { kind: 'aligned', entry, alignmentIndex };
+}
+
+function sourceSegmentIndexForTargetOffset(
+  sourceSegments: readonly TmSegment[],
+  alignments: readonly Alignment[],
+  offset: number,
+): number | null {
+  const targetEntries = alignments.filter((a): a is Alignment & { target: Span } => a.target !== null);
+  if (targetEntries.length === 0) return null;
+  let matched: (Alignment & { target: Span }) | null = null;
+  for (const entry of targetEntries) {
+    if (offset >= entry.target.start && offset <= entry.target.end) {
+      matched = entry;
+      break;
+    }
+    if (offset > entry.target.end) {
+      matched = entry;
+    }
+  }
+  if (!matched) matched = targetEntries[0]!;
+  const sIdx = sourceSegments.findIndex(seg => matched!.source.start < seg.coreEnd && matched!.source.end > seg.coreStart);
+  return sIdx >= 0 ? sIdx : null;
 }
 
 /**
- * Resolves the active source segment and its corresponding target slice from `source`, `target`, and the most recent
- * cursor/selection state. Defaults to segment 0.
+ * Resolves the active source segment and its corresponding target slice from `source`, `target`, the most recent
+ * cursor/selection state, and any explicit `alignments`. Defaults to segment 0.
  */
 export function resolveActiveSegment(
   source: string,
   target: string,
   cursor: TmSegmentCursor | null = null,
+  alignments: readonly Alignment[] | null = null,
 ): TmActiveSegment {
   const sourceSegments = segmentParagraphs(source);
   const total = sourceSegments.length;
@@ -140,8 +197,8 @@ export function resolveActiveSegment(
   }
 
   const targetSegments = segmentParagraphs(target);
+  const sourceChars = Array.from(source);
   const targetChars = Array.from(target);
-  const leadingSlots = leadingBlankSlots(targetChars, targetSegments, total);
 
   let index = 0;
   if (cursor?.kind === 'index') {
@@ -149,11 +206,13 @@ export function resolveActiveSegment(
   } else if (cursor?.kind === 'offset') {
     if (cursor.side === 'source') {
       index = clampIndex(segmentIndexAtOffset(source, sourceSegments, cursor.offset), total);
+    } else if (alignments !== null && alignments.length > 0) {
+      const mapped = sourceSegmentIndexForTargetOffset(sourceSegments, alignments, cursor.offset);
+      index = mapped !== null ? clampIndex(mapped, total) : 0;
     } else if (targetSegments.length > 0) {
       index = clampIndex(
         segmentIndexAtOffset(target, targetSegments, cursor.offset, {
           allowTrailingNewParagraph: true,
-          leadingSlots,
         }),
         total,
       );
@@ -163,6 +222,44 @@ export function resolveActiveSegment(
   const activeSource = sourceSegments[index]!;
   const prevSource = index > 0 ? sourceSegments[index - 1]!.text : null;
   const nextSource = index + 1 < total ? sourceSegments[index + 1]!.text : null;
+
+  if (alignments !== null) {
+    if (alignments.length === 0) {
+      return {
+        index,
+        total,
+        sourceText: activeSource.text,
+        targetText: '',
+        prevSource,
+        nextSource,
+        targetRange: null,
+        hasAlignedTarget: false,
+      };
+    }
+    const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, alignments);
+    if (lookup.kind === 'aligned' && lookup.entry.target !== null) {
+      return {
+        index,
+        total,
+        sourceText: activeSource.text,
+        targetText: lookup.entry.target.text,
+        prevSource,
+        nextSource,
+        targetRange: { start: scalarOffset(lookup.entry.target.start), end: scalarOffset(lookup.entry.target.end) },
+        hasAlignedTarget: true,
+      };
+    }
+    return {
+      index,
+      total,
+      sourceText: activeSource.text,
+      targetText: '',
+      prevSource,
+      nextSource,
+      targetRange: null,
+      hasAlignedTarget: false,
+    };
+  }
 
   if (total === 1) {
     return {
@@ -191,9 +288,8 @@ export function resolveActiveSegment(
     };
   }
 
-  const mappedTargetIndex = index - leadingSlots;
-  if (mappedTargetIndex >= 0 && mappedTargetIndex < targetSegments.length) {
-    const aligned = targetSegments[mappedTargetIndex]!;
+  if (index < targetSegments.length) {
+    const aligned = targetSegments[index]!;
     return {
       index,
       total,
@@ -218,66 +314,326 @@ export function resolveActiveSegment(
   };
 }
 
-function preferredSeparator(target: string): string {
-  return target.includes('\r\n') ? '\r\n\r\n' : '\n\n';
+function preferredEol(target: string, source = ''): string {
+  if (target.includes('\r\n')) return '\r\n';
+  if (!target && source.includes('\r\n')) return '\r\n';
+  return '\n';
+}
+
+function insertIntoTargetGap(
+  target: string,
+  tChars: readonly string[],
+  prevEnd: number,
+  nextStart: number,
+  hasPrev: boolean,
+  hasNext: boolean,
+  suggestionText: string,
+  eol: string,
+): { nextTarget: string; insertAt: number; coreStart: number; coreEnd: number; delta: number } {
+  const sep = eol + eol;
+  let insertAt = prevEnd;
+  let lead = '';
+  let trail = '';
+
+  if (!hasPrev && !hasNext) {
+    insertAt = tChars.length;
+  } else if (hasPrev && !hasNext) {
+    const nl = countNewlines(tChars, prevEnd, tChars.length);
+    if (nl >= 2) {
+      insertAt = tChars.length;
+    } else if (nl === 1) {
+      insertAt = indexAfterNthNewline(tChars, prevEnd, tChars.length, 1);
+      lead = eol;
+    } else {
+      insertAt = tChars.length;
+      lead = sep;
+    }
+  } else if (!hasPrev && hasNext) {
+    const nl = countNewlines(tChars, 0, nextStart);
+    insertAt = 0;
+    if (nl >= 2) {
+      trail = '';
+    } else if (nl === 1) {
+      trail = eol;
+    } else {
+      trail = sep;
+    }
+  } else {
+    const nl = countNewlines(tChars, prevEnd, nextStart);
+    if (nl >= 2) {
+      insertAt = indexAfterNthNewline(tChars, prevEnd, nextStart, 2);
+      const remainingNl = countNewlines(tChars, insertAt, nextStart);
+      trail = remainingNl >= 2 ? '' : remainingNl === 1 ? eol : sep;
+    } else if (nl === 1) {
+      insertAt = indexAfterNthNewline(tChars, prevEnd, nextStart, 1);
+      lead = eol;
+      trail = sep;
+    } else {
+      insertAt = prevEnd;
+      lead = sep;
+      trail = sep;
+    }
+  }
+
+  const inserted = `${lead}${suggestionText}${trail}`;
+  const leadLen = Array.from(lead).length;
+  const suggestionLen = Array.from(suggestionText).length;
+  const delta = Array.from(inserted).length;
+  const nextTarget = `${tChars.slice(0, insertAt).join('')}${inserted}${tChars.slice(insertAt).join('')}`;
+  const coreStart = insertAt + leadLen;
+  const coreEnd = coreStart + suggestionLen;
+  return { nextTarget, insertAt, coreStart, coreEnd, delta };
+}
+
+function spanOfSegment(seg: TmSegment): Span {
+  return { start: seg.coreStart, end: seg.coreEnd, text: seg.text };
 }
 
 /**
- * Applies `suggestionText` only to `activeIndex` in `target`, preserving all other segments and original separators.
- * When `target` is empty or shorter than `activeIndex + 1`, pads blank-line boundaries safely without overwriting
- * existing translated paragraphs; when `target` has more paragraphs than `sourceSegments` (`total > 1`), refuses to
- * overwrite ambiguous segments and returns `target` unchanged.
+ * Applies `suggestionText` only to `activeIndex` in `target`, preserving every character outside the replaced/inserted
+ * range and keeping explicit `alignments` synchronized.
+ *
+ * - Single-segment source (`total <= 1`, `alignments === null`): replaces whole `target` directly.
+ * - Multi-segment source without explicit alignments: rejects multi-paragraph suggestions (`segmentParagraphs(suggestion).length > 1`),
+ *   refuses overwriting when `targetSegments.length > total`, and when skipping untranslated segments (`index > targetSegments.length`)
+ *   creates explicit `alignments` keeping skipped segments `target: null` (or refuses if > 64 segments / no source context).
+ * - With explicit `alignments`: respects `target === null` (inserts at the exact alignment gap without altering neighbours'
+ *   whitespace/indentation and updates `alignments` via `remapForTargetFill`), and replaces aligned targets via `remapForSplice`.
  */
 export function applySegmentSuggestionResult(
   target: string,
   sourceSegments: readonly TmSegment[],
   activeIndex: number,
   suggestionText: string,
+  options: TmApplySegmentOptions = {},
 ): TmApplySegmentResult {
   const total = sourceSegments.length;
-  if (total <= 1) {
-    return { target: suggestionText, applied: true, reason: 'replaced' };
+  const alignments = options.alignments ?? null;
+  const source = options.source ?? '';
+  const tChars = Array.from(target);
+
+  if (total <= 1 && alignments === null) {
+    const repLen = Array.from(suggestionText).length;
+    return {
+      target: suggestionText,
+      alignments: null,
+      splice: { start: scalarOffset(0), oldEnd: scalarOffset(tChars.length), newEnd: scalarOffset(repLen) },
+      invalidated: [],
+      applied: true,
+      reason: 'replaced',
+    };
+  }
+
+  if (total === 0) {
+    return { target, alignments: alignments ? [...alignments] : null, splice: null, invalidated: [], applied: false, reason: 'unaligned_target' };
   }
 
   const index = clampIndex(activeIndex, total);
+  const suggestionSegments = segmentParagraphs(suggestionText);
+
+  if (total > 1 && alignments === null && suggestionSegments.length > 1) {
+    return {
+      target,
+      alignments: null,
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'multi_paragraph_suggestion',
+    };
+  }
+
+  if (alignments !== null) {
+    if (alignments.length === 0 || !source) {
+      return {
+        target,
+        alignments: [...alignments],
+        splice: null,
+        invalidated: [],
+        applied: false,
+        reason: 'unaligned_target',
+      };
+    }
+    const sourceChars = Array.from(source);
+    const lookup = locateAlignmentForSourceSegment(sourceChars, sourceSegments[index]!, alignments);
+    if (lookup.kind !== 'aligned') {
+      return {
+        target,
+        alignments: [...alignments],
+        splice: null,
+        invalidated: [],
+        applied: false,
+        reason: 'unaligned_target',
+      };
+    }
+    const { entry, alignmentIndex } = lookup;
+    if (entry.target !== null) {
+      const start = entry.target.start;
+      const end = entry.target.end;
+      const repLen = Array.from(suggestionText).length;
+      const nextTarget = `${tChars.slice(0, start).join('')}${suggestionText}${tChars.slice(end).join('')}`;
+      const remap = remapForSplice([...alignments], 'target', source, nextTarget, start, end, repLen);
+      return {
+        target: nextTarget,
+        alignments: remap.alignments,
+        splice: { start: scalarOffset(start), oldEnd: scalarOffset(end), newEnd: scalarOffset(start + repLen) },
+        invalidated: remap.invalidated,
+        applied: true,
+        reason: 'replaced',
+      };
+    }
+
+    let prevAligned: (Alignment & { target: Span }) | null = null;
+    for (let i = alignmentIndex - 1; i >= 0; i -= 1) {
+      const item = alignments[i]!;
+      if (item.target !== null) {
+        prevAligned = item as Alignment & { target: Span };
+        break;
+      }
+    }
+    let nextAligned: (Alignment & { target: Span }) | null = null;
+    for (let i = alignmentIndex + 1; i < alignments.length; i += 1) {
+      const item = alignments[i]!;
+      if (item.target !== null) {
+        nextAligned = item as Alignment & { target: Span };
+        break;
+      }
+    }
+
+    const prevEnd = prevAligned ? prevAligned.target.end : 0;
+    const nextStart = nextAligned ? nextAligned.target.start : tChars.length;
+    const eol = preferredEol(target, source);
+    const placed = insertIntoTargetGap(
+      target,
+      tChars,
+      prevEnd,
+      nextStart,
+      prevAligned !== null,
+      nextAligned !== null,
+      suggestionText,
+      eol,
+    );
+    const remap = remapForTargetFill(
+      [...alignments],
+      source,
+      placed.nextTarget,
+      entry.source.start,
+      entry.source.end,
+      placed.insertAt,
+      placed.coreStart,
+      placed.coreEnd,
+      placed.delta,
+    );
+    return {
+      target: placed.nextTarget,
+      alignments: remap.alignments,
+      splice: {
+        start: scalarOffset(placed.insertAt),
+        oldEnd: scalarOffset(placed.insertAt),
+        newEnd: scalarOffset(placed.insertAt + placed.delta),
+      },
+      invalidated: remap.invalidated,
+      applied: true,
+      reason: 'inserted',
+    };
+  }
+
+  // No explicit alignments yet (`total > 1`).
   const targetSegments = segmentParagraphs(target);
-
   if (targetSegments.length > total) {
-    return { target, applied: false, reason: 'unaligned_target' };
+    return {
+      target,
+      alignments: null,
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'unaligned_target',
+    };
   }
 
-  const sep = preferredSeparator(target);
-  if (targetSegments.length === 0) {
-    const next = index === 0 ? suggestionText : `${sep.repeat(index)}${suggestionText}`;
-    return { target: next, applied: true, reason: 'inserted' };
+  if (index < targetSegments.length) {
+    const seg = targetSegments[index]!;
+    const repLen = Array.from(suggestionText).length;
+    const nextTarget = `${tChars.slice(0, seg.coreStart).join('')}${suggestionText}${tChars.slice(seg.coreEnd).join('')}`;
+    return {
+      target: nextTarget,
+      alignments: null,
+      splice: { start: seg.coreStart, oldEnd: seg.coreEnd, newEnd: scalarOffset(seg.coreStart + repLen) },
+      invalidated: [],
+      applied: true,
+      reason: 'replaced',
+    };
   }
 
-  const tChars = Array.from(target);
-  const leadingSlots = leadingBlankSlots(tChars, targetSegments, total);
-  const mappedTargetIndex = index - leadingSlots;
-
-  if (mappedTargetIndex < 0) {
-    // Inserting into an empty leading slot before existing target paragraphs without overwriting them.
-    const prefixSlots = index;
-    const afterSlots = leadingSlots - index;
-    const rest = tChars.slice(targetSegments[0]!.coreStart).join('');
-    const next = `${prefixSlots > 0 ? sep.repeat(prefixSlots) : ''}${suggestionText}${sep.repeat(Math.max(1, afterSlots))}${rest}`;
-    return { target: next, applied: true, reason: 'inserted' };
+  const isSkipInsert = index > targetSegments.length;
+  if (isSkipInsert && (!source || total > MAX_AUTO_ALIGNMENTS)) {
+    return {
+      target,
+      alignments: null,
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'unaligned_target',
+    };
   }
 
-  if (mappedTargetIndex < targetSegments.length) {
-    const seg = targetSegments[mappedTargetIndex]!;
-    const before = tChars.slice(0, seg.coreStart).join('');
-    const after = tChars.slice(seg.coreEnd).join('');
-    return { target: `${before}${suggestionText}${after}`, applied: true, reason: 'replaced' };
+  const last = targetSegments.length > 0 ? targetSegments[targetSegments.length - 1]! : null;
+  const eol = preferredEol(target, source);
+  const placed = insertIntoTargetGap(
+    target,
+    tChars,
+    last ? last.coreEnd : 0,
+    tChars.length,
+    last !== null,
+    false,
+    suggestionText,
+    eol,
+  );
+  const splice: Splice = {
+    start: scalarOffset(placed.insertAt),
+    oldEnd: scalarOffset(placed.insertAt),
+    newEnd: scalarOffset(placed.insertAt + placed.delta),
+  };
+
+  if (!isSkipInsert) {
+    return {
+      target: placed.nextTarget,
+      alignments: null,
+      splice,
+      invalidated: [],
+      applied: true,
+      reason: 'inserted',
+    };
   }
 
-  const last = targetSegments[targetSegments.length - 1]!;
-  const missingCount = mappedTargetIndex - targetSegments.length + 1;
-  const head = tChars.slice(0, last.coreEnd).join('');
-  const tail = tChars.slice(last.coreEnd).join('').replace(/^(?:\r?\n|[ \t])+/, '');
+  const nextAlignments: Alignment[] = sourceSegments.map((seg, i): Alignment => {
+    if (i < targetSegments.length) {
+      return { source: spanOfSegment(seg), target: spanOfSegment(targetSegments[i]!) };
+    }
+    if (i === index) {
+      return {
+        source: spanOfSegment(seg),
+        target: { start: scalarOffset(placed.coreStart), end: scalarOffset(placed.coreEnd), text: suggestionText },
+      };
+    }
+    return { source: spanOfSegment(seg), target: null };
+  });
+
+  if (!validAlignments(nextAlignments, source, placed.nextTarget)) {
+    return {
+      target,
+      alignments: null,
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'unaligned_target',
+    };
+  }
+
   return {
-    target: `${head}${sep.repeat(missingCount)}${suggestionText}${tail}`,
+    target: placed.nextTarget,
+    alignments: nextAlignments,
+    splice,
+    invalidated: [],
     applied: true,
     reason: 'inserted',
   };
@@ -288,6 +644,7 @@ export function applySegmentSuggestionToTarget(
   sourceSegments: readonly TmSegment[],
   activeIndex: number,
   suggestionText: string,
+  options: TmApplySegmentOptions = {},
 ): string {
-  return applySegmentSuggestionResult(target, sourceSegments, activeIndex, suggestionText).target;
+  return applySegmentSuggestionResult(target, sourceSegments, activeIndex, suggestionText, options).target;
 }

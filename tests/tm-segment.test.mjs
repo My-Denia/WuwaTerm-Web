@@ -1,4 +1,5 @@
-// Unit tests for per-segment TM slicing, active-segment resolution, neighbour context matching, and single-segment apply (MY-491).
+// Unit tests for per-segment TM slicing, active-segment resolution, neighbour context matching,
+// explicit alignment synchronization, whitespace preservation, and single-segment apply (MY-491).
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -13,6 +14,7 @@ import {
   resolveActiveSegment,
   segmentParagraphs,
 } from '../lib/tm-segment.ts';
+import { scalarOffset } from '../lib/workbench-model.ts';
 
 test('segmentParagraphs handles empty, whitespace-only, single-paragraph, and CRLF multi-paragraph texts', () => {
   assert.deepEqual(segmentParagraphs(''), []);
@@ -64,8 +66,7 @@ test('resolveActiveSegment tracks source/target offsets, defaults to segment 0, 
   assert.equal(lastTarget.nextSource, null);
   assert.equal(lastTarget.hasAlignedTarget, true);
 
-  // When user typed a blank line at the end of a partial target (`First target.\n\n`) and caret is after it,
-  // active segment advances to segment 1 even though segment 1 has no text yet.
+  // Trailing blank line at end of partial target (`First target.\n\n`) advances active segment to segment 1.
   const partialTarget = 'First target.\n\n';
   const pendingNext = resolveActiveSegment(source, partialTarget, {
     kind: 'offset',
@@ -122,42 +123,119 @@ test('prevSource/nextSource differentiate context_exact from plain exact in mult
 });
 
 test('applySegmentSuggestionToTarget replaces only the active segment and preserves separators, emojis, and non-active segments', () => {
-  // Single segment: full replacement compatible with short-text mode.
   const singleSrc = segmentParagraphs('今汐。');
   assert.equal(applySegmentSuggestionToTarget('old target\n\nextra', singleSrc, 0, 'Jinhsi.'), 'Jinhsi.');
 
-  // Multi-segment with CRLF, leading/trailing spaces, and non-BMP emoji characters.
   const multiSrc = segmentParagraphs('甲😀。\r\n\r\n乙。\r\n\r\n丙。');
   const multiTgt = '  Alpha 😀.\r\n\r\nBeta.\r\n\r\nGamma.  ';
-  const replacedMid = applySegmentSuggestionToTarget(multiTgt, multiSrc, 1, 'Beta (TM).');
-  assert.equal(replacedMid, '  Alpha 😀.\r\n\r\nBeta (TM).\r\n\r\nGamma.  ');
-
-  const replacedFirst = applySegmentSuggestionToTarget(multiTgt, multiSrc, 0, 'Alpha (TM).');
-  assert.equal(replacedFirst, '  Alpha (TM).\r\n\r\nBeta.\r\n\r\nGamma.  ');
-
-  const replacedLast = applySegmentSuggestionToTarget(multiTgt, multiSrc, 2, 'Gamma (TM).');
-  assert.equal(replacedLast, '  Alpha 😀.\r\n\r\nBeta.\r\n\r\nGamma (TM).  ');
+  assert.equal(
+    applySegmentSuggestionToTarget(multiTgt, multiSrc, 1, 'Beta (TM).'),
+    '  Alpha 😀.\r\n\r\nBeta (TM).\r\n\r\nGamma.  ',
+  );
+  assert.equal(
+    applySegmentSuggestionToTarget(multiTgt, multiSrc, 0, 'Alpha (TM).'),
+    '  Alpha (TM).\r\n\r\nBeta.\r\n\r\nGamma.  ',
+  );
+  assert.equal(
+    applySegmentSuggestionToTarget(multiTgt, multiSrc, 2, 'Gamma (TM).'),
+    '  Alpha 😀.\r\n\r\nBeta.\r\n\r\nGamma (TM).  ',
+  );
 });
 
-test('applySegmentSuggestionToTarget handles empty/shorter target safely and refuses to overwrite when target has more segments than source', () => {
-  const src3 = segmentParagraphs('一。\n\n二。\n\n三。');
+test('skip-segment fill establishes explicit alignments so filling segment 3 then segment 2 never overwrites Tres', () => {
+  const source = '第一段。\n\n第二段。\n\n第三段。';
+  const srcSegs = segmentParagraphs(source);
 
-  // Empty target at index 0 -> direct insert.
-  assert.equal(applySegmentSuggestionToTarget('', src3, 0, 'One.'), 'One.');
+  // Start with only segment 0 translated (`Uno`), no explicit alignments.
+  const step1 = applySegmentSuggestionResult('Uno', srcSegs, 2, 'Tres', { source, alignments: null });
+  assert.equal(step1.applied, true);
+  assert.equal(step1.target, 'Uno\n\nTres');
+  assert.ok(step1.alignments);
+  assert.equal(step1.alignments.length, 3);
+  assert.equal(step1.alignments[0].target?.text, 'Uno');
+  assert.equal(step1.alignments[1].target, null);
+  assert.equal(step1.alignments[2].target?.text, 'Tres');
 
-  // Empty target at index 1 -> pads blank line; applying index 0 afterwards inserts before without overwriting index 1.
-  const afterIdx1 = applySegmentSuggestionToTarget('', src3, 1, 'Two.');
-  assert.equal(afterIdx1, '\n\nTwo.');
-  const resolvedZero = resolveActiveSegment('一。\n\n二。\n\n三。', afterIdx1, { kind: 'index', index: 0 });
-  assert.equal(resolvedZero.hasAlignedTarget, false);
-  assert.equal(resolvedZero.targetText, '');
-  const afterIdx0 = applySegmentSuggestionToTarget(afterIdx1, src3, 0, 'One.');
-  assert.equal(afterIdx0, 'One.\n\nTwo.');
+  // Moving to segment 1 (`第二段。`) must read targetText as '' (never borrow `Tres`!).
+  const activeSeg1 = resolveActiveSegment(source, step1.target, { kind: 'index', index: 1 }, step1.alignments);
+  assert.equal(activeSeg1.targetText, '');
+  assert.equal(activeSeg1.targetRange, null);
+  assert.equal(activeSeg1.hasAlignedTarget, false);
 
-  // Shorter target with 1 translated segment -> appends segment 1 cleanly without touching segment 0.
-  assert.equal(applySegmentSuggestionToTarget('One.', src3, 1, 'Two.'), 'One.\n\nTwo.');
-  assert.equal(applySegmentSuggestionToTarget('One.\r\n\r\n', src3, 1, 'Two.'), 'One.\r\n\r\nTwo.');
-  assert.equal(applySegmentSuggestionToTarget('One.', src3, 2, 'Three.'), 'One.\n\n\n\nThree.');
+  // Clicking on `Tres` in target must map back to segment 2 (`第三段。`), not segment 1!
+  const tresOffset = step1.target.indexOf('Tres') + 1;
+  const fromTargetClick = resolveActiveSegment(source, step1.target, { kind: 'offset', side: 'target', offset: tresOffset }, step1.alignments);
+  assert.equal(fromTargetClick.index, 2);
+  assert.equal(fromTargetClick.targetText, 'Tres');
+
+  // Filling segment 1 (`Dos`) inserts cleanly between `Uno` and `Tres` and keeps all 3 alignments exact.
+  const step2 = applySegmentSuggestionResult(step1.target, srcSegs, 1, 'Dos', {
+    source,
+    alignments: step1.alignments,
+  });
+  assert.equal(step2.applied, true);
+  assert.equal(step2.target, 'Uno\n\nDos\n\nTres');
+  assert.deepEqual(step2.alignments?.map(a => a.target?.text), ['Uno', 'Dos', 'Tres']);
+});
+
+test('manual alignments with target: null respect omitted target and insert cleanly without corrupting neighbour whitespace or indentation', () => {
+  // Case 1: trailing spaces + mixed CRLF/LF + tab (`Uno \r\n \n\t`) preserved verbatim when appending segment 2.
+  const source2 = '一。\n\n二。';
+  const src2 = segmentParagraphs(source2);
+  const appended = applySegmentSuggestionToTarget('Uno \r\n \n\t', src2, 1, 'Dos', { source: source2 });
+  assert.equal(appended, 'Uno \r\n \n\tDos');
+
+  // Case 2: manual alignment where segment 0 is `target: null` and segment 1 has leading indentation (`  Dos`).
+  const targetLeadingIndent = '\n\n  Dos';
+  const alignmentsLeading = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '一。' }, target: null },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '二。' }, target: { start: scalarOffset(4), end: scalarOffset(7), text: 'Dos' } },
+  ];
+  const active0 = resolveActiveSegment(source2, targetLeadingIndent, { kind: 'index', index: 0 }, alignmentsLeading);
+  assert.equal(active0.targetText, '');
+  assert.equal(active0.hasAlignedTarget, false);
+
+  const filled0 = applySegmentSuggestionResult(targetLeadingIndent, src2, 0, 'Uno', {
+    source: source2,
+    alignments: alignmentsLeading,
+  });
+  assert.equal(filled0.applied, true);
+  assert.equal(filled0.target, 'Uno\n\n  Dos');
+  assert.equal(filled0.alignments?.[0].target?.text, 'Uno');
+  assert.equal(filled0.alignments?.[1].target?.text, 'Dos');
+  assert.equal(filled0.alignments?.[1].target?.start, 7);
+
+  // Case 3: manual alignment filling middle segment 1 between `Uno \r\n \n\tTres` preserves mixed whitespace and `\t` indent!
+  const source3 = '一。\n\n二。\n\n三。';
+  const src3 = segmentParagraphs(source3);
+  const mixedTarget = 'Uno \r\n \n\tTres';
+  const tresStart = Array.from('Uno \r\n \n\t').length;
+  const alignmentsMidNull = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '一。' }, target: { start: scalarOffset(0), end: scalarOffset(3), text: 'Uno' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '二。' }, target: null },
+    { source: { start: scalarOffset(8), end: scalarOffset(10), text: '三。' }, target: { start: scalarOffset(tresStart), end: scalarOffset(tresStart + 4), text: 'Tres' } },
+  ];
+  const filledMid = applySegmentSuggestionResult(mixedTarget, src3, 1, 'Dos', {
+    source: source3,
+    alignments: alignmentsMidNull,
+  });
+  assert.equal(filledMid.applied, true);
+  assert.equal(filledMid.target, 'Uno \r\n \nDos\r\n\r\n\tTres');
+  assert.deepEqual(filledMid.alignments?.map(a => a.target?.text), ['Uno', 'Dos', 'Tres']);
+});
+
+test('multi-paragraph suggestion without explicit alignments is refused, and longer target refuses overwrite', () => {
+  const source = '一。\n\n二。\n\n三。';
+  const src3 = segmentParagraphs(source);
+  const target = 'Uno.\n\nDos.';
+
+  const multiSegSuggestion = applySegmentSuggestionResult(target, src3, 0, 'Part A.\n\nPart B.', {
+    source,
+    alignments: null,
+  });
+  assert.equal(multiSegSuggestion.applied, false);
+  assert.equal(multiSegSuggestion.reason, 'multi_paragraph_suggestion');
+  assert.equal(multiSegSuggestion.target, target);
 
   // Longer target (more paragraphs than source) -> refuses to overwrite existing translations.
   const src2 = segmentParagraphs('一。\n\n二。');
@@ -165,6 +243,8 @@ test('applySegmentSuggestionToTarget handles empty/shorter target safely and ref
   const active = resolveActiveSegment('一。\n\n二。', longerTgt, { kind: 'index', index: 1 });
   assert.equal(active.hasAlignedTarget, false);
   assert.equal(active.targetRange, null);
-  const outcome = applySegmentSuggestionResult(longerTgt, src2, 1, 'Overwrite attempt');
-  assert.deepEqual(outcome, { target: longerTgt, applied: false, reason: 'unaligned_target' });
+  const outcome = applySegmentSuggestionResult(longerTgt, src2, 1, 'Overwrite attempt', { source: '一。\n\n二。' });
+  assert.equal(outcome.applied, false);
+  assert.equal(outcome.reason, 'unaligned_target');
+  assert.equal(outcome.target, longerTgt);
 });

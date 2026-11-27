@@ -17,9 +17,10 @@ import { isAmbiguousMention, isLong, sessionReviewFeatures } from '../../lib/lon
 import { judgedReport, layerTwoCounts, layerTwoRows, structureSummary, structureViews } from '../../lib/structure-layer';
 import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
+import { META_FRESH_TTL_MS } from '../../lib/runtime-store';
 import { numberLocale } from '../../lib/ui-language';
-import { tmServiceBasis } from '../../lib/tm-live-provenance';
-import { applySegmentSuggestionResult, resolveActiveSegment, segmentParagraphs, type TmSegmentCursor } from '../../lib/tm-segment';
+import { isMetaFresh, tmServiceBasis } from '../../lib/tm-live-provenance';
+import { resolveActiveSegment, segmentParagraphs, type TmSegmentCursor } from '../../lib/tm-segment';
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
@@ -155,10 +156,20 @@ export function DocumentWorkspace() {
   const previous = reports.at(-2) ?? null;
   const sourceSegments = useMemo(() => segmentParagraphs(source), [source]);
   const targetSegments = useMemo(() => segmentParagraphs(target), [target]);
-  const activeTmSegment = useMemo(() => resolveActiveSegment(source, target, tmCursor), [source, target, tmCursor]);
+  const activeTmSegment = useMemo(() => resolveActiveSegment(source, target, tmCursor, alignments), [source, target, tmCursor, alignments]);
+  const [, setTmTtlVersion] = useState(0);
   useEffect(() => {
     if (tmOpen) void runtime.loadMeta();
   }, [runtime, tmOpen]);
+  useEffect(() => {
+    if (!tmOpen || meta.kind !== 'success') return;
+    const remaining = meta.fetchedAt + META_FRESH_TTL_MS - Date.now();
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => {
+      setTmTtlVersion(v => v + 1);
+    }, remaining + 1);
+    return () => clearTimeout(timer);
+  }, [tmOpen, meta]);
   const [tmResetSeen, setTmResetSeen] = useState(snapshot.resetSignal);
   if (tmResetSeen !== snapshot.resetSignal) {
     setTmResetSeen(snapshot.resetSignal);
@@ -343,13 +354,21 @@ export function DocumentWorkspace() {
   }
 
   function applyMemorySuggestion(suggestionText: string) {
-    const outcome = applySegmentSuggestionResult(target, sourceSegments, activeTmSegment.index, suggestionText);
+    const outcome = doc.applyMemorySuggestion(activeTmSegment.index, suggestionText);
     if (!outcome.applied) return outcome;
     setTmCursor({ kind: 'index', index: activeTmSegment.index });
-    doc.editText('target', outcome.target, { coalesce: false });
     targetEditor.current?.focus();
     return outcome;
   }
+
+  const getLiveTmBasis = useCallback(() => {
+    const liveMeta = runtime.getSnapshot().meta;
+    const liveLatest = doc.getSnapshot().reports.at(-1) ?? null;
+    if (liveMeta.kind === 'success' && !isMetaFresh(liveMeta)) {
+      setTmTtlVersion(v => v + 1);
+    }
+    return tmServiceBasis(liveMeta, liveLatest);
+  }, [runtime, doc]);
 
   function promoteSelectionToTermbase() {
     const selectedSource = sourceEditor.current?.selection()?.text.trim() ?? '';
@@ -914,6 +933,7 @@ export function DocumentWorkspace() {
           direction={effectiveTermbaseDirection}
           currentTermsDbRevision={tmBasis.currentTermsDbRevision}
           currentGameVersion={tmBasis.currentGameVersion}
+          getServiceBasis={getLiveTmBasis}
           entries={tmEntries}
           setEntries={setTmEntries}
           onApplySuggestion={applyMemorySuggestion}

@@ -380,6 +380,108 @@ test('per-segment TM matching with prevSource/nextSource context_exact, per-segm
   expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
 });
 
+test('skip-segment fill never overwrites later segment, multi-paragraph suggestion is rejected, CRLF caret selects right segment, and open-panel TTL expiry drops verified_fresh', async ({ page }) => {
+  await page.clock.install({ time: 1_700_000_000_000 });
+  await open(page);
+  await expand(page);
+
+  const src3 = '首段原文。\n\n中段原文。\n\n末段原文。';
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: '末段原文。',
+      target_text: 'Tres',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+    makeEntry({
+      source_text: '中段原文。',
+      target_text: 'Dos',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+    makeEntry({
+      source_text: '首段原文。',
+      target_text: 'Multi line A.\n\nMulti line B.',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+  ]));
+
+  // Start with only segment 1 translated (`Uno`), skip segment 2 to fill segment 3 (`Tres`),
+  // then return to segment 2 and fill `Dos` -> must produce `Uno\n\nDos\n\nTres` without overwriting `Tres`!
+  await page.locator('#review-source').fill(src3);
+  await page.locator('#review-target').fill('Uno');
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '3').replace('{n}', '3'),
+  );
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nTres');
+
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '3'),
+  );
+  // Confirm button must stay disabled because segment 2 has target: null (never borrows `Tres`!).
+  await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeDisabled();
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos\n\nTres');
+
+  // Verify live TTL expiry while panel remains open (no collapse/reopen) + live re-check on confirm:
+  await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+  await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+
+  // Move to segment 1 (`首段原文。`): verified_fresh before TTL; applying multi-paragraph suggestion
+  // without explicit multi-paragraph protection is refused when alignments are cleared.
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
+
+  // Fast-forward past 10-minute TTL while panel stays open -> badge immediately degrades to provenance_unknown.
+  await page.clock.fastForward(10 * 60 * 1000 + 50);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+
+  // Confirming segment 1 after TTL expiry must write `terms_db_revision: null` (never stamp expired revision).
+  await panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true }).click();
+  const exportedAfterTtl = await downloaded(page, () =>
+    panel(page).getByRole('button', { name: tmMsg.exportButton, exact: true }).click(),
+  );
+  const parsedAfterTtl = parseTranslationMemoryText(exportedAfterTtl);
+  const confirmedSeg1 = parsedAfterTtl.entries.find(e => e.source_text === '首段原文。' && e.target_text === 'Uno');
+  expect(confirmedSeg1?.terms_db_revision).toBeNull();
+
+  // Multi-paragraph TM suggestion rejected when alignments are cleared (no explicit alignments).
+  await page.locator('.alignment-panel summary').click();
+  await page.getByRole('button', { name: m.review.alignmentReset, exact: true }).click();
+  await expect(hits(page).filter({ hasText: 'Multi line A.' })).toHaveCount(1);
+  await hits(page).filter({ hasText: 'Multi line A.' }).getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.multiParagraphSuggestion);
+  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos\n\nTres');
+
+  // Import a CRLF `.txt` manuscript (`第一段CRLF。\r\n\r\n第二段CRLF。`) and click at DOM offset of second paragraph:
+  // DOM normalized selectionStart (`5`) must map back to raw CRLF offset (`7`) and select segment 2 / 2!
+  await page.getByLabel(m.review.importFileAria).setInputFiles({
+    name: 'crlf.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('第一段CRLF。\r\n\r\n第二段CRLF。', 'utf8'),
+  });
+  await page.getByRole('button', { name: m.review.importReplaceConfirm, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '1').replace('{n}', '2'),
+  );
+  const domSeg2Start = '第一段CRLF。\n\n'.length;
+  await page.locator('#review-source').evaluate((el, pos) => {
+    el.focus();
+    el.setSelectionRange(pos, pos);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }, domSeg2Start);
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '2'),
+  );
+  expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
+});
+
 test('three-state freshness badges after term check and merge 8 MiB overflow protection', async ({ page }) => {
   await open(page);
   await expand(page);

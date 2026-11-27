@@ -26,7 +26,12 @@ type Feedback = { kind: 'notice' | 'error'; text: string } | null;
 
 export type ApplySuggestionOutcome = {
   applied: boolean;
-  reason?: 'replaced' | 'inserted' | 'unaligned_target';
+  reason?: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion';
+};
+
+export type TmLiveBasis = {
+  currentTermsDbRevision: string | null;
+  currentGameVersion: string | null;
 };
 
 type Props = {
@@ -40,6 +45,7 @@ type Props = {
   direction: TmDirection;
   currentTermsDbRevision?: string | null;
   currentGameVersion?: string | null;
+  getServiceBasis?: () => TmLiveBasis;
   entries: TmEntry[];
   setEntries: Dispatch<SetStateAction<TmEntry[]>>;
   onApplySuggestion: (targetText: string) => ApplySuggestionOutcome | boolean | void;
@@ -67,6 +73,7 @@ export function MyMemory({
   direction,
   currentTermsDbRevision = null,
   currentGameVersion = null,
+  getServiceBasis,
   entries,
   setEntries,
   onApplySuggestion,
@@ -89,19 +96,34 @@ export function MyMemory({
   const [pending, setPending] = useState<TmFile | null>(null);
   const fileBox = useRef<HTMLInputElement>(null);
 
-  const deferredSource = useDeferredValue(sourceText);
-  const deferredPrevSource = useDeferredValue(prevSource);
-  const deferredNextSource = useDeferredValue(nextSource);
-  const matches = useMemo(
-    () =>
-      matchTranslationMemory(entries, deferredSource, direction, {
-        prevSource: deferredPrevSource,
-        nextSource: deferredNextSource,
+  const currentQuery = useMemo(
+    () => ({
+      segmentIndex,
+      sourceText,
+      prevSource: prevSource ?? null,
+      nextSource: nextSource ?? null,
+    }),
+    [segmentIndex, sourceText, prevSource, nextSource],
+  );
+  const deferredQuery = useDeferredValue(currentQuery);
+  const matchesCurrentSegment =
+    deferredQuery.segmentIndex === currentQuery.segmentIndex
+    && deferredQuery.sourceText === currentQuery.sourceText
+    && deferredQuery.prevSource === currentQuery.prevSource
+    && deferredQuery.nextSource === currentQuery.nextSource;
+  const matchBundle = useMemo(
+    () => ({
+      query: deferredQuery,
+      matches: matchTranslationMemory(entries, deferredQuery.sourceText, direction, {
+        prevSource: deferredQuery.prevSource,
+        nextSource: deferredQuery.nextSource,
         currentTermsDbRevision,
         currentGameVersion,
       }),
-    [entries, deferredSource, deferredPrevSource, deferredNextSource, direction, currentTermsDbRevision, currentGameVersion],
+    }),
+    [entries, deferredQuery, direction, currentTermsDbRevision, currentGameVersion],
   );
+  const matches = matchBundle.matches;
   const directionLabel = direction === 'en' ? t.directionEn : t.directionZh;
   const isMultiSegment = segmentTotal > 1;
   const targetHasMoreSegments = isMultiSegment && targetSegmentTotal > segmentTotal;
@@ -169,6 +191,7 @@ export function MyMemory({
   }
 
   function confirmCurrent() {
+    const liveBasis = getServiceBasis ? getServiceBasis() : { currentTermsDbRevision, currentGameVersion };
     const outcome = confirmTranslationMemoryEntry(entries, {
       sourceText,
       targetText,
@@ -176,8 +199,8 @@ export function MyMemory({
       prevSource: prevSource ?? null,
       nextSource: nextSource ?? null,
       origin: TM_ORIGIN_HUMAN,
-      termsDbRevision: currentTermsDbRevision,
-      gameVersion: currentGameVersion,
+      termsDbRevision: liveBasis.currentTermsDbRevision,
+      gameVersion: liveBasis.currentGameVersion,
     });
     if (outcome.status === 'added') {
       setEntries(outcome.entries);
@@ -203,11 +226,27 @@ export function MyMemory({
     else failure(fill(t.errors.fieldInvalid, { field: fieldName }));
   }
 
-  function applySuggestion(match: TmMatch) {
+  function applySuggestion(match: TmMatch, matchQuery: typeof deferredQuery) {
+    if (
+      !matchesCurrentSegment
+      || matchQuery.segmentIndex !== currentQuery.segmentIndex
+      || matchQuery.sourceText !== currentQuery.sourceText
+      || matchQuery.prevSource !== currentQuery.prevSource
+      || matchQuery.nextSource !== currentQuery.nextSource
+    ) {
+      return;
+    }
     const outcome = onApplySuggestion(match.entry.target_text);
     const applied = typeof outcome === 'boolean' ? outcome : outcome ? outcome.applied : true;
     if (!applied) {
-      failure(fill(t.errors.segmentUnaligned, { sourceTotal: segmentTotal, targetTotal: targetSegmentTotal }));
+      const reason = typeof outcome === 'object' && outcome ? outcome.reason : undefined;
+      if (reason === 'multi_paragraph_suggestion') {
+        failure(t.errors.multiParagraphSuggestion);
+      } else if (targetHasMoreSegments) {
+        failure(fill(t.errors.segmentUnaligned, { sourceTotal: segmentTotal, targetTotal: targetSegmentTotal }));
+      } else {
+        failure(t.errors.segmentAlignmentRequired);
+      }
       return;
     }
     if (isMultiSegment) {
@@ -376,7 +415,7 @@ export function MyMemory({
                 )}
                 {match.entry.note && <p className="my-terms-meta">{match.entry.note}</p>}
                 <div className="finding-actions">
-                  <button type="button" className="secondary-button" onClick={() => applySuggestion(match)}>
+                  <button type="button" className="secondary-button" disabled={!matchesCurrentSegment} onClick={() => applySuggestion(match, matchBundle.query)}>
                     {t.applyButton}
                   </button>
                 </div>
