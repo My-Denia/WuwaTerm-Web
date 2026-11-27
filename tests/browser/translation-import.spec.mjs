@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { expectEditorValue } from '../helpers/editor.mjs';
 
 // Source-file import in quick mode: the one import of the document workspace. A read that resolves after the user has
 // moved on must lose to the newer edit, term insert, query move or translation, and say so instead of overwriting.
@@ -164,14 +165,13 @@ test('a late file read neither cancels a newer translation nor paints its stale 
 
 test('normal import, strict UTF-8 and the real 1 MiB file limit still hold', async ({ page }) => {
   await open(page);
-  const source = page.locator('#review-source');
   const fileInput = page.getByLabel('选择稿件文件');
 
   // A 2,005-character file imports: that is the one-request translation limit, not the 1 MiB file limit. The document is
   // then past the limit, so it opens in manuscript review, where whole-text translation is disabled for it.
   const longText = '今'.repeat(2005);
   await fileInput.setInputFiles({ name: 'source.md', mimeType: 'text/markdown', buffer: Buffer.from(longText) });
-  await expect(source).toHaveValue(longText);
+  await expectEditorValue(page, '#review-source', longText);
   await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'manuscript');
   await expect(page.locator('.notice-state')).toHaveText('已导入原稿文本；可生成译文或填入已有译文后核对术语。');
   await expect(page.getByRole('button', { name: '生成译文', exact: true })).toBeDisabled();
@@ -179,12 +179,12 @@ test('normal import, strict UTF-8 and the real 1 MiB file limit still hold', asy
   // A real file over 1 MiB is rejected before any read starts.
   await fileInput.setInputFiles({ name: 'huge.md', mimeType: 'text/markdown', buffer: Buffer.alloc(1_048_577, 0x61) });
   await expect(page.locator('.error-panel')).toContainText('稿件文件超过大小上限');
-  await expect(source).toHaveValue(longText);
+  await expectEditorValue(page, '#review-source', longText);
 
   // Strict UTF-8 stays fatal.
   await fileInput.setInputFiles({ name: 'gbk.md', mimeType: 'text/markdown', buffer: Buffer.from([0xc4, 0xe3]) });
   await expect(page.locator('.error-panel')).toContainText('文件无效；当前稿件未被替换。');
-  await expect(source).toHaveValue(longText);
+  await expectEditorValue(page, '#review-source', longText);
 });
 
 test('a later file selection still wins over the earlier one', async ({ page }) => {

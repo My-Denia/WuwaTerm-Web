@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 
@@ -62,8 +63,8 @@ async function switchTo(page, language) {
 }
 
 async function fillPair(page) {
-  await page.locator('#review-source').fill(SOURCE);
-  await page.locator('#review-target').fill(TARGET);
+  await fillEditor(page, '#review-source', SOURCE);
+  await fillEditor(page, '#review-target', TARGET);
 }
 
 async function downloadFrom(page, name) {
@@ -272,8 +273,8 @@ test('with no report yet, save/import/export really work and send no review requ
   await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
   await expect(page.locator('.manuscript-save-state')).toContainText('当前工作与这次导入的稿件一致');
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
-  await expect(page.locator('#review-target')).toHaveValue(TARGET);
+  await expectEditorValue(page, '#review-source', SOURCE);
+  await expectEditorValue(page, '#review-target', TARGET);
 
   const resaved = await downloadFrom(page, ZH.save);
   expect(resaved.text).toBe(file);
@@ -308,7 +309,7 @@ test('at zero review quota the local file tools stay usable and send no review r
   const file = serializeWorkfile({ source: SOURCE, target: TARGET, direction: 'en', alignments: null, choices: [], history: [] });
   await page.getByLabel(EN.importFile).setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(file) });
   await page.getByRole('dialog', { name: 'Replace the current manuscript with this workfile?' }).getByRole('button', { name: 'Import and replace', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
+  await expectEditorValue(page, '#review-source', SOURCE);
   for (const name of [EN.clear, EN.save, EN.import, EN.exportTxt, EN.exportResult, EN.exportMarkdown]) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name, exact: true })).toBeEnabled();

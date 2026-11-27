@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -58,8 +59,8 @@ test('Chinese UI: disk-save -> close session -> fresh context -> reopen from fil
   // 1. Create public/synthetic manuscript with Unicode text, correspondence, choice, report history
   const unicodeSource = '今汐：乘霄山之行。\n声骸。';
   const unicodeTarget = 'Jinhsi: Journey to Mt. Firmament.\nEcho.';
-  await page1.locator('#review-source').fill(unicodeSource);
-  await page1.locator('#review-target').fill(unicodeTarget);
+  await fillEditor(page1, '#review-source', unicodeSource);
+  await fillEditor(page1, '#review-target', unicodeTarget);
 
   // Add explicit correspondence (alignment)
   await page1.locator('.alignment-panel > summary').click();
@@ -110,8 +111,8 @@ test('Chinese UI: disk-save -> close session -> fresh context -> reopen from fil
   await setupPage(page2, { requests: requests2 });
 
   // Demonstrate page work is absent in new context
-  await expect(page2.locator('#review-source')).toHaveValue('');
-  await expect(page2.locator('#review-target')).toHaveValue('');
+  await expectEditorValue(page2, '#review-source', '');
+  await expectEditorValue(page2, '#review-target', '');
   await expect(page2.locator('.choice-records')).toHaveCount(0);
   await expect(page2.locator('.review-findings')).toHaveCount(0);
 
@@ -119,8 +120,8 @@ test('Chinese UI: disk-save -> close session -> fresh context -> reopen from fil
   await page2.getByLabel('选择稿件文件').setInputFiles(file1Path);
 
   // Wait for import completion
-  await expect(page2.locator('#review-source')).toHaveValue(unicodeSource);
-  await expect(page2.locator('#review-target')).toHaveValue(unicodeTarget);
+  await expectEditorValue(page2, '#review-source', unicodeSource);
+  await expectEditorValue(page2, '#review-target', unicodeTarget);
   await expect(page2.locator('.notice-state')).toContainText('已在本地恢复稿件');
 
   // Verify choices, alignments, reports restored
@@ -137,7 +138,7 @@ test('Chinese UI: disk-save -> close session -> fresh context -> reopen from fil
 
   // Edit draft in session 2, save a second file to disk
   const editedSource = unicodeSource + '\n追加内容。';
-  await page2.locator('#review-source').fill(editedSource);
+  await fillEditor(page2, '#review-source', editedSource);
   const [downloadEvent2] = await Promise.all([
     page2.waitForEvent('download'),
     page2.getByRole('button', { name: '保存稿件', exact: true }).click(),
@@ -162,7 +163,7 @@ test('Chinese UI: disk-save -> close session -> fresh context -> reopen from fil
   const page3 = await context3.newPage();
   await setupPage(page3);
   await page3.getByLabel('选择稿件文件').setInputFiles(file2Path);
-  await expect(page3.locator('#review-source')).toHaveValue(editedSource);
+  await expectEditorValue(page3, '#review-source', editedSource);
   await page3.close();
   await context3.close();
 
@@ -195,8 +196,8 @@ test('English UI: save/reopen journey and in-place language toggle preservation'
   const enTarget = '今汐与声骸。\n共鸣。';
   // English to Chinese direction
   await page.getByLabel('Translation language').selectOption('zh');
-  await page.locator('#review-source').fill(enSource);
-  await page.locator('#review-target').fill(enTarget);
+  await fillEditor(page, '#review-source', enSource);
+  await fillEditor(page, '#review-target', enTarget);
 
   // Save to actual filesystem path
   const [downloadEvent] = await Promise.all([
@@ -209,8 +210,8 @@ test('English UI: save/reopen journey and in-place language toggle preservation'
   // Switch language with work present: verify text/direction preserved
   await page.getByRole('button', { name: '中文', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-  await expect(page.locator('#review-source')).toHaveValue(enSource);
-  await expect(page.locator('#review-target')).toHaveValue(enTarget);
+  await expectEditorValue(page, '#review-source', enSource);
+  await expectEditorValue(page, '#review-target', enTarget);
 
   await page.close();
   await context.close();
@@ -224,8 +225,8 @@ test('English UI: save/reopen journey and in-place language toggle preservation'
 
   // Import saved English manuscript from filesystem path
   await freshPage.getByLabel('Choose a manuscript file').setInputFiles(enFilePath);
-  await expect(freshPage.locator('#review-source')).toHaveValue(enSource);
-  await expect(freshPage.locator('#review-target')).toHaveValue(enTarget);
+  await expectEditorValue(freshPage, '#review-source', enSource);
+  await expectEditorValue(freshPage, '#review-target', enTarget);
   await expect(freshPage.locator('.notice-state')).toContainText('Manuscript restored locally');
 
   await freshPage.close();
@@ -244,8 +245,8 @@ test('Read back TXT, result JSON, Markdown outputs from actual saved disk paths'
 
   const sampleSource = '今汐。\n声骸。';
   const sampleTarget = 'Jinhsi.\nEcho.';
-  await page.locator('#review-source').fill(sampleSource);
-  await page.locator('#review-target').fill(sampleTarget);
+  await fillEditor(page, '#review-source', sampleSource);
+  await fillEditor(page, '#review-target', sampleTarget);
 
   // Perform a check to have reports and results
   await page.getByRole('button', { name: '核对术语', exact: true }).click();

@@ -1,6 +1,7 @@
 // Resumable long-manuscript term review (contracts/manuscript-v3/SPEC.md, "Runtime: reopening and re-checking").
 // Every request count below is derived from a SPEC step, named beside it. Synthetic text only; the routes are local fakes.
 import { test, expect } from '@playwright/test';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 import { msg } from '../../lib/messages.ts';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 import { candidate } from '../fixtures/manuscript.mjs';
@@ -163,7 +164,7 @@ test('an edit re-checks only that segment, in the session and after save and reo
   await run(page, rec, 4);
   await page.locator('[data-group-filter="all"]').click();
   await findingIn(page, 2).getByRole('button', { name: M.review.adopt, exact: true }).click();
-  await page.locator('#review-target').fill(withTarget(n, 3, ' again'));
+  await fillEditor(page, '#review-target', withTarget(n, 3, ' again'));
   // Step 6, first bullet (an in-session target-only edit): only segment 3, one request with its confirmed choice.
   await expect(runButton(page)).toHaveText(fill(S.runTerm, { n: 1 }));
   await run(page, rec, 5);
@@ -171,7 +172,7 @@ test('an edit re-checks only that segment, in the session and after save and reo
 
   // Segment 3 (with its choice) and segment 4 (without) are edited, then saved and reopened.
   const edited = Array.from({ length: n }, (_, k) => termTargetParagraph(k + 1, k >= 2 ? ' later' : '')).join('\n\n');
-  await page.locator('#review-target').fill(edited);
+  await fillEditor(page, '#review-target', edited);
   const saved = (await downloadFrom(page, '保存稿件')).text;
   expect(JSON.parse(saved).segments.map(r => r.status)).toEqual(['done', 'done', 'pending', 'pending']);
   const { page: again, rec: rec2 } = await reopen(context, saved);
@@ -255,7 +256,7 @@ test('the segment translation run shows waiting, retrying, paused and failed apa
   const held = new Promise(resolve => { release = resolve; });
   const rec = await openWorkbench(page, { capabilities: ['translation-context-v1'], translateFailures: { 2: busy(), 4: failure(502, 'upstream_network_error', { request_id: 'synthetic-request-4' }) },
     translateHold: { 3: held }, translate: (body, n) => `T${n}.` });
-  await page.locator('#review-source').fill(longPair(3).source);
+  await fillEditor(page, '#review-source', longPair(3).source);
   await page.getByRole('button', { name: S.translateLong, exact: true }).click();
   await expect(status(page)).toHaveAttribute('data-run-state', 'waiting');
   await expect(status(page)).toContainText('公共站正在限流，请等待约');
@@ -278,7 +279,7 @@ test('the segment translation run shows waiting, retrying, paused and failed apa
   await expect(status(page)).not.toContainText(M.failure.adviceTranslation);
   await shot(page, testInfo, 'translate-run-failed');
   // Finished segments stay in order; the failed one is sent first on continue (SPEC step 9 for the translation run).
-  await expect(page.locator('#review-target')).toHaveValue('T1.\n\nT3.\n\n');
+  await expectEditorValue(page, '#review-target', 'T1.\n\nT3.\n\n');
   expect(rec.translations.map(b => b.text)).toEqual([1, 2, 2, 3].map(i => zhParagraph(i)));
 });
 
@@ -292,7 +293,7 @@ test('segment checks send alignments by the SPEC rule, and automatic corresponde
   const alignments = paragraphs.map((p, i) => ({ source: span(source, p), target: span(target, translations[i]) }));
   const file = serializeWorkfile({ source, target, direction: 'en', alignments, choices: [], history: [] });
   await page.getByLabel('选择稿件文件').setInputFiles(asFile(file));
-  await expect(page.locator('#review-source')).toHaveValue(source);
+  await expectEditorValue(page, '#review-source', source);
   // Explicit alignments: each segment sends the alignments clipped to its cores, rebased, with the core text.
   await run(page, rec, 2);
   rec.reviews.forEach((body, i) => expect(body.alignments).toEqual([
@@ -335,7 +336,7 @@ test('a handled semantic suggestion stays handled after saving a v3 manuscript, 
   expect(rec2.semantic).toHaveLength(0);
   await expect(again.getByRole('button', { name: `${S.statusHandled} 1`, exact: true })).toBeVisible();
   // Edit the first segment away from its issues, then review it again: the ignore is carried, not raised again.
-  await again.locator('#review-target').fill([`${lines[0]} Extra.`, lines[1]].join('\n\n'));
+  await fillEditor(again, '#review-target', [`${lines[0]} Extra.`, lines[1]].join('\n\n'));
   await chip(again, 0).getByRole('button', { name: S.segReview, exact: true }).click();
   await expect.poll(() => rec2.semantic.length).toBe(1);
   // The re-review merge settles asynchronously: pending 3 (the new omission and segment 2's two issues), handled 1.
@@ -360,7 +361,7 @@ test('a reused segment exports its rebuilt report, and an exported result cannot
 
   const { page: again, rec: rec2 } = await reopen(context, saved);
   await run(again, rec2, 1);
-  await again.locator('#review-target').fill(withTarget(n, 3, ' again'));
+  await fillEditor(again, '#review-target', withTarget(n, 3, ' again'));
   const edited = JSON.parse((await downloadFrom(again, '导出当前结果')).text);
   expect([edited.status, edited.report_is_current]).toEqual(['requires_recheck', false]);
   await run(again, rec2, 2);
@@ -379,8 +380,8 @@ test('a reused segment exports its rebuilt report, and an exported result cannot
   // A report export is not a resumable manuscript: importing it is rejected, plainly, and the open manuscript is kept.
   await again.getByLabel('选择稿件文件').setInputFiles(asFile(exported, 'wuwaterm-result.json'));
   await expect(again.locator('.error-panel')).toHaveText(M.errors.importReportExport);
-  await expect(again.locator('#review-source')).toHaveValue(source);
-  await expect(again.locator('#review-target')).toHaveValue(withTarget(n, 3, ' again'));
+  await expectEditorValue(again, '#review-source', source);
+  await expectEditorValue(again, '#review-target', withTarget(n, 3, ' again'));
 });
 
 test('a replacement asks before discarding a workbench that holds only the segment choice history', async ({ page }) => {
@@ -398,7 +399,7 @@ test('a replacement asks before discarding a workbench that holds only the segme
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: M.review.dialogKeep, exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.locator('#review-source')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '');
   await expect(page.locator('.long-history summary')).toHaveText(fill(S.historyTitle, { n: 1 }));
   const file = JSON.parse((await downloadFrom(page, '保存稿件')).text);
   expect(file.segment_choice_history.map(e => [e.choice, e.source_span.text])).toEqual([['official_pair', '今汐']]);
@@ -443,7 +444,7 @@ test('the Markdown export follows the long-mode state like the JSON export, with
   expect([current.json.status, current.json.report]).toEqual(['current_terminology_check', null]);
   expect(current.md).toContain(M.md.currencyCurrent);
   expect(current.md).not.toContain('`fixture-request`');
-  await page.locator('#review-target').fill(withTarget(2, 2, ' again'));
+  await fillEditor(page, '#review-target', withTarget(2, 2, ' again'));
   const edited = await exports();
   expect(edited.json.status).toBe('requires_recheck');
   expect(edited.md).toContain(M.md.currencyStale);

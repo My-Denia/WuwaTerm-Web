@@ -3,6 +3,7 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { downloadFrom, fillPair, openWorkbench } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue } from '../helpers/editor.mjs';
 
 const M = msg('zh');
 
@@ -13,19 +14,19 @@ test('an exported Markdown report is not imported as source text, and plain text
   const input = page.getByLabel('选择稿件文件');
   await input.setInputFiles({ name: 'wuwaterm-report.md', mimeType: 'text/markdown', buffer: Buffer.from(report.text) });
   await expect(page.locator('.document-workspace .error-panel')).toHaveText(M.errors.importReportExport);
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
+  await expectEditorValue(page, '#review-source', '今汐。');
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
 
   const dialog = page.getByRole('dialog', { name: M.review.importReplaceTitle });
   await input.setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('新的原文。') });
   await dialog.getByRole('button', { name: M.review.dialogKeep, exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
+  await expectEditorValue(page, '#review-source', '今汐。');
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
 
   await input.setInputFiles({ name: 'source.txt', mimeType: 'text/plain', buffer: Buffer.from('新的原文。') });
   await dialog.getByRole('button', { name: M.review.importReplaceConfirm, exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('新的原文。');
-  await expect(page.locator('#review-target')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '新的原文。');
+  await expectEditorValue(page, '#review-target', '');
   await expect(page.locator('.document-workspace .notice-state')).toHaveText(M.notices.importedSourceText);
 });

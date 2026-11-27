@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 import { msg } from '../../lib/messages.ts';
 import { downloadFrom, fill, openWorkbench } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 
 // Edit transactions in the review workbench (contracts/workbench-state/edit-transactions.json): an edit that crosses one
 // alignment boundary takes only the crossed entries out, says so, and one undo brings them back; a deleted translation keeps
@@ -22,7 +23,7 @@ async function openAligned(page) {
   await openWorkbench(page);
   const file = serializeWorkfile({ source: SOURCE, target: TARGET, direction: 'en', alignments: ALIGNMENTS, choices: [], history: [] });
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'aligned.json', mimeType: 'application/json', buffer: Buffer.from(file) });
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
+  await expectEditorValue(page, '#review-source', SOURCE);
   await expect(summary(page)).toHaveText(fill(m.review.alignmentSummaryCount, { n: 3 }));
   await summary(page).click();
 }
@@ -30,7 +31,7 @@ async function openAligned(page) {
 test('an edit across one alignment boundary keeps the untouched alignment, and one undo restores the crossed ones', async ({ page }) => {
   await openAligned(page);
   // Deleting '。\n\n甲' joins the first two paragraphs: it crosses the end of 甲一。 and the start of 甲二。 only.
-  await page.locator('#review-source').fill('甲一二。\n\n甲三。');
+  await fillEditor(page, '#review-source', '甲一二。\n\n甲三。');
   await expect(page.locator('.notice-state')).toHaveText(m.notices.editedAlignmentsPartial);
   await expect(summary(page)).toHaveText(fill(m.review.alignmentSummaryCount, { n: 1 }));
   await expect(rows(page)).toHaveCount(1);
@@ -47,13 +48,13 @@ test('an edit across one alignment boundary keeps the untouched alignment, and o
   expect(JSON.stringify(saved)).not.toMatch(/invalidat|original_?index|emptied/iu);
 
   await undo(page).click();
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
+  await expectEditorValue(page, '#review-source', SOURCE);
   await expect(summary(page)).toHaveText(fill(m.review.alignmentSummaryCount, { n: 3 }));
   await expect(rows(page)).toHaveCount(3);
   await expect(page.locator('.notice-state')).toHaveText(m.notices.undoLocal);
 
   // A deleted translation keeps its source anchor as an untranslated alignment; the others stay.
-  await page.locator('#review-target').fill('One.\n\n\n\nThree.');
+  await fillEditor(page, '#review-target', 'One.\n\n\n\nThree.');
   await expect(rows(page)).toHaveCount(3);
   await expect(rows(page).nth(1)).toContainText('甲二。');
   await expect(rows(page).nth(1)).toContainText(m.review.alignmentRowOmit);
@@ -62,7 +63,7 @@ test('an edit across one alignment boundary keeps the untouched alignment, and o
   await expect(page.getByText(m.notices.editedAlignments)).toHaveCount(0);
 
   // Crossing every entry still leaves none and keeps the existing recovery prompt.
-  await page.locator('#review-source').fill('甲');
+  await fillEditor(page, '#review-source', '甲');
   await expect(page.locator('.notice-state')).toHaveText(m.notices.editedAlignments);
   await expect(page.locator('.alignment-recovery')).toHaveCount(1);
 

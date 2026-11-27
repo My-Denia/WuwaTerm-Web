@@ -1,0 +1,452 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+import {
+  applyDomChangesToRaw,
+  createCompositionTracker,
+  diffDomChange,
+  domOffset,
+  domUtf16ToScalar,
+  normalizeLineBreaks,
+  rawOffset,
+  rawSpanFromDomRange,
+  scalarToDomUtf16,
+} from '../lib/editor-coords.ts';
+import {
+  createCanonicalComputer,
+  shouldOffloadCanonicalToWorker,
+  WORKER_OFFLOAD_CHAR_THRESHOLD,
+} from '../lib/canonical-worker-client.ts';
+import { canonicalOf, createWorkbenchController, EMPTY_DRAFT } from '../lib/workbench-controller.ts';
+import { serializeWorkfile } from '../lib/manuscript.js';
+import { emptySemantic } from '../lib/semantic-state.js';
+
+test('editor-coords round-trips CRLF, CR, CJK, and astral emoji scalar/UTF-16/DOM coordinates losslessly', () => {
+  const raw = '  😀前\r\n今汐。\r声骸。  ';
+  assert.equal(normalizeLineBreaks(raw), '  😀前\n今汐。\n声骸。  ');
+
+  // '今汐' starts after '  ' (2) + '😀' (1 scalar, 2 UTF-16) + '前' (1) + '\r' (1) + '\n' (1) = scalar 6
+  const scalarStart = Array.from(raw.slice(0, raw.indexOf('今汐'))).length;
+  const scalarEnd = scalarStart + 2;
+  const domStart = scalarToDomUtf16(raw, scalarStart);
+  const domEnd = scalarToDomUtf16(raw, scalarEnd);
+  assert.notEqual(domStart, null);
+  assert.notEqual(domEnd, null);
+  assert.equal(normalizeLineBreaks(raw).slice(domStart, domEnd), '今汐');
+  assert.equal(domUtf16ToScalar(raw, domStart), scalarStart);
+  assert.equal(domUtf16ToScalar(raw, domEnd), scalarEnd);
+
+  // Full range selection preserves raw CRLF and CR bytes
+  const norm = normalizeLineBreaks(raw);
+  const full = rawSpanFromDomRange(raw, 0, norm.length);
+  assert.deepEqual(full, { start: 0, end: Array.from(raw).length, text: raw });
+
+  // Boundary guards
+  assert.equal(rawOffset(raw, -1), null);
+  assert.equal(rawOffset(raw, norm.length + 1), null);
+  assert.equal(rawSpanFromDomRange(raw, 3, 3), null);
+  assert.equal(domOffset(raw, raw.indexOf('声骸')), norm.indexOf('声骸'));
+});
+
+test('applyDomChangesToRaw preserves CRLF bytes on untouched paragraphs and keeps all 3 alignments intact', async () => {
+  const rawSource = '甲一。\r\n\r\n甲二。\r\n\r\n甲三。';
+  const rawTarget = 'One.\r\n\r\nTwo.\r\n\r\nThree.';
+  const s1 = { start: 0, end: 3, text: '甲一。' };
+  const s2 = { start: 7, end: 10, text: '甲二。' };
+  const s3 = { start: 14, end: 17, text: '甲三。' };
+  const t1 = { start: 0, end: 4, text: 'One.' };
+  const t2 = { start: 8, end: 12, text: 'Two.' };
+  const t3 = { start: 16, end: 22, text: 'Three.' };
+
+  // Appending '!' at the end of the LF-normalized CM6 document must keep every untouched \r\n\r\n intact.
+  const domEnd = normalizeLineBreaks(rawSource).length;
+  const nextRaw = applyDomChangesToRaw(rawSource, [{ fromA: domEnd, toA: domEnd, inserted: '!' }]);
+  assert.equal(nextRaw, '甲一。\r\n\r\n甲二。\r\n\r\n甲三。!');
+
+  // Applying that edit through the workbench controller keeps all 3 alignments and preserves CRLF on save.
+  const doc = createWorkbenchController({ onPoolRefresh: () => {} });
+  const workfile = serializeWorkfile({
+    source: rawSource,
+    target: rawTarget,
+    direction: 'en',
+    alignments: [
+      { source: s1, target: t1 },
+      { source: s2, target: t2 },
+      { source: s3, target: t3 },
+    ],
+    choices: [],
+    history: [],
+  });
+  await doc.importFile({ name: 'crlf.json', size: Buffer.byteLength(workfile), arrayBuffer: async () => Buffer.from(workfile) });
+  assert.equal(doc.getSnapshot().draft.alignments.length, 3);
+  doc.editText('source', nextRaw);
+  const after = doc.getSnapshot();
+  assert.equal(after.draft.source, '甲一。\r\n\r\n甲二。\r\n\r\n甲三。!');
+  assert.equal(after.draft.alignments.length, 3);
+  const saved = JSON.parse(doc.save().content);
+  assert.equal(saved.source, '甲一。\r\n\r\n甲二。\r\n\r\n甲三。!');
+  assert.equal(saved.alignments.length, 3);
+  doc.dispose();
+});
+
+test('applyDomChangesToRaw holds normalizeLineBreaks(result) === expectedDom across all CR/LF/CRLF boundaries', () => {
+  const applyDom = (dom, changes) => {
+    let out = '';
+    let cur = 0;
+    for (const c of changes) {
+      out += dom.slice(cur, c.fromA) + c.inserted;
+      cur = c.toA;
+    }
+    return out + dom.slice(cur);
+  };
+
+  // Explicit standalone-CR regression cases:
+  // 1) Pressing Enter right after standalone \r in "A\rB" must not fuse into \r\n.
+  const crEnter = applyDomChangesToRaw('A\rB', [{ fromA: 2, toA: 2, inserted: '\n' }]);
+  assert.equal(normalizeLineBreaks(crEnter), 'A\n\nB');
+  // 2) Deleting 'x' between \r and \n in "A\rx\nB" must not fuse into \r\n.
+  const crDel = applyDomChangesToRaw('A\rx\nB', [{ fromA: 2, toA: 3, inserted: '' }]);
+  assert.equal(normalizeLineBreaks(crDel), 'A\n\nB');
+  // 3) Inserting '\n' after intact CRLF preserves the CRLF bytes and adds one newline.
+  const crlfEnter = applyDomChangesToRaw('A\r\nB', [{ fromA: 2, toA: 2, inserted: '\n' }]);
+  assert.equal(crlfEnter, 'A\r\n\nB');
+  assert.equal(normalizeLineBreaks(crlfEnter), 'A\n\nB');
+
+  // Combinatorial sweep over mixed \r / \n / \r\n / emoji texts with inserts, Enter, deletes, and multi-edits.
+  const samples = [
+    'A\rB',
+    'A\nB',
+    'A\r\nB',
+    '\r\n',
+    '\r\r\n\n',
+    'A\rx\nB\r\nC\rD',
+    '😀\r\n今汐\rx\n声骸\r',
+  ];
+  const inserts = ['', '!', '\n', '\n\n', 'x\n', '\nx'];
+  for (const raw of samples) {
+    const dom = normalizeLineBreaks(raw);
+    assert.equal(diffDomChange(dom, dom), null);
+    for (let fromA = 0; fromA <= dom.length; fromA += 1) {
+      for (let toA = fromA; toA <= dom.length; toA += 1) {
+        for (const inserted of inserts) {
+          const changes = [{ fromA, toA, inserted }];
+          const expectedDom = applyDom(dom, changes);
+          const actualRaw = applyDomChangesToRaw(raw, changes);
+          assert.notEqual(actualRaw, null);
+          assert.equal(
+            normalizeLineBreaks(actualRaw),
+            expectedDom,
+            `invariant violated for raw=${JSON.stringify(raw)} change=${JSON.stringify(changes)} -> ${JSON.stringify(actualRaw)}`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test('Android next-frame compositionend commit (ni -> 你), cancelled composition, and non-compose interruption each close cleanly in one undo step', async () => {
+  const doc = createWorkbenchController({ onPoolRefresh: () => {} });
+  doc.editText('source', 'Alpha');
+
+  let currentText = 'Alpha';
+  let scheduledFallback = null;
+  let cancelledCount = 0;
+  const tracker = createCompositionTracker({
+    scheduleFallback(onFire) {
+      scheduledFallback = onFire;
+      return () => {
+        if (scheduledFallback === onFire) scheduledFallback = null;
+        cancelledCount += 1;
+      };
+    },
+    onFinalize() {
+      doc.editText('source', currentText, { composing: false });
+    },
+  });
+
+  const emitDocChange = (nextText, viewComposing, isComposeEvent = false) => {
+    currentText = nextText;
+    const composing = tracker.onLocalDocChange(viewComposing, isComposeEvent);
+    doc.editText('source', nextText, { composing });
+  };
+
+  // 1) Android Chrome flow: compositionstart -> n -> ni -> compositionend -> microtasks drain ->
+  //    next-frame flushSoon() commits ni -> 你. Must stay open across microtasks and fold into ONE undo step.
+  tracker.begin();
+  emitDocChange('Alphan', true, true);
+  emitDocChange('Alphani', true, true);
+  tracker.onCompositionEnd();
+  assert.equal(tracker.isPendingEnd(), true);
+
+  // Drain multiple microtasks (simulating the window before Android's next rAF flushSoon).
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(tracker.isPendingEnd(), true);
+  assert.equal(tracker.isComposing(), true);
+
+  // Next frame: CM6 flushSoon() runs with view.composing === false and commits 'Alpha你'.
+  emitDocChange('Alpha你', false, false);
+  assert.equal(tracker.isPendingEnd(), false);
+  assert.equal(tracker.isComposing(), false);
+  assert.equal(scheduledFallback, null);
+  assert.equal(cancelledCount, 1);
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+
+  // Single undo must restore 'Alpha' directly (never stop at 'Alphani').
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+
+  // 2) Cross-line selection deletion -> composition -> Android next-frame commit -> single undo.
+  doc.editText('source', 'Line1\nLine2');
+  currentText = 'Line1\nLine2';
+  tracker.begin();
+  emitDocChange('', false, false); // CM6 multi-line selection delete before view.composing flips
+  emitDocChange('n', true, true);
+  emitDocChange('ni', true, true);
+  tracker.onCompositionEnd();
+  await Promise.resolve();
+  emitDocChange('你', false, false);
+  assert.equal(doc.getSnapshot().draft.source, '你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Line1\nLine2');
+
+  // 3) Composition cancelled/unchanged with no trailing docChanged: cross-frame fallback closes cleanly.
+  tracker.begin();
+  emitDocChange('Line1\nLine2a', true, true);
+  emitDocChange('Line1\nLine2', true, true);
+  tracker.onCompositionEnd();
+  assert.equal(tracker.isPendingEnd(), true);
+  assert.notEqual(scheduledFallback, null);
+  scheduledFallback();
+  assert.equal(tracker.isPendingEnd(), false);
+  assert.equal(tracker.isComposing(), false);
+
+  // 4) Interleaved Android `compositionend -> blur -> next-frame flush`:
+  //    In CM6, observer.flush() returns false while `delayedFlush >= 0`. Blur must NOT
+  //    prematurely close the composition; when the next frame actually commits `Alpha你`,
+  //    it folds into the same composition step so one undo directly restores `Alpha`.
+  doc.editText('source', 'Alpha');
+  currentText = 'Alpha';
+  let delayedFlush = -1;
+  let queuedNextFrameCommit = null;
+  const mockObserver = {
+    flush() {
+      if (delayedFlush >= 0) return false;
+      return false;
+    },
+  };
+  const blurTracker = createCompositionTracker({
+    scheduleFallback(onFire) {
+      scheduledFallback = onFire;
+      return () => {
+        if (scheduledFallback === onFire) scheduledFallback = null;
+      };
+    },
+    flushPendingObserver() {
+      if (delayedFlush >= 0) return true;
+      return mockObserver.flush() === false && delayedFlush >= 0;
+    },
+    onFinalize() {
+      doc.editText('source', currentText, { composing: false });
+    },
+  });
+  const emitBlurDocChange = (nextText, viewComposing, isComposeEvent = false) => {
+    currentText = nextText;
+    const composing = blurTracker.onLocalDocChange(viewComposing, isComposeEvent);
+    doc.editText('source', nextText, { composing });
+  };
+  blurTracker.begin();
+  emitBlurDocChange('Alphan', true, true);
+  emitBlurDocChange('Alphani', true, true);
+  blurTracker.onCompositionEnd();
+  // Android flushSoon() scheduled a rAF (`delayedFlush >= 0`), so flush() returns false.
+  delayedFlush = 42;
+  queuedNextFrameCommit = () => {
+    delayedFlush = -1;
+    emitBlurDocChange('Alpha你', false, false);
+  };
+  // Blur fires before next frame -> must keep transaction open instead of closing early.
+  assert.equal(mockObserver.flush(), false);
+  blurTracker.onNonComposeEvent();
+  assert.equal(blurTracker.isPendingEnd(), true);
+  assert.equal(blurTracker.isComposing(), true);
+  // Next animation frame lands `Alpha你` -> closes inside the exact same IME step.
+  queuedNextFrameCommit();
+  assert.equal(blurTracker.isPendingEnd(), false);
+  assert.equal(blurTracker.isComposing(), false);
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+  blurTracker.dispose();
+
+  // 5) Chromium EditContext: (a) explicit `compositionend` then `!`, AND (b) missed
+  //    `compositionend` where CM6 already mutated `view.state.doc` to `Alpha你!` before
+  //    entering updateListener — closing via `closeBeforeNewEdit()` must use pre-change
+  //    raw text (`Alpha你`), never double-applying `!` into `Alpha你!!`.
+  doc.editText('source', 'Alpha');
+  let latestRaw = 'Alpha';
+  let liveViewDoc = 'Alpha';
+  const ecTracker = createCompositionTracker({
+    scheduleFallback(onFire) {
+      scheduledFallback = onFire;
+      return () => {
+        if (scheduledFallback === onFire) scheduledFallback = null;
+      };
+    },
+    onFinalize(syncFromView) {
+      if (syncFromView && normalizeLineBreaks(latestRaw) !== liveViewDoc) {
+        latestRaw = liveViewDoc;
+      }
+      doc.editText('source', latestRaw, { composing: false });
+    },
+  });
+  const simulateEcUpdate = (domChange, nextViewDoc, viewComposing, isComposeEvent) => {
+    liveViewDoc = nextViewDoc;
+    if (ecTracker.isComposing() && !ecTracker.isPendingEnd() && !viewComposing && !isComposeEvent) {
+      ecTracker.closeBeforeNewEdit();
+    }
+    const nextRaw = applyDomChangesToRaw(latestRaw, [domChange]);
+    latestRaw = nextRaw;
+    const composing = ecTracker.onLocalDocChange(viewComposing, isComposeEvent);
+    doc.editText('source', nextRaw, { composing });
+  };
+  // (a) Explicit EditContext compositionend then `!`.
+  ecTracker.begin();
+  simulateEcUpdate({ fromA: 5, toA: 5, inserted: 'n' }, 'Alphan', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 6, inserted: 'ni' }, 'Alphani', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 7, inserted: '你' }, 'Alpha你', true, true);
+  ecTracker.finalizeNow();
+  simulateEcUpdate({ fromA: 6, toA: 6, inserted: '!' }, 'Alpha你!', false, false);
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你!');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+
+  // (b) Missed EditContext compositionend: `!` arrives while liveViewDoc is ALREADY 'Alpha你!'.
+  latestRaw = 'Alpha';
+  liveViewDoc = 'Alpha';
+  ecTracker.begin();
+  simulateEcUpdate({ fromA: 5, toA: 5, inserted: 'n' }, 'Alphan', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 6, inserted: 'ni' }, 'Alphani', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 7, inserted: '你' }, 'Alpha你', true, true);
+  // No compositionend event fired; CM6 internally cleared view.composing and dispatched '!'.
+  simulateEcUpdate({ fromA: 6, toA: 6, inserted: '!' }, 'Alpha你!', false, false);
+  assert.equal(latestRaw, 'Alpha你!');
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你!');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+  ecTracker.dispose();
+
+  tracker.dispose();
+  doc.dispose();
+});
+
+test('createCanonicalComputer keeps small drafts off Worker (before and after Worker spawn) and falls back on async Worker error', async () => {
+  const smallInput = {
+    draft: { ...EMPTY_DRAFT, source: '今汐。', target: 'Jinhsi.' },
+    choices: [],
+    reports: [],
+    semantic: emptySemantic(),
+    basis: null,
+  };
+  assert.equal(shouldOffloadCanonicalToWorker(smallInput), false);
+
+  let spawned = 0;
+  let posted = 0;
+  let messageListener = null;
+  let errorListener = null;
+  let terminated = 0;
+  let failNextPost = false;
+  const mockWorker = {
+    addEventListener(type, fn) {
+      if (type === 'message') messageListener = fn;
+      if (type === 'error') errorListener = fn;
+    },
+    postMessage(payload) {
+      posted += 1;
+      if (failNextPost) {
+        queueMicrotask(() => errorListener?.(new Event('error')));
+        return;
+      }
+      const canonical = canonicalOf(payload.draft, payload.choices, payload.reports, payload.semantic, payload.basis);
+      queueMicrotask(() => messageListener?.({ data: { id: payload.id, canonical } }));
+    },
+    terminate() {
+      terminated += 1;
+    },
+  };
+
+  const computer = createCanonicalComputer({
+    workerFactory: () => {
+      spawned += 1;
+      return mockWorker;
+    },
+  });
+
+  // Small draft must NOT spawn a Worker (zero static worker network fetch in quick mode).
+  const expectedSmall = canonicalOf(smallInput.draft, smallInput.choices, smallInput.reports, smallInput.semantic, smallInput.basis);
+  assert.equal(computer.computeSync(smallInput), expectedSmall);
+  assert.equal(await computer.compute(smallInput), expectedSmall);
+  assert.equal(spawned, 0);
+  assert.equal(posted, 0);
+
+  // Large draft crosses offload threshold -> spawns Worker and posts once.
+  const largeInput = {
+    draft: { ...EMPTY_DRAFT, source: '今汐。'.repeat(Math.ceil(WORKER_OFFLOAD_CHAR_THRESHOLD / 3) + 10), target: 'Jinhsi. '.repeat(200) },
+    choices: [],
+    reports: [],
+    semantic: emptySemantic(),
+    basis: null,
+  };
+  assert.equal(shouldOffloadCanonicalToWorker(largeInput), true);
+  const expectedLarge = canonicalOf(largeInput.draft, largeInput.choices, largeInput.reports, largeInput.semantic, largeInput.basis);
+  assert.notEqual(expectedLarge, null);
+  assert.equal(await computer.compute(largeInput), expectedLarge);
+  assert.equal(spawned, 1);
+  assert.equal(posted, 1);
+
+  // Returning to a small draft after Worker creation must bypass postMessage and run locally.
+  assert.equal(await computer.compute(smallInput), expectedSmall);
+  assert.equal(posted, 1);
+
+  // Async Worker `error` while a large request is in flight must resolve with real canonicalOf() (never null!).
+  failNextPost = true;
+  const resolved = await computer.compute(largeInput);
+  assert.equal(resolved, expectedLarge);
+  assert.equal(spawned, 1);
+  assert.equal(posted, 2);
+  assert.equal(terminated, 1);
+
+  // Subsequent call uses fallback without spawning a second broken Worker.
+  assert.equal(await computer.compute(largeInput), expectedLarge);
+  assert.equal(spawned, 1);
+
+  computer.dispose();
+  assert.equal(await computer.compute(smallInput), null);
+});
+
+test('split workbench controller submodules and worker libs have zero React imports', () => {
+  const files = [
+    '../lib/workbench-controller.ts',
+    '../lib/workbench-store.ts',
+    '../lib/workbench-document-ops.ts',
+    '../lib/workbench-long-ops.ts',
+    '../lib/workbench-batch-runner.ts',
+    '../lib/workbench-tm-translate.ts',
+    '../lib/workbench-workfile-io.ts',
+    '../lib/editor-coords.ts',
+    '../lib/canonical.worker.ts',
+    '../lib/canonical-worker-client.ts',
+  ];
+  for (const rel of files) {
+    const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+    assert.equal(/\bfrom\s+['"]react['"]/u.test(src), false, `${rel} must not import react`);
+    assert.equal(/\brequire\(\s*['"]react['"]\s*\)/u.test(src), false, `${rel} must not require react`);
+  }
+});

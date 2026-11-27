@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { fillEditor } from '../helpers/editor.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -74,8 +75,8 @@ test('lookup and review labels follow the interface language and leave unknown k
 
   // Review runs in manuscript mode; the lookup folds there and keeps its results.
   await openManuscript(page);
-  await page.locator('#review-source').fill('声骸');
-  await page.locator('#review-target').fill('Echo');
+  await fillEditor(page, '#review-source', '声骸');
+  await fillEditor(page, '#review-target', 'Echo');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await page.getByRole('button', { name: '全部 1', exact: true }).click();
   const chips = page.locator('.review-findings .term-pair small');

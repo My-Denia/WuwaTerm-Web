@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
@@ -96,8 +97,8 @@ test('A selected then B; B succeeds then A rejects: candidate must not show obso
   await setupFileReadInterception(page);
   await open(page);
 
-  await page.locator('#review-source').fill('初始。');
-  await page.locator('#review-target').fill('Initial.');
+  await fillEditor(page, '#review-source', '初始。');
+  await fillEditor(page, '#review-target', 'Initial.');
 
   // Select A
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -118,7 +119,7 @@ test('A selected then B; B succeeds then A rejects: candidate must not show obso
   // B succeeds
   await page.evaluate(() => window.__resolveRead('file-b.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
   await expect(page.locator('.error-panel')).toHaveCount(0);
 
@@ -127,7 +128,7 @@ test('A selected then B; B succeeds then A rejects: candidate must not show obso
 
   // Obsolete A rejection must NOT display an error in candidate
   await expect(page.locator('.error-panel')).toHaveCount(0);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
 });
 
@@ -136,8 +137,8 @@ test('both success completion orders: A-before-B and B-before-A must end at B', 
   await open(page);
 
   // Subcase 1: B-before-A
-  await page.locator('#review-source').fill('初始1。');
-  await page.locator('#review-target').fill('Initial 1.');
+  await fillEditor(page, '#review-source', '初始1。');
+  await fillEditor(page, '#review-target', 'Initial 1.');
 
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-a1.json', mimeType: 'application/json', buffer: Buffer.from(savedManuscript(A)),
@@ -151,14 +152,14 @@ test('both success completion orders: A-before-B and B-before-A must end at B', 
 
   await page.evaluate(() => window.__resolveRead('file-b1.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await page.evaluate(() => window.__resolveRead('file-a1.json'));
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await expect(page.locator('.error-panel')).toHaveCount(0);
 
   // Subcase 2: A-before-B
-  await page.locator('#review-source').fill('初始2。');
-  await page.locator('#review-target').fill('Initial 2.');
+  await fillEditor(page, '#review-source', '初始2。');
+  await fillEditor(page, '#review-target', 'Initial 2.');
 
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-a2.json', mimeType: 'application/json', buffer: Buffer.from(savedManuscript(A)),
@@ -173,12 +174,12 @@ test('both success completion orders: A-before-B and B-before-A must end at B', 
   // A finishes first, but is obsolete because C was selected
   await page.evaluate(() => window.__resolveRead('file-a2.json'));
   // Manuscript should still be Initial 2, because C has not resolved yet and A is obsolete
-  await expect(page.locator('#review-source')).toHaveValue('初始2。');
+  await expectEditorValue(page, '#review-source', '初始2。');
 
   // Now C finishes
   await page.evaluate(() => window.__resolveRead('file-c2.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(C.source);
+  await expectEditorValue(page, '#review-source', C.source);
   await expect(page.locator('.error-panel')).toHaveCount(0);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
 });
@@ -187,8 +188,8 @@ test('obsolete A parse failure and obsolete A success after B result do not poll
   await setupFileReadInterception(page);
   await open(page);
 
-  await page.locator('#review-source').fill('初始。');
-  await page.locator('#review-target').fill('Initial.');
+  await fillEditor(page, '#review-source', '初始。');
+  await fillEditor(page, '#review-target', 'Initial.');
 
   // Select A with invalid JSON
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -205,14 +206,14 @@ test('obsolete A parse failure and obsolete A success after B result do not poll
   // B succeeds first
   await page.evaluate(() => window.__resolveRead('file-b-good.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
   await expect(page.locator('.error-panel')).toHaveCount(0);
 
   // A resolves with corrupt JSON: should be silently dropped without showing parse error
   await page.evaluate(() => window.__resolveRead('file-a-bad.json'));
   await expect(page.locator('.error-panel')).toHaveCount(0);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
 });
 
@@ -222,8 +223,8 @@ test('B invalid/unreadable/oversize supersedes pending A; current manuscript ret
 
   const initialSource = '当前稿件源文。';
   const initialTarget = 'Current draft target.';
-  await page.locator('#review-source').fill(initialSource);
-  await page.locator('#review-target').fill(initialTarget);
+  await fillEditor(page, '#review-source', initialSource);
+  await fillEditor(page, '#review-target', initialTarget);
 
   // 1. B unreadable / rejects
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -239,11 +240,11 @@ test('B invalid/unreadable/oversize supersedes pending A; current manuscript ret
   // B rejects
   await page.evaluate(() => window.__rejectRead('file-b1-unreadable.json', 'IO error'));
   await expect(page.locator('.error-panel')).toHaveText('文件无效；当前稿件未被替换。');
-  await expect(page.locator('#review-source')).toHaveValue(initialSource);
+  await expectEditorValue(page, '#review-source', initialSource);
 
   // A resolves after B rejection: must NOT import as fallback
   await page.evaluate(() => window.__resolveRead('file-a1.json'));
-  await expect(page.locator('#review-source')).toHaveValue(initialSource);
+  await expectEditorValue(page, '#review-source', initialSource);
   await expect(page.locator('.error-panel')).toHaveText('文件无效；当前稿件未被替换。');
 
   // 2. B invalid JSON
@@ -259,11 +260,11 @@ test('B invalid/unreadable/oversize supersedes pending A; current manuscript ret
 
   await page.evaluate(() => window.__resolveRead('file-b2-corrupt.json'));
   await expect(page.locator('.error-panel')).toHaveText('无法读取 JSON 稿件文件。');
-  await expect(page.locator('#review-source')).toHaveValue(initialSource);
+  await expectEditorValue(page, '#review-source', initialSource);
 
   // A resolves: must NOT import
   await page.evaluate(() => window.__resolveRead('file-a2.json'));
-  await expect(page.locator('#review-source')).toHaveValue(initialSource);
+  await expectEditorValue(page, '#review-source', initialSource);
   await expect(page.locator('.error-panel')).toHaveText('无法读取 JSON 稿件文件。');
 
   // 3. B oversized (>1 MiB). manuscript-v3 SPEC "Limits" and "Reading" steps 1-2: the file gate is now 44 MiB, so a
@@ -282,11 +283,11 @@ test('B invalid/unreadable/oversize supersedes pending A; current manuscript ret
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-b3-huge.json');
   await page.evaluate(() => window.__resolveRead('file-b3-huge.json'));
   await expect(page.locator('.error-panel')).toHaveText(tooLarge);
-  await expect(page.locator('#review-source')).toHaveValue(initialSource);
+  await expectEditorValue(page, '#review-source', initialSource);
 
   // Now A resolves: must NOT import
   await page.evaluate(() => window.__resolveRead('file-a3.json'));
-  await expect(page.locator('#review-source')).toHaveValue(initialSource);
+  await expectEditorValue(page, '#review-source', initialSource);
   await expect(page.locator('.error-panel')).toHaveText(tooLarge);
 });
 
@@ -294,7 +295,7 @@ test('the same file can be selected again and late A cannot clear later selectio
   await setupFileReadInterception(page);
   await open(page);
 
-  await page.locator('#review-source').fill('初始。');
+  await fillEditor(page, '#review-source', '初始。');
 
   // Select file A
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -310,12 +311,12 @@ test('the same file can be selected again and late A cannot clear later selectio
 
   // First A resolves: obsolete, should not import A
   await page.evaluate(() => window.__resolveRead('file-a.json'));
-  await expect(page.locator('#review-source')).toHaveValue('初始。');
+  await expectEditorValue(page, '#review-source', '初始。');
 
   // Second A resolves: owning, imports B
   await page.evaluate(() => window.__resolveRead('file-a.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件');
 
   // Now select the same file once more after completion
@@ -324,7 +325,7 @@ test('the same file can be selected again and late A cannot clear later selectio
   });
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-a.json');
   await page.evaluate(() => window.__resolveRead('file-a.json'));
-  await expect(page.locator('#review-source')).toHaveValue(A.source);
+  await expectEditorValue(page, '#review-source', A.source);
 });
 
 test('source/target edit, clear, check initiation during read preserve newer work', async ({ page }) => {
@@ -332,8 +333,8 @@ test('source/target edit, clear, check initiation during read preserve newer wor
   const { gate } = await open(page);
 
   // 1. Source edit during read
-  await page.locator('#review-source').fill('初始1。');
-  await page.locator('#review-target').fill('Initial 1.');
+  await fillEditor(page, '#review-source', '初始1。');
+  await fillEditor(page, '#review-target', 'Initial 1.');
 
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-a.json', mimeType: 'application/json', buffer: Buffer.from(savedManuscript(A)),
@@ -341,11 +342,11 @@ test('source/target edit, clear, check initiation during read preserve newer wor
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-a.json');
 
   // User edits source while reading
-  await page.locator('#review-source').fill('初始1已修改。');
+  await fillEditor(page, '#review-source', '初始1已修改。');
 
   // Read resolves: generation changed, so A must NOT replace newer work
   await page.evaluate(() => window.__resolveRead('file-a.json'));
-  await expect(page.locator('#review-source')).toHaveValue('初始1已修改。');
+  await expectEditorValue(page, '#review-source', '初始1已修改。');
   await expect(page.locator('.notice-state')).toHaveText('读取文件期间稿件发生变化，未覆盖当前内容，请重新导入。');
 
   // 2. Clear draft during read
@@ -355,16 +356,16 @@ test('source/target edit, clear, check initiation during read preserve newer wor
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-b.json');
 
   await page.getByRole('button', { name: '清空稿件', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '');
 
   await page.evaluate(() => window.__resolveRead('file-b.json'));
   // Newer clear is preserved
-  await expect(page.locator('#review-source')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '');
   await expect(page.locator('.notice-state')).toHaveText('读取文件期间稿件发生变化，未覆盖当前内容，请重新导入。');
 
   // Undo restores the draft before clear
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('初始1已修改。');
+  await expectEditorValue(page, '#review-source', '初始1已修改。');
 
   // 3. Check initiation during read
   let releaseCheck;
@@ -379,7 +380,7 @@ test('source/target edit, clear, check initiation during read preserve newer wor
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   // C resolves while check is in flight: check initiation changed generation
   await page.evaluate(() => window.__resolveRead('file-c.json'));
-  await expect(page.locator('#review-source')).toHaveValue('初始1已修改。');
+  await expectEditorValue(page, '#review-source', '初始1已修改。');
   await expect(page.locator('.notice-state')).toHaveText('读取文件期间稿件发生变化，未覆盖当前内容，请重新导入。');
   releaseCheck();
 });
@@ -388,8 +389,8 @@ test('owning A failure after edit does not overwrite newer work or its notice wi
   await setupFileReadInterception(page);
   await open(page);
 
-  await page.locator('#review-source').fill('用户新文本。');
-  await page.locator('#review-target').fill('User new target.');
+  await fillEditor(page, '#review-source', '用户新文本。');
+  await fillEditor(page, '#review-target', 'User new target.');
 
   // Select A
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -398,13 +399,13 @@ test('owning A failure after edit does not overwrite newer work or its notice wi
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-a.json');
 
   // User edits while A is reading
-  await page.locator('#review-source').fill('用户再次修改。');
+  await fillEditor(page, '#review-source', '用户再次修改。');
 
   // A rejects or fails
   await page.evaluate(() => window.__rejectRead('file-a.json', 'Late read failure'));
 
   // Newer draft is preserved, NO importInvalid error shown
-  await expect(page.locator('#review-source')).toHaveValue('用户再次修改。');
+  await expectEditorValue(page, '#review-source', '用户再次修改。');
   await expect(page.locator('.error-panel')).toHaveCount(0);
 });
 
@@ -412,8 +413,8 @@ test('review finishing during pending read: import then undo restores acceptance
   await setupFileReadInterception(page);
   const { reviews, gate } = await open(page);
 
-  await page.locator('#review-source').fill(A.source);
-  await page.locator('#review-target').fill(A.target);
+  await fillEditor(page, '#review-source', A.source);
+  await fillEditor(page, '#review-target', A.target);
 
   // Gate the review so it stays in flight
   let release;
@@ -435,11 +436,11 @@ test('review finishing during pending read: import then undo restores acceptance
   // B finishes reading and is accepted
   await page.evaluate(() => window.__resolveRead('file-b.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
 
   // Undo import: must restore the acceptance-time reports from the check that just finished
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue(A.source);
+  await expectEditorValue(page, '#review-source', A.source);
   // Findings from the restored report should be visible
   await expect(page.locator('.review-findings')).toBeVisible();
 });
@@ -449,15 +450,15 @@ test('owning read error and changed-during-read relocalize correctly on Chinese/
   await open(page);
 
   // Trigger changed-during-read
-  await page.locator('#review-source').fill('测试。');
-  await page.locator('#review-target').fill('Test.');
+  await fillEditor(page, '#review-source', '测试。');
+  await fillEditor(page, '#review-target', 'Test.');
 
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'file-a.json', mimeType: 'application/json', buffer: Buffer.from(savedManuscript(A)),
   });
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-a.json');
 
-  await page.locator('#review-source').fill('测试变动。');
+  await fillEditor(page, '#review-source', '测试变动。');
   await page.evaluate(() => window.__resolveRead('file-a.json'));
   await expect(page.locator('.notice-state')).toHaveText('读取文件期间稿件发生变化，未覆盖当前内容，请重新导入。');
 
@@ -484,8 +485,8 @@ test('import and undo issue zero translation/review POSTs and exports remain his
   await setupFileReadInterception(page);
   const { reviews, translations } = await open(page);
 
-  await page.locator('#review-source').fill(A.source);
-  await page.locator('#review-target').fill(A.target);
+  await fillEditor(page, '#review-source', A.source);
+  await fillEditor(page, '#review-target', A.target);
 
   // Import B
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -494,11 +495,11 @@ test('import and undo issue zero translation/review POSTs and exports remain his
   await expect.poll(() => page.evaluate(() => window.__pendingReads())).toContain('file-b.json');
   await page.evaluate(() => window.__resolveRead('file-b.json'));
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-source')).toHaveValue(B.source);
+  await expectEditorValue(page, '#review-source', B.source);
 
   // Undo
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue(A.source);
+  await expectEditorValue(page, '#review-source', A.source);
 
   // Zero network calls made
   expect(reviews).toHaveLength(0);
@@ -520,15 +521,15 @@ test('import and undo issue zero translation/review POSTs and exports remain his
 
 test('a v2 manuscript with semantic records imports and restores its decisions', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('当前稿件源文。');
+  await fillEditor(page, '#review-source', '当前稿件源文。');
   const v2 = readFileSync(new URL('../../contracts/manuscript-v2/valid-all-parts.json', import.meta.url));
   const parsed = JSON.parse(v2.toString('utf-8'));
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'semantic.json', mimeType: 'application/json', buffer: v2 });
   await confirmWorkfileImport(page);
   await expect(page.locator('.error-panel')).toHaveCount(0);
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
-  await expect(page.locator('#review-source')).toHaveValue(parsed.source);
-  await expect(page.locator('#review-target')).toHaveValue(parsed.target);
+  await expectEditorValue(page, '#review-source', parsed.source);
+  await expectEditorValue(page, '#review-target', parsed.target);
   // The decisions were made against an older target, so no issue row is shown,
   // but they are kept and a save writes them back instead of dropping them.
   const waiting = page.waitForEvent('download');
@@ -543,8 +544,8 @@ test('a v2 manuscript with semantic records imports and restores its decisions',
 
 test('importing JSON workfile over unsaved revision asks confirmation, coalesces typing undo, and exposes checkpoint recovery', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('一。\n\n二。\n\n三。\n\n四。\n\n五。\n\n六。');
-  await page.locator('#review-target').fill('One. Two. Three. Four. Five. Six.');
+  await fillEditor(page, '#review-source', '一。\n\n二。\n\n三。\n\n四。\n\n五。\n\n六。');
+  await fillEditor(page, '#review-target', 'One. Two. Three. Four. Five. Six.');
 
   const saveWait = page.waitForEvent('download');
   await page.getByRole('button', { name: '保存稿件', exact: true }).click();
@@ -554,7 +555,7 @@ test('importing JSON workfile over unsaved revision asks confirmation, coalesces
   const savedJson = Buffer.concat(chunks).toString('utf8');
 
   // Append unsaved revision
-  await page.locator('#review-target').fill('One. Two. Three. Four. Five. Six. [unsaved edit]');
+  await fillEditor(page, '#review-target', 'One. Two. Three. Four. Five. Six. [unsaved edit]');
 
   // Re-importing JSON must prompt confirmation; Keep must preserve the unsaved edit.
   await page.getByLabel('选择稿件文件').setInputFiles({
@@ -563,19 +564,19 @@ test('importing JSON workfile over unsaved revision asks confirmation, coalesces
   const dialog = page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: '保留当前稿件', exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue('One. Two. Three. Four. Five. Six. [unsaved edit]');
+  await expectEditorValue(page, '#review-target', 'One. Two. Three. Four. Five. Six. [unsaved edit]');
 
   // Import again and confirm replacement.
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'saved.json', mimeType: 'application/json', buffer: Buffer.from(savedJson),
   });
   await confirmWorkfileImport(page);
-  await expect(page.locator('#review-target')).toHaveValue('One. Two. Three. Four. Five. Six.');
+  await expectEditorValue(page, '#review-target', 'One. Two. Three. Four. Five. Six.');
 
   // Typing 25 chars in a row keeps both Undo and the protected pre-import checkpoint working.
   await page.locator('#review-target').focus();
   await page.locator('#review-target').pressSequentially('1234567890123456789012345');
   await expect(page.getByRole('button', { name: '恢复更换前整稿', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '恢复更换前整稿', exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue('One. Two. Three. Four. Five. Six. [unsaved edit]');
+  await expectEditorValue(page, '#review-target', 'One. Two. Three. Four. Five. Six. [unsaved edit]');
 });

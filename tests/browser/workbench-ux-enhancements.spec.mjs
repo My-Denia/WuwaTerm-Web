@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { S, fillPair, openManuscript, openWorkbench, rng, semanticResponse } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, fillEditor, openInspectorTab, readEditorScroll, setEditorScroll, setEditorSelection } from '../helpers/editor.mjs';
 import { camellyaManuscript, termGroupReport } from '../helpers/term-group-fixture.mjs';
 import { dictionary, echo, FRESH_MATCHER_REVISION, hash } from '../fixtures/manuscript.mjs';
 
@@ -102,39 +103,34 @@ test('synchronized scrolling syncs source and target by ratio, respects toggle O
   await expect(syncBtn).toHaveAttribute('aria-pressed', 'true');
 
   // Scroll source to ~50% -> target follows to ~50%.
-  await page.locator('#review-source').evaluate(el => {
-    el.scrollTop = Math.round((el.scrollHeight - el.clientHeight) * 0.5);
-    el.dispatchEvent(new Event('scroll'));
-  });
-  await expect.poll(async () => page.locator('#review-target').evaluate(el => {
-    const max = el.scrollHeight - el.clientHeight;
-    return max > 0 ? el.scrollTop / max : 0;
-  })).toBeGreaterThan(0.4);
+  await setEditorScroll(page, '#review-source', 0.5, { ratio: true, dispatch: true });
+  await expect.poll(async () => {
+    const s = await readEditorScroll(page, '#review-target');
+    const max = s.scrollHeight - s.clientHeight;
+    return max > 0 ? s.scrollTop / max : 0;
+  }).toBeGreaterThan(0.4);
 
   // Turn sync OFF -> scrolling source to 0 leaves target where it was.
   await syncBtn.click();
   await expect(syncBtn).toHaveAttribute('aria-pressed', 'false');
-  const targetBefore = await page.locator('#review-target').evaluate(el => el.scrollTop);
-  await page.locator('#review-source').evaluate(el => {
-    el.scrollTop = 0;
-    el.dispatchEvent(new Event('scroll'));
-  });
+  const targetBefore = (await readEditorScroll(page, '#review-target')).scrollTop;
+  await setEditorScroll(page, '#review-source', 0, { dispatch: true });
   await page.waitForTimeout(100);
-  expect(await page.locator('#review-target').evaluate(el => el.scrollTop)).toBe(targetBefore);
+  expect((await readEditorScroll(page, '#review-target')).scrollTop).toBe(targetBefore);
 
   // Turn sync ON -> locating a finding in target does NOT fight scroll sync / overwrite source scrollTop.
   await syncBtn.click();
   await expect(syncBtn).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();
   await page.getByRole('button', { name: /^全部 / }).click();
-  await page.locator('#review-source').evaluate(el => { el.scrollTop = 0; });
-  await page.locator('#review-target').evaluate(el => { el.scrollTop = 0; });
+  await setEditorScroll(page, '#review-source', 0);
+  await setEditorScroll(page, '#review-target', 0);
   const lastFinding = page.locator('.review-findings .term-result').last();
   await lastFinding.getByRole('button', { name: M.review.jumpTarget, exact: true }).click();
   await page.waitForTimeout(150);
   // Target scrolled down to Echo, while source stayed at top (sync suspended during reveal).
-  expect(await page.locator('#review-target').evaluate(el => el.scrollTop)).toBeGreaterThan(50);
-  expect(await page.locator('#review-source').evaluate(el => el.scrollTop)).toBe(0);
+  expect((await readEditorScroll(page, '#review-target')).scrollTop).toBeGreaterThan(50);
+  expect((await readEditorScroll(page, '#review-source')).scrollTop).toBe(0);
   expect(await storageState(page)).toEqual({ local: 0, session: 0, idb: 0 });
 });
 
@@ -236,32 +232,33 @@ test('promote term finding, semantic issue, and editor selection to in-memory pe
   const findingPromote = page.locator('.review-findings .term-result').first().getByRole('button', { name: M.termbase.promoteButton, exact: true });
   await findingPromote.click();
   await expect(page.locator('.termbase-promote-status')).toContainText('声骸 → Echo');
-  await expect(page.getByTestId('my-terms-counts')).toContainText('1 条');
+  await expect(page.locator('[data-inspector-tab="terms"] .inspector-badge')).toHaveText('1');
   // Target text was NOT auto-mutated (no auto-apply to homographs).
-  await expect(page.locator('#review-target')).toHaveValue(target);
+  await expectEditorValue(page, '#review-target', target);
 
   const alreadyBtn = page.locator('.review-findings .term-result').first().getByRole('button', { name: M.termbase.alreadyInTermbase, exact: true });
   await expect(alreadyBtn).toBeVisible();
   await alreadyBtn.click();
   await expect(page.locator('.termbase-promote-status')).toContainText('已有相同条目');
-  await expect(page.getByTestId('my-terms-counts')).toContainText('1 条');
+  await expect(page.locator('[data-inspector-tab="terms"] .inspector-badge')).toHaveText('1');
 
   // 2) Promote from semantic issue -> uses suggested replacement.
   await page.getByRole('button', { name: S.start, exact: true }).click();
   await expect.poll(() => rec.semantic.length).toBe(1);
   await page.locator('.semantic-card').getByRole('button', { name: M.termbase.promoteButton, exact: true }).click();
   await expect(page.locator('.termbase-promote-status')).toContainText('一起出发 → set out together');
-  await expect(page.getByTestId('my-terms-counts')).toContainText('2 条');
+  await expect(page.locator('[data-inspector-tab="terms"] .inspector-badge')).toHaveText('2');
 
   // 3) Promote from editor selection (source + target selected).
-  await page.locator('#review-source').evaluate(el => { el.focus(); el.setSelectionRange(0, 2); });
-  await page.locator('#review-target').evaluate(el => { el.setSelectionRange(0, 6); });
+  await setEditorSelection(page, '#review-source', 0, 2);
+  await setEditorSelection(page, '#review-target', 0, 6);
   await page.getByRole('button', { name: M.termbase.promoteSelection, exact: true }).click();
   await expect(page.locator('.termbase-promote-status')).toContainText('今汐 → Jinhsi');
-  await expect(page.getByTestId('my-terms-counts')).toContainText('3 条');
+  await expect(page.locator('[data-inspector-tab="terms"] .inspector-badge')).toHaveText('3');
 
-  // Expand MyTerms and verify all 3 entries are present as preferred_term with zero browser storage.
-  await page.locator('.my-terms').getByRole('button', { name: M.workspace.lookupShow, exact: true }).click();
+  // Open the Terms & glossary inspector tab and verify all 3 entries are present as preferred_term with zero browser storage.
+  await openInspectorTab(page, 'terms');
+  await expect(page.getByTestId('my-terms-counts')).toContainText('3 条');
   await expect(page.locator('.my-terms-list li')).toHaveCount(3);
   await expect(page.locator('.my-terms-list')).toContainText(M.termbase.kinds.preferred_term);
   expect(await storageState(page)).toEqual({ local: 0, session: 0, idb: 0 });
@@ -309,7 +306,82 @@ test('Markdown reading preview renders formatting safely, neutralizes XSS, and p
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#review-source')).toBeVisible();
-  await expect(page.locator('#review-source')).toHaveValue(rawMd);
-  await expect(page.locator('#review-target')).toHaveValue(targetMd);
+  await expectEditorValue(page, '#review-source', rawMd);
+  await expectEditorValue(page, '#review-target', targetMd);
   expect(await storageState(page)).toEqual({ local: 0, session: 0, idb: 0 });
+});
+
+test('manuscript CM6 editors expose accessible names, preserve MyTerms drafts across mode switches, and never steal focus on exit', async ({ page }) => {
+  await openQuick(page);
+  // Open MyTerms in quick mode and type an unsaved term draft.
+  const myTerms = page.locator('.my-terms');
+  await myTerms.getByRole('button', { name: M.workspace.lookupShow, exact: true }).click();
+  await myTerms.getByLabel(M.termbase.fieldSource, { exact: true }).fill('未保存词条');
+  await myTerms.getByLabel(M.termbase.fieldTarget, { exact: true }).fill('unsaved entry');
+
+  // Switch to manuscript mode -> CM6 mounts with accessible textbox names via aria-labelledby.
+  await openManuscript(page);
+  await expect(page.getByRole('textbox', { name: M.review.sourceLabel })).toHaveAttribute('id', 'review-source');
+  await expect(page.getByRole('textbox', { name: M.review.targetLabel })).toHaveAttribute('id', 'review-target');
+
+  // Unsaved MyTerms draft survives the quick -> manuscript layout switch.
+  await openInspectorTab(page, 'terms');
+  await expect(myTerms.getByLabel(M.termbase.fieldSource, { exact: true })).toHaveValue('未保存词条');
+  await expect(myTerms.getByLabel(M.termbase.fieldTarget, { exact: true })).toHaveValue('unsaved entry');
+
+  // Click the quick-mode switch button (blurring CM6): exiting manuscript mode must NOT steal focus into #review-source.
+  await page.locator('.mode-switch button').first().click();
+  await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'quick');
+  expect(await page.evaluate(() => document.activeElement?.id ?? '')).not.toBe('review-source');
+  await expect(myTerms.getByLabel(M.termbase.fieldSource, { exact: true })).toHaveValue('未保存词条');
+  await expect(myTerms.getByLabel(M.termbase.fieldTarget, { exact: true })).toHaveValue('unsaved entry');
+});
+
+test('short-manuscript conflict highlights clear when translation is fixed, and CM6 IME ni -> 你 is one undo step', async ({ page, browserName }) => {
+  await openWorkbench(page, {
+    capabilities: [],
+    reviewReport: body => ({
+      request_id: 'hl-check',
+      source_revision: hash(body.source),
+      target_revision: hash(body.target),
+      rule_version: 'review-v2',
+      matcher_revision: FRESH_MATCHER_REVISION,
+      dictionary,
+      coverage: { evaluated: 1, not_evaluated: 0, rules: ['review.term_pair'] },
+      findings: [
+        {
+          id: '0:2:声骸',
+          rule_id: 'review.term_pair',
+          verdict: 'confirmed_conflict',
+          source_span: { start: 0, end: 2, text: '声骸' },
+          target_span: { start: 0, end: 11, text: 'sound shell' },
+          candidates: [echo],
+          candidates_truncated: false,
+        },
+      ],
+      truncated: false,
+    }),
+  });
+  await fillPair(page, '声骸。', 'sound shell.');
+  await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toBeVisible();
+  await expect(page.locator('#review-source .cm-wt-hl-term-conflict')).toHaveCount(1);
+
+  // Fixing the target makes the report stale -> source conflict highlight must also clear immediately.
+  await fillEditor(page, '#review-target', 'Echo.');
+  await expect(page.locator('.review-stale')).toBeVisible();
+  await expect(page.locator('#review-source .cm-wt-hl-term-conflict')).toHaveCount(0);
+
+  // Verify CM6 IME composition (ni -> insertText('你')) is a single undo step in Chromium.
+  if (browserName === 'chromium') {
+    await fillEditor(page, '#review-source', 'Alpha');
+    await setEditorSelection(page, '#review-source', 5, 5);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: 'n', selectionStart: 1, selectionEnd: 1 });
+    await cdp.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
+    await cdp.send('Input.insertText', { text: '你' });
+    await expectEditorValue(page, '#review-source', 'Alpha你');
+    await page.getByRole('button', { name: M.review.undo, exact: true }).click();
+    await expectEditorValue(page, '#review-source', 'Alpha');
+  }
 });

@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { S, fill, openWorkbench, fillPair, blurFocus, rng, semanticResponse, TRIO, trioResponse } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, readEditorSelection } from '../helpers/editor.mjs';
 
 const target = page => page.locator('#review-target');
+const expectTarget = (page, expected) => expectEditorValue(page, '#review-target', expected);
 const card = page => page.locator('.semantic-card');
 const act = (page, name) => card(page).getByRole('button', { name, exact: true });
 const notice = page => page.locator('.notice-state');
@@ -19,7 +21,7 @@ test('accept, adjust and ignore each rewrite or record, jump to the next open is
   await reviewTrio(page);
   await expect(card(page)).toContainText(S.categories.quantity_change);
   await act(page, S.accept).click();
-  await expect(target(page)).toHaveValue('She saw three birds. He came. We leave today.');
+  await expectTarget(page, 'She saw three birds. He came. We leave today.');
   await expect(notice(page)).toHaveText(S.notices.accepted);
   await expect(card(page)).toContainText(S.categories.negation_change);
   await expect(filter(page, S.statusPending, 2)).toBeVisible();
@@ -28,12 +30,12 @@ test('accept, adjust and ignore each rewrite or record, jump to the next open is
   await act(page, S.adjust).click();
   await page.locator('.semantic-adjust textarea').fill('was absent');
   await card(page).getByRole('button', { name: S.adjustApply, exact: true }).click();
-  await expect(target(page)).toHaveValue('She saw three birds. He was absent. We leave today.');
+  await expectTarget(page, 'She saw three birds. He was absent. We leave today.');
   await expect(notice(page)).toHaveText(S.notices.adjusted);
   await expect(card(page)).toContainText(S.categories.meaning_shift);
 
   await act(page, S.ignore).click();
-  await expect(target(page)).toHaveValue('She saw three birds. He was absent. We leave today.');
+  await expectTarget(page, 'She saw three birds. He was absent. We leave today.');
   // The last open issue: the notice says everything under the filter is handled.
   await expect(notice(page)).toHaveText(S.notices.allHandled);
   await expect(filter(page, S.statusHandled, 3)).toBeVisible();
@@ -46,9 +48,9 @@ test('accept, adjust and ignore each rewrite or record, jump to the next open is
 test('undo this restores the translation after an accept and reopens an ignored issue', async ({ page }) => {
   await reviewTrio(page);
   await act(page, S.accept).click();
-  await expect(target(page)).toHaveValue('She saw three birds. He came. We leave today.');
+  await expectTarget(page, 'She saw three birds. He came. We leave today.');
   await page.locator('.semantic-last').getByRole('button', { name: S.undoDecision, exact: true }).click();
-  await expect(target(page)).toHaveValue(TRIO.target);
+  await expectTarget(page, TRIO.target);
   await expect(filter(page, S.statusPending, 3)).toBeVisible();
   await expect(card(page)).toContainText(S.categories.quantity_change);
 
@@ -57,7 +59,7 @@ test('undo this restores the translation after an accept and reopens an ignored 
   await filter(page, S.statusHandled, 1).click();
   await act(page, S.undoDecision).click();
   await expect(filter(page, S.statusPending, 3)).toBeVisible();
-  await expect(target(page)).toHaveValue(TRIO.target);
+  await expectTarget(page, TRIO.target);
 });
 
 test('J and K switch the current issue and Enter selects its translation text', async ({ page }) => {
@@ -66,7 +68,10 @@ test('J and K switch the current issue and Enter selects its translation text', 
   await expect(position).toHaveText(fill(S.position, { i: 1, n: 3 }));
   const select = async needle => {
     const [start, end] = rng(TRIO.target, needle);
-    await expect.poll(() => target(page).evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([start, end]);
+    await expect.poll(async () => {
+      const sel = await readEditorSelection(page, '#review-target');
+      return [sel.start, sel.end];
+    }).toEqual([start, end]);
   };
   await blurFocus(page);
   await page.keyboard.press('j');
@@ -92,7 +97,7 @@ test('choosing the alternative replaces the text with the alternative wording', 
   await card(page).getByRole('radio', { name: S.alternative }).check();
   await expect(card(page).locator('.semantic-suggestion ins')).toHaveText('several');
   await act(page, S.accept).click();
-  await expect(target(page)).toHaveValue('She saw several birds. He came. We leave today.');
+  await expectTarget(page, 'She saw several birds. He came. We leave today.');
 });
 
 test('a withheld suggestion offers no accept, only a manual adjustment or ignore, and effects are explained', async ({ page }) => {
@@ -102,7 +107,7 @@ test('a withheld suggestion offers no accept, only a manual adjustment or ignore
   await act(page, S.adjust).click();
   await page.locator('.semantic-adjust textarea').fill('three');
   await card(page).getByRole('button', { name: S.adjustApply, exact: true }).click();
-  await expect(target(page)).toHaveValue('She saw three birds. He came. We leave today.');
+  await expectTarget(page, 'She saw three birds. He came. We leave today.');
   await expect(card(page)).toContainText(S.categories.negation_change);
   await expect(card(page).locator('.term-effect')).toHaveText(S.termEffects.alters_official_match);
   await expect(act(page, S.accept)).toBeVisible();
@@ -143,7 +148,7 @@ test('re-reviewing a segment flags a place where a suggestion was applied and th
   await page.getByRole('button', { name: S.start, exact: true }).click();
   await expect(page.locator('.semantic-item')).toHaveCount(1);
   await act(page, S.accept).click();
-  await expect(target(page)).toHaveValue('She saw two birds. He did not come. We leave today.');
+  await expectTarget(page, 'She saw two birds. He did not come. We leave today.');
   await target(page).press('Control+End');
   await target(page).pressSequentially(' Extra.');
   await page.locator('.segment-chip').first().getByRole('button', { name: S.segReview, exact: true }).click();

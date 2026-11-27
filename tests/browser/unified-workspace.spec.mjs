@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 import { msg } from '../../lib/messages.ts';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 
 // One document workspace: quick translation and manuscript review are two layouts of one controller. A long text, an
 // imported manuscript or an explicit switch moves to manuscript mode in place, with no handoff dialog and nothing lost;
@@ -78,19 +79,24 @@ test('quick translation fills the shared document, and passing 2,000 characters 
   await expect(mode(page)).toHaveAttribute('data-mode', 'manuscript');
   await expect(page.locator('.notice-state')).toHaveText(m.notices.switchedToManuscript);
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(source).toHaveValue('今汐。' + added);
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
-  const caret = await page.evaluate(() => ({ id: document.activeElement?.id, at: document.activeElement?.selectionStart, length: document.activeElement?.value.length }));
+  await expectEditorValue(page, '#review-source', '今汐。' + added);
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
+  const caret = await page.evaluate(() => {
+    const el = document.activeElement;
+    const view = el?.__cm6View ?? el?.cmView?.view;
+    if (view) return { id: el.id, at: view.state.selection.main.from, length: view.state.doc.length };
+    return { id: el?.id, at: el?.selectionStart, length: el?.value?.length };
+  });
   expect(caret).toEqual({ id: 'review-source', at: 2003, length: 2003 });
   await expect(page.getByRole('button', { name: w.modeQuick, exact: true })).toBeDisabled();
 
   // Undo still holds the quick translation step: one undo drops the long insert, the next the translation.
   await page.getByRole('button', { name: m.review.undo, exact: true }).click();
-  await expect(source).toHaveValue('今汐。');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
+  await expectEditorValue(page, '#review-source', '今汐。');
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
   await expect(mode(page)).toHaveAttribute('data-mode', 'manuscript');
   await page.getByRole('button', { name: m.review.undo, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue('');
+  await expectEditorValue(page, '#review-target', '');
   expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
 });
 
@@ -102,7 +108,7 @@ test('opening manuscript review keeps the quick translation and its direction, a
   await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
   await page.getByRole('button', { name: w.openManuscript, exact: true }).click();
   await expect(mode(page)).toHaveAttribute('data-mode', 'manuscript');
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
+  await expectEditorValue(page, '#review-source', '今汐。');
   await expect(page.getByLabel(m.review.directionAria)).toHaveValue('en');
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
@@ -117,8 +123,8 @@ test('importing a manuscript from quick mode opens it in manuscript mode without
   const file = serializeWorkfile({ source: '今汐。', target: 'Jinhsi.', direction: 'en', alignments: null, choices: [], history: [] });
   await page.getByLabel(m.review.importFileAria).setInputFiles({ name: 'draft.json', mimeType: 'application/json', buffer: Buffer.from(file) });
   await expect(mode(page)).toHaveAttribute('data-mode', 'manuscript');
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
+  await expectEditorValue(page, '#review-source', '今汐。');
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
   await expect(page.locator('.notice-state')).toHaveText(m.notices.imported);
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
@@ -141,22 +147,22 @@ test('redo brings back an edit that took alignments out, and undo restores them 
   await expect(summary).toHaveText(count(3));
   await expect(redo).toBeDisabled();
   // Deleting '。\n\n甲' joins the first two paragraphs: only the two entries it crosses leave the list.
-  await page.locator('#review-source').fill('甲一二。\n\n甲三。');
+  await fillEditor(page, '#review-source', '甲一二。\n\n甲三。');
   await expect(page.locator('.notice-state')).toHaveText(m.notices.editedAlignmentsPartial);
   await expect(summary).toHaveText(count(1));
   await undo.click();
   await expect(summary).toHaveText(count(3));
   await expect(redo).toBeEnabled();
   await redo.click();
-  await expect(page.locator('#review-source')).toHaveValue('甲一二。\n\n甲三。');
+  await expectEditorValue(page, '#review-source', '甲一二。\n\n甲三。');
   await expect(page.locator('.notice-state')).toHaveText(m.notices.redoLocal);
   await expect(summary).toHaveText(count(1));
   await expect(redo).toBeDisabled();
   await undo.click();
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
+  await expectEditorValue(page, '#review-source', SOURCE);
   await expect(summary).toHaveText(count(3));
   // A new edit makes the undone step unreachable.
-  await page.locator('#review-target').fill(TARGET + ' ');
+  await fillEditor(page, '#review-target', TARGET + ' ');
   await expect(redo).toBeDisabled();
 });
 

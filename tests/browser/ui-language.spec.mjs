@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, fillEditor, openInspectorTab } from '../helpers/editor.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -37,8 +38,8 @@ async function open(page) {
 
 async function prepare(page) {
   await openManuscript(page);
-  await page.locator('#review-source').fill(SOURCE);
-  await page.locator('#review-target').fill(TARGET);
+  await fillEditor(page, '#review-source', SOURCE);
+  await fillEditor(page, '#review-target', TARGET);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.locator('.review-current')).toBeVisible();
 }
@@ -116,8 +117,9 @@ test('first visit defaults to Chinese with server-rendered lang and metadata', a
 test('toggling language switches copy in place, keeps workbench state, and sends no requests', async ({ page }) => {
   const { reviews } = await open(page);
   await prepare(page);
-  await page.locator('.term-lookup').getByRole('button', { name: '展开', exact: true }).click();
+  await openInspectorTab(page, 'terms');
   await page.locator('#term-query').fill(CREDENTIAL_CANARY);
+  await openInspectorTab(page, 'review');
   await page.getByRole('button', { name: '全部 2', exact: true }).click();
   await page.getByRole('button', { name: '采用此官方词对', exact: true }).first().click();
   await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
@@ -139,8 +141,8 @@ test('toggling language switches copy in place, keeps workbench state, and sends
   await expect(page.getByRole('heading', { level: 1 })).toContainText('term, delivered accurately');
   await expect(page.getByRole('button', { name: 'Check terms', exact: true })).toBeVisible();
   // Workbench state survives: manuscript, currency semantics, choice, filter, active finding, expansion.
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
-  await expect(page.locator('#review-target')).toHaveValue(TARGET);
+  await expectEditorValue(page, '#review-source', SOURCE);
+  await expectEditorValue(page, '#review-target', TARGET);
   await expect(page.locator('#term-query')).toHaveValue(CREDENTIAL_CANARY);
   // The staged choice reset the phase, so the honest state is "stale / re-check";
   // that semantics must survive the language switch unchanged.
@@ -168,13 +170,13 @@ test('toggling language switches copy in place, keeps workbench state, and sends
 test('translation direction is independent of interface language', async ({ page }) => {
   await open(page);
   await openManuscript(page);
-  await page.locator('#review-source').fill(SOURCE);
-  await page.locator('#review-target').fill(TARGET);
+  await fillEditor(page, '#review-source', SOURCE);
+  await fillEditor(page, '#review-target', TARGET);
   await page.getByLabel('译文语言').selectOption('zh');
   await switchTo(page, 'English');
   await expect(page.getByLabel('Translation language')).toHaveValue('zh');
-  await expect(page.locator('#review-source')).toHaveValue(SOURCE);
-  await expect(page.locator('#review-target')).toHaveValue(TARGET);
+  await expectEditorValue(page, '#review-source', SOURCE);
+  await expectEditorValue(page, '#review-target', TARGET);
   await switchTo(page, '中文');
   await expect(page.getByLabel('译文语言')).toHaveValue('zh');
 });
@@ -244,8 +246,8 @@ test('a reason-less review error body still shows the localized fallback, and re
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
   await openManuscript(page);
-  await page.locator('#review-source').fill('今汐。');
-  await page.locator('#review-target').fill('Jinhsi.');
+  await fillEditor(page, '#review-source', '今汐。');
+  await fillEditor(page, '#review-target', 'Jinhsi.');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.locator('.error-panel')).toContainText('服务暂时不可用');
   await switchTo(page, 'English');
