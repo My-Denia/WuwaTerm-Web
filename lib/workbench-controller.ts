@@ -2841,6 +2841,7 @@ export class WorkbenchController {
       // Construct updated draft with explicit alignments for reused segments.
       let updatedDraft: Draft = startDraft;
       let appliedReusedUnits: (CandidateUnit & { targetText: string })[] = [];
+      let scheduledRemainingCount = candidates.length;
 
       if (reusedUnits.length > 0) {
         if (isBlankMode) {
@@ -2865,13 +2866,56 @@ export class WorkbenchController {
             cursor += len;
           }
           const nextTarget = targetParts.join('');
-          const nextAlignments = sourceSegments.map((seg, i) => ({
-            source: { start: seg.coreStart, end: seg.coreEnd, text: seg.text },
-            target: targetSpans.get(i) ?? null,
-          }));
-          if (validAlignments(nextAlignments, startDraft.source, nextTarget)) {
-            updatedDraft = { ...startDraft, target: nextTarget, alignments: nextAlignments };
-            appliedReusedUnits = reusedUnits;
+          const nextAlignments: { source: Span; target: Span | null }[] = [];
+          let unreusedScheduled = 0;
+          for (let i = 0; i < sourceSegments.length; i += 1) {
+            const seg = sourceSegments[i]!;
+            const reusedTarget = targetSpans.get(i);
+            if (reusedTarget) {
+              nextAlignments.push({
+                source: { start: seg.coreStart, end: seg.coreEnd, text: seg.text },
+                target: reusedTarget,
+              });
+              continue;
+            }
+            const segChars = chars(seg.text);
+            if (segChars.length <= SEGMENT_LIMIT) {
+              nextAlignments.push({
+                source: { start: seg.coreStart, end: seg.coreEnd, text: seg.text },
+                target: null,
+              });
+              unreusedScheduled += 1;
+            } else {
+              // Preserve blank-draft segmentation for unreused paragraphs > SEGMENT_LIMIT
+              // so buildTranslatePlan never silently drops long unreused paragraphs.
+              const subSegments = segmentText(seg.text);
+              for (const sub of subSegments) {
+                const subText = slice(segChars, sub.core_start, sub.core_end);
+                if (!subText.trim()) continue;
+                nextAlignments.push({
+                  source: {
+                    start: scalarOffset(seg.coreStart + sub.core_start),
+                    end: scalarOffset(seg.coreStart + sub.core_end),
+                    text: subText,
+                  },
+                  target: null,
+                });
+                unreusedScheduled += 1;
+              }
+            }
+          }
+          if (nextAlignments.length <= 64 && validAlignments(nextAlignments, startDraft.source, nextTarget)) {
+            const candidateDraft: Draft = { ...startDraft, target: nextTarget, alignments: nextAlignments };
+            // Verify every unreused chunk can actually be scheduled before committing partial reuse.
+            if (unreusedScheduled === 0 || this.buildTranslatePlan(candidateDraft) !== null) {
+              updatedDraft = candidateDraft;
+              appliedReusedUnits = reusedUnits;
+              scheduledRemainingCount = unreusedScheduled;
+            }
+          } else if (reusedUnits.length < candidates.length) {
+            // Exceeds explicit alignment capacity after sub-segmenting long unreused paragraphs:
+            // fall back cleanly to the standard blank-draft translator so nothing is dropped.
+            return false;
           }
         } else {
           let curTarget = startDraft.target;
@@ -2896,6 +2940,7 @@ export class WorkbenchController {
           }
           if (appliedReusedUnits.length > 0) {
             updatedDraft = { ...startDraft, target: curTarget, alignments: curAlignments };
+            scheduledRemainingCount = candidates.length - appliedReusedUnits.length;
           }
         }
       }
@@ -3011,7 +3056,10 @@ export class WorkbenchController {
       }
 
       const demotedSegmentIndices = [...demotedSet].sort((a, b) => a - b);
-      const remainingCount = candidates.length - appliedReusedUnits.length;
+      const remainingCount = appliedReusedUnits.length > 0
+        ? scheduledRemainingCount
+        : candidates.length;
+      const baselineRequests = appliedReusedUnits.length + remainingCount;
       const tmReceipt: TmRunReceipt = {
         reused: appliedReusedUnits.length,
         referenced,
@@ -3020,7 +3068,7 @@ export class WorkbenchController {
         demotedByStructureCheck: demotedSegmentIndices.length,
         demotedSegmentIndices,
         modelCalls: 0,
-        baselineRequests: candidates.length,
+        baselineRequests,
         termsDbRevision: basis.currentTermsDbRevision,
         gameVersion: basis.currentGameVersion,
         structureCheckStatus,

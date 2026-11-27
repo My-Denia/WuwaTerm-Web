@@ -216,7 +216,19 @@ export function MyMemory({
       : `${base}${error.detail ? ` (${error.detail})` : ''} ${fallback}`;
   };
 
+  const storageNotReady = storageMode === 'selfhost_sqlite' && storageState !== 'ready';
+  const mutationsDisabled = busy || storageNotReady;
+
+  function storageNotReadyMessage() {
+    return storageState === 'loading' ? t.storageLoading : t.storageError;
+  }
+
   async function applyReplace(file: TmFile) {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      setPending(null);
+      return;
+    }
     if (persistence) {
       setBusy(true);
       try {
@@ -240,6 +252,11 @@ export function MyMemory({
   }
 
   async function applyMerge(file: TmFile) {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      setPending(null);
+      return;
+    }
     if (persistence) {
       setBusy(true);
       try {
@@ -270,6 +287,11 @@ export function MyMemory({
 
   async function importFile(file?: File) {
     if (!file) return;
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      setPending(null);
+      return;
+    }
     setPending(null);
     try {
       if (file.size > MAX_TM_BYTES) {
@@ -317,6 +339,10 @@ export function MyMemory({
   }
 
   async function confirmCurrent() {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      return;
+    }
     // Tier 3 (Human confirm): strictly fresh live provenance only; NEVER writes `lastKnown` on stale/error/idle (P1-02).
     const confirmBasis = getConfirmBasis
       ? getConfirmBasis()
@@ -424,6 +450,10 @@ export function MyMemory({
   }
 
   async function removeAt(index: number) {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      return;
+    }
     const targetEntry = entries[index];
     if (!targetEntry) return;
     if (persistence) {
@@ -537,10 +567,10 @@ export function MyMemory({
           </p>
         )}
         <div className="my-terms-actions">
-          <button type="button" className="secondary-button" disabled={busy} onClick={() => fileBox.current?.click()}>
+          <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => fileBox.current?.click()}>
             {t.importButton}
           </button>
-          <button type="button" className="secondary-button" disabled={busy} onClick={exportFile}>
+          <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={exportFile}>
             {t.exportButton}
           </button>
         </div>
@@ -548,7 +578,7 @@ export function MyMemory({
           <button
             type="button"
             className="secondary-button my-memory-confirm-btn"
-            disabled={busy || !sourceText.trim() || !targetText.trim() || isTargetCursorUnaligned}
+            disabled={mutationsDisabled || !sourceText.trim() || !targetText.trim() || isTargetCursorUnaligned}
             onClick={() => void confirmCurrent()}
           >
             {isMultiSegment ? t.confirmSegmentButton : t.confirmButton}
@@ -559,6 +589,7 @@ export function MyMemory({
           className="visually-hidden"
           type="file"
           tabIndex={-1}
+          disabled={mutationsDisabled}
           accept=".json,application/json"
           aria-label={t.importAria}
           onChange={event => {
@@ -571,10 +602,10 @@ export function MyMemory({
           <div className="my-terms-confirm" role="group" aria-label={t.importButton}>
             <p>{fill(t.replacePrompt, { n: entries.length })}</p>
             <div className="my-terms-actions">
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => void applyMerge(pending)}>
+              <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyMerge(pending)}>
                 {t.mergeConfirm}
               </button>
-              <button type="button" className="secondary-button" disabled={busy} onClick={() => void applyReplace(pending)}>
+              <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyReplace(pending)}>
                 {t.replaceConfirm}
               </button>
               <button type="button" className="secondary-button" disabled={busy} onClick={() => setPending(null)}>
@@ -664,7 +695,7 @@ export function MyMemory({
                     {entry.direction === 'en' ? t.directionEn : t.directionZh} · {fill(t.hitMeta, { count: entry.use_count, origin: t.origins[entry.origin] })}
                   </p>
                   <div className="finding-actions">
-                    <button type="button" className="text-button" disabled={busy} onClick={() => void removeAt(idx)}>
+                    <button type="button" className="text-button" disabled={mutationsDisabled} onClick={() => void removeAt(idx)}>
                       {t.remove}
                       <span className="visually-hidden"> {entry.source_text}</span>
                     </button>

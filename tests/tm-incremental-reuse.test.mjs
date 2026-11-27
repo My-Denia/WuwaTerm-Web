@@ -286,3 +286,58 @@ test('explicit alignments with target: null reuses only the null segment with 0 
   assert.equal(snap.tmReceipt?.baselineRequests, 1);
   assert.equal(snap.tmReceipt?.modelCalls, 0);
 });
+
+test('blank draft with short reused paragraph and 1900-scalar unreused paragraph sub-segments and translates the long paragraph without dropping it', async () => {
+  const shortPara = '首段文';
+  const longPara = '长'.repeat(1900);
+  const confirmed = confirmTranslationMemoryEntry([], {
+    sourceText: shortPara,
+    targetText: 'First short paragraph.',
+    direction: 'en',
+    prevSource: null,
+    nextSource: longPara,
+    origin: 'human_confirmed',
+    termsDbRevision: REV,
+    gameVersion: '3.7.0',
+  });
+  assert.equal(confirmed.status, 'added');
+
+  const calls = [];
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => confirmed.entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      calls.push({ path, body });
+      if (path === '/api/structure-checks') {
+        return { response: new Response(null, { status: 200 }), value: okStructureResponse(body) };
+      }
+      if (path === '/api/translations') {
+        const len = Array.from(body.text).length;
+        return {
+          response: new Response(null, { status: 200 }),
+          value: { kind: 'llm', text: `Translated(${len})`, direction: 'en', dictionary_miss: false, request_id: `req-${len}` },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  doc.editText('source', `${shortPara}\n\n${longPara}`);
+  await doc.startTranslateRun();
+  await flushMicrotasks();
+
+  const translateCalls = calls.filter(c => c.path === '/api/translations');
+  assert.equal(translateCalls.length, 2);
+  assert.deepEqual(
+    translateCalls.map(c => Array.from(c.body.text).length),
+    [1800, 100],
+  );
+  const snap = doc.getSnapshot();
+  assert.equal(snap.draft.target, 'First short paragraph.\n\nTranslated(1800)\n\nTranslated(100)');
+  assert.equal(snap.tmReceipt?.reused, 1);
+  assert.equal(snap.tmReceipt?.retranslated, 2);
+  assert.equal(snap.tmReceipt?.modelCalls, 2);
+  assert.equal(snap.tmReceipt?.baselineRequests, 3);
+});
