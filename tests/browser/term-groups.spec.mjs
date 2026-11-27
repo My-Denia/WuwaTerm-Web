@@ -5,6 +5,7 @@ import { msg } from '../../lib/messages.ts';
 import { parseWorkfile } from '../../lib/manuscript.js';
 import { hash } from '../fixtures/manuscript.mjs';
 import { S, downloadFrom, fill, fillPair, openWorkbench } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, readEditorValue } from '../helpers/editor.mjs';
 import { camellyaManuscript, denseManuscript, termGroupReport, tunerManuscript } from '../helpers/term-group-fixture.mjs';
 
 const M = msg('zh');
@@ -166,12 +167,12 @@ test('replace puts the official rendering into one place only; a word that stand
   await expect(tuner.locator('.term-group-renderings')).toHaveText(fill(S.groupRenderings, { items: '调谐器 ×2 · 调音师 ×1' }));
   const conflict = places(tuner).filter({ has: page.locator('.occurrence-translation', { hasText: '调音师' }) });
   await expect(conflict).toHaveCount(1);
-  const before = await target(page).inputValue();
+  const before = await readEditorValue(page, '#review-target');
   expect(before.split('调音师').length - 1).toBe(2);
   // The places whose translation already is the official one offer no replacement; the conflicting one offers it.
   await expect(places(tuner).getByRole('button', { name: fill(S.occReplace, { term: '调谐器' }), exact: true })).toHaveCount(1);
   await conflict.getByRole('button', { name: fill(S.occReplace, { term: '调谐器' }), exact: true }).click();
-  const after = await target(page).inputValue();
+  const after = await readEditorValue(page, '#review-target');
   expect(after.split('调音师').length - 1).toBe(1);
   expect(after.length).toBe(before.length - '调音师'.length + '调谐器'.length);
   expect(after.endsWith('后来调音师也来了。') || after.includes('后来调音师也来了。')).toBe(true);
@@ -191,7 +192,7 @@ test('replace puts the official rendering into one place only; a word that stand
   await expect(filterButton(page, 'confirmed')).toHaveAttribute('data-group-count', '0');
   // One undo step restores the text, and with it the complete run and the inconsistent group.
   await page.getByRole('button', { name: M.review.undo, exact: true }).click();
-  await expect(target(page)).toHaveValue(before);
+  await expectEditorValue(page, '#review-target', before);
   await expect(page.locator('.groups-unchecked')).toHaveCount(0);
   await expect(status(page)).toHaveText(S.phaseTermDone);
   await expect(runButton(page)).not.toHaveAttribute('data-recheck', 'true');
@@ -221,17 +222,17 @@ test('a place with no translation hit opens an editor for that one segment; appl
   await apply.click();
   const full = manuscript.target.split('\n\n');
   full[1] = revised;
-  await expect(target(page)).toHaveValue(full.join('\n\n'));
+  await expectEditorValue(page, '#review-target', full.join('\n\n'));
   await expect(page.locator('.notice-state')).toHaveText(S.notices.longSegmentRevised);
   await expect(status(page)).toHaveText(fill(S.phaseTermDoneRecheck, { n: 1 }));
   await page.getByRole('button', { name: M.review.undo, exact: true }).click();
   await expect(status(page)).toHaveText(S.phaseTermDone);
-  await expect(target(page)).toHaveValue(manuscript.target);
+  await expectEditorValue(page, '#review-target', manuscript.target);
   // The editor closes with Cancel and changes nothing.
   await places(groupOf(page, '椿')).nth(1).getByRole('button', { name: S.occRevise, exact: true }).click();
   await places(groupOf(page, '椿')).nth(1).getByRole('button', { name: S.reviseCancel, exact: true }).click();
   await expect(page.locator('.term-revise')).toHaveCount(0);
-  await expect(target(page)).toHaveValue(manuscript.target);
+  await expectEditorValue(page, '#review-target', manuscript.target);
 });
 
 test('the banner counts the segments that were not paired, keeps the layout and jumps to the first one that needs a manual split', async ({ page }) => {
@@ -246,7 +247,7 @@ test('the banner counts the segments that were not paired, keeps the layout and 
   await expect(banner).toContainText(S.mismatchBody);
   await expect(banner.locator('.track-note')).toHaveText(fill(S.mismatchList, { list: '5' }));
   // Nothing was regrouped by force: the translation is exactly what was typed, and no request was sent.
-  await expect(target(page)).toHaveValue(manuscript.target);
+  await expectEditorValue(page, '#review-target', manuscript.target);
   expect(rec.reviews).toHaveLength(0);
   await expect(page.locator('.split-helper')).toHaveCount(0);
   await banner.getByRole('button', { name: S.mismatchJump, exact: true }).click();

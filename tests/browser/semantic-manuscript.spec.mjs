@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { S, fill, openWorkbench, fillPair, downloadFrom, TRIO, trioResponse, zhParagraph, enParagraph, failure } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue } from '../helpers/editor.mjs';
 
 const card = page => page.locator('.semantic-card');
 const act = (page, name) => card(page).getByRole('button', { name, exact: true });
@@ -19,7 +20,7 @@ async function handleTrio(page, { accept = true, ...options } = {}) {
     return rec;
   }
   await act(page, S.accept).click();
-  await expect(page.locator('#review-target')).toHaveValue('She saw two birds. He did not come. We leave today.');
+  await expectEditorValue(page, '#review-target', 'She saw two birds. He did not come. We leave today.');
   await expect(filter(page, S.statusHandled, 2)).toBeVisible();
   return rec;
 }
@@ -58,12 +59,12 @@ test('a saved v2 manuscript with an ignored issue comes back as history with the
   expect(file.semantic_history).toHaveLength(1);
 
   await page.getByRole('button', { name: '清空稿件', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '');
   await expect(page.locator('.semantic-item')).toHaveCount(0);
 
   await page.getByLabel('选择稿件文件').setInputFiles(buffer(saved));
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
-  await expect(page.locator('#review-target')).toHaveValue(TRIO.target);
+  await expectEditorValue(page, '#review-target', TRIO.target);
   await filter(page, S.statusAll, 3).click();
   await expect(page.locator('.semantic-item')).toHaveCount(3);
   await expect(card(page)).toContainText(S.importedBadge);
@@ -80,7 +81,7 @@ test('a v2 manuscript with an applied suggestion keeps its decisions through cle
   await page.getByRole('button', { name: '清空稿件', exact: true }).click();
   await page.getByLabel('选择稿件文件').setInputFiles(buffer(saved));
   await expect(page.locator('.notice-state')).toContainText('已在本地恢复稿件，未上传');
-  await expect(page.locator('#review-target')).toHaveValue('She saw two birds. He did not come. We leave today.');
+  await expectEditorValue(page, '#review-target', 'She saw two birds. He did not come. We leave today.');
   expect((await downloadFrom(page, '保存稿件')).text).toBe(saved);
 });
 

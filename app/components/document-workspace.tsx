@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   FILTERS, filterFindings, findingVerdictCounts, reconcileActiveId, compactScalarContext,
 } from '../../lib/review-navigation.js';
@@ -13,7 +13,7 @@ import { spliceOccurrence, fragmentOccurrences } from '../../lib/target-revision
 import { categoryLabel, labelJoiner } from '../../lib/dictionary-labels';
 import { failureDetails, fill, msg, summarySentence } from '../../lib/messages';
 import { downloadFile } from '../../lib/download-file';
-import { isAmbiguousMention, isLong, sessionReviewFeatures } from '../../lib/long-review';
+import { isAmbiguousMention, isLong, sessionReviewFeatures, termSegments } from '../../lib/long-review';
 import { judgedReport, layerTwoCounts, layerTwoRows, structureSummary, structureViews } from '../../lib/structure-layer';
 import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
@@ -32,18 +32,20 @@ import { describeTmSegmentAlignment, resolveActiveSegment, type TmSegmentCursor 
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
-  findMatchingTermbaseEntry, inferDirection, promoteTermbaseEntry,
+  inferDirection, promoteTermbaseEntry,
   type TermbaseDirection, type TermbaseEntry, type TermbaseKind,
 } from '../../lib/termbase';
+import { findMatchingTermbaseEntry } from '../../lib/termbase';
 import { TranslationMemoryError, type TmConfirmCandidate, type TmConfirmResult, type TmEntry, type TmErrorCode, type TmFile } from '../../lib/translation-memory';
+import { createCanonicalComputer, type CanonicalComputer } from '../../lib/canonical-worker-client';
 import {
-  canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
+  createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
-import type { Candidate, Choice, Draft, Finding, PairView, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
-import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
+import { scalarOffset, type Candidate, type Choice, type Draft, type Finding, type PairView, type PendingWorkfile, type Snapshot, type Span } from '../../lib/workbench-model';
+import { EditorSurfaceAdapter, type EditorEdit, type EditorHighlight, type EditorSurfaceHandle } from './editor-surface';
 import { MyMemory, type TmDictionaryStatusView, type TmPersistenceAdapter } from './my-memory';
 import { MyTerms, type TermbaseDraftSeed, type TermbaseExternalFeedback } from './my-terms';
-import { QuickTermLookup } from './quick-term-lookup';
+import { QuickTermLookup, type QuickTermLookupPersisted } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
 import { RuntimeStatus } from './runtime-status';
 import { useUiLanguage } from './ui-language-context';
@@ -141,6 +143,10 @@ export function DocumentWorkspace() {
   const [copied, setCopied] = useState<'done' | 'failed' | null>(null);
   const [syncScroll, setSyncScroll] = useState(true);
   const [markdownPreview, setMarkdownPreview] = useState(false);
+  const [editorLayout, setEditorLayout] = useState<'split' | 'stacked'>('split');
+  const [inspectorTab, setInspectorTab] = useState<'review' | 'terms' | 'memory'>('review');
+  const [activeSemanticId, setActiveSemanticId] = useState<string | null>(null);
+  const [lookupPersisted, setLookupPersisted] = useState<QuickTermLookupPersisted>({ query: '', terms: { kind: 'idle' }, seeded: false });
   const syncSuspended = useRef(false);
   const syncSuspendRaf = useRef<number | null>(null);
   const [termbaseEntries, setTermbaseEntries] = useState<TermbaseEntry[]>([]);
@@ -325,11 +331,77 @@ export function DocumentWorkspace() {
   const sourceCompatible = !!latest?.trusted && latest.source === source && latest.direction === direction;
   const comparison = latest && previous ? compareReports(previous, latest) : null;
   const basisChanged = !!latest?.trusted && choices.some(choice => !sameBasis(choice.basis, basisOf(latest.report)));
-  const canonical = useMemo(() => canonicalOf(draft, choices, reports, semantic, basis), [draft, choices, reports, semantic, basis]);
+  const canonicalComputerRef = useRef<CanonicalComputer | null>(null);
+  const canonicalGenRef = useRef(0);
+  const canonicalPendingRef = useRef(false);
+  const prevSavedMarkersRef = useRef({ importedCanonical, downloadedCanonical, resetSignal: snapshot.resetSignal });
+  const [canonicalState, setCanonicalState] = useState<{ value: string | null; pending: boolean; computed: boolean }>({
+    value: null,
+    pending: false,
+    computed: false,
+  });
+
+  useEffect(() => {
+    const computer = createCanonicalComputer();
+    canonicalComputerRef.current = computer;
+    return () => {
+      computer.dispose();
+      canonicalComputerRef.current = null;
+    };
+  }, []);
+
   const holdsWork = workPresent(draft, choices, reports, semantic);
-  const saveView = manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
+
+  // Offload expensive canonicalOf() serialization/validation to a debounced Web Worker
+  // so typing in large manuscripts never stalls the main thread.
+  useEffect(() => {
+    if (!holdsWork) {
+      canonicalGenRef.current += 1;
+      canonicalPendingRef.current = false;
+      const timer = setTimeout(() => {
+        setCanonicalState(prev => (prev.value === null && !prev.pending && !prev.computed ? prev : { value: null, pending: false, computed: false }));
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    const gen = ++canonicalGenRef.current;
+    canonicalPendingRef.current = true;
+    const markersChanged =
+      prevSavedMarkersRef.current.importedCanonical !== importedCanonical
+      || prevSavedMarkersRef.current.downloadedCanonical !== downloadedCanonical
+      || prevSavedMarkersRef.current.resetSignal !== snapshot.resetSignal;
+    prevSavedMarkersRef.current = { importedCanonical, downloadedCanonical, resetSignal: snapshot.resetSignal };
+    const delayMs = markersChanged ? 0 : 120;
+    const timer = setTimeout(() => {
+      const computer = canonicalComputerRef.current ?? createCanonicalComputer({ disableWorker: true });
+      void computer.compute({ draft, choices, reports, semantic, basis }).then(result => {
+        if (canonicalGenRef.current !== gen) return;
+        canonicalPendingRef.current = false;
+        setCanonicalState({ value: result, pending: false, computed: true });
+      });
+    }, delayMs);
+    return () => clearTimeout(timer);
+  }, [holdsWork, draft, choices, reports, semantic, basis, importedCanonical, downloadedCanonical, snapshot.resetSignal]);
+
+  const canonical = canonicalState.value;
+  const saveView = !holdsWork
+    ? 'empty'
+    : !canonicalState.computed
+      ? (importedCanonical !== null || downloadedCanonical !== null ? 'diverged' : 'page-only')
+      : manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
   const semanticRunActive = isRunActive(run, pairTranslating);
-  const guard = leaveGuardActive({ view: saveView, checkInFlight: phase === 'loading' || translating || semanticRunActive });
+  const checkInFlight = phase === 'loading' || translating || semanticRunActive;
+  const guard = leaveGuardActive({ view: saveView, checkInFlight });
+  const liveLeaveGuardRef = useRef(() => guard);
+  useEffect(() => {
+    liveLeaveGuardRef.current = () => {
+      if (!holdsWork) return checkInFlight;
+      const latestCanonical = canonicalPendingRef.current || !canonicalState.computed
+        ? (canonicalComputerRef.current ?? createCanonicalComputer({ disableWorker: true })).computeSync({ draft, choices, reports, semantic, basis })
+        : canonicalState.value;
+      const liveView = manuscriptSaveView({ holdsWork, canonical: latestCanonical, importedCanonical, downloadedCanonical });
+      return leaveGuardActive({ view: liveView, checkInFlight });
+    };
+  });
   const m = msg(lang);
   const w = m.workspace;
   const saveStateText = {
@@ -451,6 +523,7 @@ export function DocumentWorkspace() {
       termbaseSeq.current += 1;
       const seedKey = termbaseSeq.current;
       setTermbaseOpen(true);
+      if (!quick) setInspectorTab('terms');
       setTermbaseDraftSeed({
         key: seedKey,
         source: outcome.source,
@@ -647,7 +720,6 @@ export function DocumentWorkspace() {
   }, [pendingLeaveUrl]);
 
   useEffect(() => {
-    if (!guard) return;
     function onClick(event: MouseEvent) {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (!(event.target instanceof Element)) return;
@@ -655,13 +727,14 @@ export function DocumentWorkspace() {
       if (!(anchor instanceof HTMLAnchorElement)) return;
       const url = unloadUrl(anchor);
       if (!url) return;
+      if (!liveLeaveGuardRef.current()) return;
       event.preventDefault();
       event.stopPropagation();
       setPendingLeaveUrl(url);
     }
     document.addEventListener('click', onClick, true);
     return () => document.removeEventListener('click', onClick, true);
-  }, [guard]);
+  }, []);
 
   useEffect(() => {
     function onPageShow() { leaveBypass.current = false; setPendingLeaveUrl(null); }
@@ -670,15 +743,15 @@ export function DocumentWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!guard) return;
     function onBeforeUnload(event: BeforeUnloadEvent) {
       if (leaveBypass.current) return;
+      if (!liveLeaveGuardRef.current()) return;
       event.preventDefault();
       event.returnValue = '1';
     }
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [guard]);
+  }, []);
 
   async function check(withChoices = true) {
     await doc.check(withChoices, { reviewsClosed });
@@ -788,6 +861,85 @@ export function DocumentWorkspace() {
   const translatePrimary = !!source.trim() && !target.trim();
   // Over 2,000 characters the whole-text check and translation are disabled; the segment panel's run buttons are the main action.
   const longInput = sourceLength > 2000 || targetLength > 2000;
+
+  // Inline CodeMirror 6 highlight ranges (deferred so typing stays 60fps on long manuscripts).
+  const deferredJudged = useDeferredValue(judged);
+  const deferredLayer1 = useDeferredValue(layer1);
+  const deferredPlaced = useDeferredValue(semantic.placed);
+  const deferredLongRecords = useDeferredValue(semantic.long);
+  const { sourceHighlights, targetHighlights } = useMemo(() => {
+    if (quick) return { sourceHighlights: [] as EditorHighlight[], targetHighlights: [] as EditorHighlight[] };
+    const CAP = 400;
+    const src: EditorHighlight[] = [];
+    const tgt: EditorHighlight[] = [];
+    const pushSrc = (h: EditorHighlight) => { if (src.length < CAP) src.push(h); };
+    const pushTgt = (h: EditorHighlight) => { if (tgt.length < CAP) tgt.push(h); };
+
+    if (deferredJudged && latest && latest.source === source) {
+      const targetOk = latest.target === target;
+      for (const f of deferredJudged.report.findings) {
+        const kind = f.verdict === 'confirmed_conflict' ? 'term-conflict'
+          : f.verdict === 'verified_constraint' ? 'term-verified' : 'term-review';
+        pushSrc({ start: f.source_span.start, end: f.source_span.end, kind, title: f.source_span.text });
+        if (targetOk && f.target_span) {
+          pushTgt({ start: f.target_span.start, end: f.target_span.end, kind, title: f.target_span.text });
+        }
+      }
+    } else if (longDocument) {
+      const segs = termSegments(deferredLongRecords, { draft, basis, features: reviewFeatures });
+      for (const seg of segs) {
+        for (const f of seg.report.findings) {
+          if (isAmbiguousMention(f)) continue;
+          const kind = f.verdict === 'confirmed_conflict' ? 'term-conflict'
+            : f.verdict === 'verified_constraint' ? 'term-review' : 'term-review';
+          const resolvedKind = f.verdict === 'verified_constraint' ? 'term-verified' : kind;
+          pushSrc({
+            start: scalarOffset(seg.source_start + f.source_span.start),
+            end: scalarOffset(seg.source_start + f.source_span.end),
+            kind: resolvedKind,
+            title: f.source_span.text,
+          });
+          if (f.target_span) {
+            pushTgt({
+              start: scalarOffset(seg.target_start + f.target_span.start),
+              end: scalarOffset(seg.target_start + f.target_span.end),
+              kind: resolvedKind,
+              title: f.target_span.text,
+            });
+          }
+        }
+      }
+    }
+
+    for (const view of deferredLayer1) {
+      if (!view.result) continue;
+      for (const f of view.result.findings) {
+        const label = sm.layers.rules[f.rule_id] ?? f.rule_id;
+        if (f.source_span) pushSrc({ start: f.source_span.start, end: f.source_span.end, kind: 'structure', title: label });
+        if (f.target_span) pushTgt({ start: f.target_span.start, end: f.target_span.end, kind: 'structure', title: label });
+      }
+    }
+
+    for (const p of deferredPlaced) {
+      if (p.stale) continue;
+      const kind = p.id === activeSemanticId ? 'semantic-active' : 'semantic';
+      const title = sm.categories[p.issue.category] ?? p.issue.category;
+      if (p.live.source_span) pushSrc({ start: p.live.source_span.start, end: p.live.source_span.end, kind, title });
+      if (p.live.target_span) pushTgt({ start: p.live.target_span.start, end: p.live.target_span.end, kind, title });
+    }
+
+    return { sourceHighlights: src, targetHighlights: tgt };
+  }, [quick, deferredJudged, latest, source, target, longDocument, deferredLongRecords, draft, basis, reviewFeatures, deferredLayer1, deferredPlaced, activeSemanticId, sm.layers.rules, sm.categories]);
+
+  const reviewBadgeCount = (layer1Summary.findings + layer1Summary.omitted)
+    + (longDocument ? termTotal : findingCounts.actionable)
+    + layer2.pending;
+
+  const selectInspectorTab = (tab: 'review' | 'terms' | 'memory') => {
+    setInspectorTab(tab);
+    if (tab === 'terms') setTermbaseOpen(true);
+    if (tab === 'memory') setTmOpen(true);
+  };
 
   const termTrack = (longTerms: ReactNode): ReactNode => <section className="term-track" aria-labelledby="term-track-title">
     <h3 id="term-track-title">{sm.termTrackTitle}</h3>
@@ -958,6 +1110,17 @@ export function DocumentWorkspace() {
           )}
           <form onSubmit={quick ? translateQuick : submit}>
             <div className="editor-toolbar" role="group" aria-label={w.editorToolbarAria}>
+              {!quick && (
+                <button
+                  type="button"
+                  className="secondary-button toolbar-toggle layout-toggle"
+                  aria-pressed={editorLayout === 'split'}
+                  data-editor-layout={editorLayout}
+                  onClick={() => setEditorLayout(prev => (prev === 'split' ? 'stacked' : 'split'))}
+                >
+                  {editorLayout === 'split' ? w.layoutSplit : w.layoutStacked}
+                </button>
+              )}
               <button
                 type="button"
                 className="secondary-button toolbar-toggle"
@@ -983,8 +1146,21 @@ export function DocumentWorkspace() {
               >
                 {m.termbase.promoteSelection}
               </button>
+              {!quick && activeTmSegment.total > 1 && (
+                <span className="toolbar-segment-pill" data-testid="editor-segment-indicator">
+                  {fill(w.segmentIndicator, { i: activeTmSegment.index + 1, n: activeTmSegment.total })}
+                </span>
+              )}
             </div>
-            <div className="editor-panes">
+            {!quick && (sourceHighlights.length > 0 || targetHighlights.length > 0) && (
+              <div className="highlight-legend" role="note" aria-label={w.highlightLegendAria}>
+                <span className="legend-dot legend-term">{w.highlightLegendTerm}</span>
+                <span className="legend-dot legend-conflict">{w.highlightLegendConflict}</span>
+                <span className="legend-dot legend-structure">{w.highlightLegendStructure}</span>
+                <span className="legend-dot legend-semantic">{w.highlightLegendSemantic}</span>
+              </div>
+            )}
+            <div className="editor-panes" data-layout={quick ? 'split' : editorLayout}>
               <div className="editor-pane">
                 <div className="label-row">
                   <label htmlFor="review-source">{m.review.sourceLabel}</label>
@@ -1004,12 +1180,16 @@ export function DocumentWorkspace() {
                   value={source}
                   rows={6}
                   placeholder={quick ? m.translation.placeholder : m.review.sourcePlaceholder}
+                  enhanced={!quick}
+                  highlights={sourceHighlights}
                   preview={markdownPreview}
                   previewEmptyText={w.markdownPreviewEmpty}
                   previewAriaLabel={w.markdownSourcePreviewAria}
                   onScrollRatio={ratio => handleEditorScroll('source', ratio)}
                   onCursorChange={offset => setTmCursor(prev => (prev?.kind === 'offset' && prev.side === 'source' && prev.offset === offset ? prev : { kind: 'offset', side: 'source', offset }))}
                   onEdit={editSide('source')}
+                  onUndo={() => doc.undo()}
+                  onRedo={() => doc.redo()}
                 />
               </div>
               <div className="editor-pane">
@@ -1023,16 +1203,23 @@ export function DocumentWorkspace() {
                   value={target}
                   rows={6}
                   placeholder={quick ? m.translation.idlePlaceholder : m.review.targetPlaceholder}
+                  enhanced={!quick}
+                  highlights={targetHighlights}
                   preview={markdownPreview}
                   previewEmptyText={w.markdownPreviewEmpty}
                   previewAriaLabel={w.markdownTargetPreviewAria}
                   onScrollRatio={ratio => handleEditorScroll('target', ratio)}
                   onCursorChange={offset => setTmCursor(prev => (prev?.kind === 'offset' && prev.side === 'target' && prev.offset === offset ? prev : { kind: 'offset', side: 'target', offset }))}
                   onEdit={editSide('target')}
+                  onUndo={() => doc.undo()}
+                  onRedo={() => doc.redo()}
                 />
               </div>
             </div>
-            <div className="field-hint"><span>{m.review.hintSafety}</span><span aria-live="polite">{quick ? fill(m.translation.charCount, { n: sourceLength.toLocaleString(locale) }) : fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span></div>
+            <div className="field-hint">
+              <span>{m.review.hintSafety}{!quick && <span className="shortcut-hint"> · {w.shortcutBar}</span>}</span>
+              <span aria-live="polite">{quick ? fill(m.translation.charCount, { n: sourceLength.toLocaleString(locale) }) : fill(m.review.charCounts, { s: sourceLength.toLocaleString(locale), t: targetLength.toLocaleString(locale) })}</span>
+            </div>
             {!quick && (sourceLength > 2000 || targetLength > 2000) && <p role="status">{m.review.longManuscript}</p>}
             {quick && translationClosed && <p className="notice-state">{pool.kind === 'success' && !pool.data.translation_enabled ? m.tMsg.translation_disabled : m.tMsg.translation_pool_exhausted}</p>}
             {!quick && <details className="alignment-panel"><summary>{alignments === null ? m.review.alignmentSummaryNone : fill(m.review.alignmentSummaryCount, { n: alignments.length })}</summary>
@@ -1111,40 +1298,139 @@ export function DocumentWorkspace() {
           {!quick && phase === 'loading' && <p role="status">{m.review.loadingStatus}</p>}
           {!quick && basisChanged && <p className="review-stale">{m.review.staleBasis}</p>}
         </div>
-        {!quick && <div className="manuscript-review-pane">
-          {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
-            {choices.map((choice, i) => {
-              const canConfirm = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' && doc.canConfirmChoice(i);
-              return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{canConfirm && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.confirmChoice(i)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
-            })}
-          </div>}
-          {(semanticOn || structureOn) && <div className="issue-overview layer-overview" role="group" aria-label={sm.overviewAria}>
-            {structureOn && <button type="button" className="secondary-button" data-layer="1" onClick={() => scrollTo('#layer1-title')}>
-              {layer1Summary.checked ? fill(sm.layers.ovL1, { n: layer1Summary.findings + layer1Summary.omitted }) : sm.layers.ovL1None}</button>}
-            <button type="button" className="secondary-button" onClick={() => scrollTo('#term-track-title')}>{fill(sm.overviewTerms, { n: termTotal })}</button>
-            {ambiguousTotal > 0 && <button type="button" className="secondary-button" data-ambiguous={ambiguousTotal} onClick={() => scrollTo('details.ambiguous-mentions')}>{fill(sm.layers.ovAmbiguous, { n: ambiguousTotal })}</button>}
-            {semanticOn && <button type="button" className="secondary-button" data-layer="2" onClick={() => scrollTo('#semantic-title')}>{layer2.listed + layer2.covered || semantic.results.length ? fill(sm.overviewSemantic, { n: layer2.listed, pending: layer2.pending }) : sm.overviewSemanticNone}</button>}
-            {semanticOn && layer2.high + layer2.medium > 0 && <span className="overview-note" data-buckets={`${layer2.high}:${layer2.medium}`}>{fill(sm.layers.ovBuckets, { high: layer2.high, medium: layer2.medium })}</span>}
-            {semanticOn && layer2.low > 0 && <span className="overview-note" data-low={layer2.low}>{fill(sm.layers.ovLow, { n: layer2.low })}</span>}
-            {semanticOn && layer2.covered > 0 && <span className="overview-note" data-covered={layer2.covered}>{fill(sm.layers.ovCovered, { n: layer2.covered })}</span>}
-            <button type="button" className="secondary-button" data-layer="3" data-on={styleOn ? 'true' : 'false'} onClick={() => scrollTo('#layer3-title')}>{styleOn ? sm.layers.ovL3On : sm.layers.ovL3Off}</button>
-          </div>}
-          <StructureLayer doc={doc} snapshot={snapshot} lang={lang} pool={pool} locate={(side, span) => jumpTo(side, span)} />
-          <SemanticWorkbench
-            doc={doc}
-            snapshot={snapshot}
-            lang={lang}
-            pool={pool}
-            locate={(side, span) => jumpTo(side, span)}
-            termTrack={termTrack}
-            termbaseEntries={termbaseEntries}
-            onPromoteToTermbase={promoteToTermbase}
-          />
-          <StyleLayer lang={lang} on={styleOn} setOn={setStyleOn} />
-        </div>}
+        {!quick && <aside className="manuscript-review-pane workspace-inspector" aria-label={w.inspectorAria}>
+          <div className="inspector-tabs" role="tablist" aria-label={w.inspectorAria} data-testid="inspector-tabs">
+            <button
+              type="button"
+              role="tab"
+              id="inspector-tab-review"
+              aria-selected={inspectorTab === 'review'}
+              aria-controls="inspector-panel-review"
+              data-inspector-tab="review"
+              onClick={() => selectInspectorTab('review')}
+            >
+              <span>{w.inspectorReview}</span>
+              {reviewBadgeCount > 0 && <span className="inspector-badge">{reviewBadgeCount}</span>}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="inspector-tab-terms"
+              aria-selected={inspectorTab === 'terms'}
+              aria-controls="inspector-panel-terms"
+              data-inspector-tab="terms"
+              onClick={() => selectInspectorTab('terms')}
+            >
+              <span>{w.inspectorTerms}</span>
+              {termbaseEntries.length > 0 && <span className="inspector-badge">{termbaseEntries.length}</span>}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="inspector-tab-memory"
+              aria-selected={inspectorTab === 'memory'}
+              aria-controls="inspector-panel-memory"
+              data-inspector-tab="memory"
+              onClick={() => selectInspectorTab('memory')}
+            >
+              <span>{w.inspectorMemory}</span>
+              {tmEntries.length > 0 && <span className="inspector-badge">{tmEntries.length}</span>}
+            </button>
+          </div>
+          <div
+            id="inspector-panel-review"
+            role="tabpanel"
+            aria-labelledby="inspector-tab-review"
+            className="inspector-panel"
+            hidden={inspectorTab !== 'review'}
+          >
+            {choices.length > 0 && <div className="choice-records"><h3>{fill(m.review.choiceHeader, { ready: ready.length, pending: choices.length - ready.length })}</h3>
+              {choices.map((choice, i) => {
+                const canConfirm = reconciled[i].status === 'pending' && reconciled[i].code !== 'duplicate_position' && doc.canConfirmChoice(i);
+                return <div className="choice-record" key={i}><p>{choice.candidate ? fill(m.review.choicePair, { span: choice.source_span.text, zh: choice.candidate.zh, en: choice.candidate.en }) : fill(m.review.choiceNotTerm, { span: choice.source_span.text })} — {reconciled[i].status === 'applicable' ? m.review.choiceApplicable : m.review.choicePending}</p><p>{reasonText(reconciled[i])}</p><div className="finding-actions">{canConfirm && <button type="button" className="text-button" disabled={phase === 'loading'} onClick={() => doc.confirmChoice(i)}>{m.review.choiceConfirm}</button>}<button type="button" className="text-button" onClick={() => doc.removeChoice(i)}>{m.review.choiceRemove}</button></div></div>;
+              })}
+            </div>}
+            {(semanticOn || structureOn) && <div className="issue-overview layer-overview" role="group" aria-label={sm.overviewAria}>
+              {structureOn && <button type="button" className="secondary-button" data-layer="1" onClick={() => scrollTo('#layer1-title')}>
+                {layer1Summary.checked ? fill(sm.layers.ovL1, { n: layer1Summary.findings + layer1Summary.omitted }) : sm.layers.ovL1None}</button>}
+              <button type="button" className="secondary-button" onClick={() => scrollTo('#term-track-title')}>{fill(sm.overviewTerms, { n: termTotal })}</button>
+              {ambiguousTotal > 0 && <button type="button" className="secondary-button" data-ambiguous={ambiguousTotal} onClick={() => scrollTo('details.ambiguous-mentions')}>{fill(sm.layers.ovAmbiguous, { n: ambiguousTotal })}</button>}
+              {semanticOn && <button type="button" className="secondary-button" data-layer="2" onClick={() => scrollTo('#semantic-title')}>{layer2.listed + layer2.covered || semantic.results.length ? fill(sm.overviewSemantic, { n: layer2.listed, pending: layer2.pending }) : sm.overviewSemanticNone}</button>}
+              {semanticOn && layer2.high + layer2.medium > 0 && <span className="overview-note" data-buckets={`${layer2.high}:${layer2.medium}`}>{fill(sm.layers.ovBuckets, { high: layer2.high, medium: layer2.medium })}</span>}
+              {semanticOn && layer2.low > 0 && <span className="overview-note" data-low={layer2.low}>{fill(sm.layers.ovLow, { n: layer2.low })}</span>}
+              {semanticOn && layer2.covered > 0 && <span className="overview-note" data-covered={layer2.covered}>{fill(sm.layers.ovCovered, { n: layer2.covered })}</span>}
+              <button type="button" className="secondary-button" data-layer="3" data-on={styleOn ? 'true' : 'false'} onClick={() => scrollTo('#layer3-title')}>{styleOn ? sm.layers.ovL3On : sm.layers.ovL3Off}</button>
+            </div>}
+            <StructureLayer doc={doc} snapshot={snapshot} lang={lang} pool={pool} locate={(side, span) => jumpTo(side, span)} />
+            <SemanticWorkbench
+              doc={doc}
+              snapshot={snapshot}
+              lang={lang}
+              pool={pool}
+              locate={(side, span) => jumpTo(side, span)}
+              termTrack={termTrack}
+              termbaseEntries={termbaseEntries}
+              onPromoteToTermbase={promoteToTermbase}
+              onActiveSemanticChange={setActiveSemanticId}
+            />
+            <StyleLayer lang={lang} on={styleOn} setOn={setStyleOn} />
+          </div>
+          <div
+            id="inspector-panel-terms"
+            role="tabpanel"
+            aria-labelledby="inspector-tab-terms"
+            className="inspector-panel inspector-stack"
+            hidden={inspectorTab !== 'terms'}
+          >
+            <QuickTermLookup quick={false} embedded persisted={lookupPersisted} onPersistedChange={setLookupPersisted} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+            <MyTerms
+              source={source}
+              direction={effectiveTermbaseDirection}
+              entries={termbaseEntries}
+              setEntries={setTermbaseEntries}
+              open={termbaseOpen}
+              onOpenChange={setTermbaseOpen}
+              draftSeed={termbaseDraftSeed}
+              externalFeedback={termbaseFeedback}
+            />
+          </div>
+          <div
+            id="inspector-panel-memory"
+            role="tabpanel"
+            aria-labelledby="inspector-tab-memory"
+            className="inspector-panel inspector-stack"
+            hidden={inspectorTab !== 'memory'}
+          >
+            <MyMemory
+              sourceText={activeTmSegment.sourceText}
+              targetText={activeTmSegment.targetText}
+              prevSource={activeTmSegment.prevSource}
+              nextSource={activeTmSegment.nextSource}
+              segmentIndex={activeTmSegment.index}
+              segmentTotal={activeTmSegment.total}
+              alignmentStatus={tmAlignmentStatus}
+              direction={effectiveTermbaseDirection}
+              currentTermsDbRevision={tmDisplayBasis.currentTermsDbRevision}
+              currentGameVersion={tmDisplayBasis.currentGameVersion}
+              getDisplayBasis={getDisplayTmBasis}
+              getConfirmBasis={getConfirmTmBasis}
+              dictionaryStatus={tmDictionaryStatus}
+              storageMode={selfHosted ? 'selfhost_sqlite' : 'public_memory'}
+              storageState={tmStorageState}
+              onRetryLoad={selfHosted ? () => void loadSelfhostTm() : undefined}
+              persistence={tmPersistence}
+              entries={tmEntries}
+              setEntries={setTmEntries}
+              onApplySuggestion={applyMemorySuggestion}
+              onSelectSegment={index => setTmCursor({ kind: 'index', index })}
+              open={tmOpen}
+              onOpenChange={setTmOpen}
+            />
+          </div>
+        </aside>}
       </div>
-      <div className="workspace-side">
-        <QuickTermLookup quick={quick} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+      {quick && <div className="workspace-side">
+        <QuickTermLookup quick={quick} persisted={lookupPersisted} onPersistedChange={setLookupPersisted} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
         <MyTerms
           source={source}
           direction={effectiveTermbaseDirection}
@@ -1180,7 +1466,7 @@ export function DocumentWorkspace() {
           open={tmOpen}
           onOpenChange={setTmOpen}
         />
-      </div>
+      </div>}
     </div>
     <RuntimeStatus saveView={saveView} reportCommit={latest?.report.dictionary.source_commit ?? null} />
   </section>;

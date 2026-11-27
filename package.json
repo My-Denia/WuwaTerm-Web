@@ -26,6 +26,9 @@
     "check:contracts": "node scripts/generate-contract-types.mjs --check"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.44.2",
     "next": "16.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1"
@@ -47,13 +50,13 @@
     "eslint": "9.39.4",
     "eslint-config-next": "16.4.5",
     "miniflare": "5.20260820.0-alpha",
+    "minimatch": "file:vendor/minimatch-legacy",
     "react-server-dom-webpack": "19.3.1",
     "tailwindcss": "4.3.5",
     "typescript": "5.9.3",
     "vinext": "1.4.4",
     "vite": "8.3.6",
-    "wrangler": "4.158.0",
-    "minimatch": "file:vendor/minimatch-legacy"
+    "wrangler": "4.158.0"
   },
   "type": "module",
   "overrides": {

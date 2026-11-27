@@ -9,9 +9,11 @@ import { setBrowserQuery, useTermQuery } from '../query-state';
 import { FailureView, RequestId, type Failure } from './request-feedback';
 import { useUiLanguage } from './ui-language-context';
 
-type TermMatch = { zh: string; en: string; category: string; reason: string; score: number };
-type TermsResult = { query: string; matches: TermMatch[]; request_id: string };
-type State = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; data: TermsResult } | { kind: 'error'; error: Failure };
+export type TermMatch = { zh: string; en: string; category: string; reason: string; score: number };
+export type TermsResult = { query: string; matches: TermMatch[]; request_id: string };
+export type QuickTermLookupState = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; data: TermsResult } | { kind: 'error'; error: Failure };
+export type QuickTermLookupPersisted = { query: string; terms: QuickTermLookupState; seeded: boolean };
+type State = QuickTermLookupState;
 
 const FALLBACK: Failure = { status: 'unavailable', reason: 'site_response_invalid' };
 function failure(value: unknown): value is Failure {
@@ -29,8 +31,11 @@ function isTerms(v: unknown): v is TermsResult {
  * be appended to the source and a query without matches can become the source; in manuscript mode the panel folds away so
  * the editors keep the focus, and it offers copying only.
  */
-export function QuickTermLookup({ quick, onInsert, onUseQuery }: {
+export function QuickTermLookup({ quick, embedded = false, persisted, onPersistedChange, onInsert, onUseQuery }: {
   quick: boolean;
+  embedded?: boolean;
+  persisted?: QuickTermLookupPersisted;
+  onPersistedChange?: (next: QuickTermLookupPersisted) => void;
   onInsert: (text: string) => void;
   onUseQuery: (query: string) => void;
 }) {
@@ -38,8 +43,33 @@ export function QuickTermLookup({ quick, onInsert, onUseQuery }: {
   const m = msg(lang);
   const runtime = useRuntimeStore();
   const termQuery = useTermQuery();
-  const [query, setQuery] = useState('');
-  const [terms, setTerms] = useState<State>({ kind: 'idle' });
+  const [localQuery, setLocalQuery] = useState(persisted?.query ?? '');
+  const [localTerms, setLocalTerms] = useState<State>(persisted?.terms ?? { kind: 'idle' });
+  const query = persisted ? persisted.query : localQuery;
+  const terms = persisted ? persisted.terms : localTerms;
+  const persistedRef = useRef<QuickTermLookupPersisted>(persisted ?? { query: localQuery, terms: localTerms, seeded: false });
+  useEffect(() => {
+    persistedRef.current = persisted ?? { query: localQuery, terms: localTerms, seeded: persistedRef.current.seeded };
+  }, [persisted, localQuery, localTerms]);
+
+  const setQuery = (nextQuery: string) => {
+    if (onPersistedChange) {
+      const next = { ...persistedRef.current, query: nextQuery };
+      persistedRef.current = next;
+      onPersistedChange(next);
+    } else {
+      setLocalQuery(nextQuery);
+    }
+  };
+  const setTerms = (nextTerms: State) => {
+    if (onPersistedChange) {
+      const next = { ...persistedRef.current, terms: nextTerms };
+      persistedRef.current = next;
+      onPersistedChange(next);
+    } else {
+      setLocalTerms(nextTerms);
+    }
+  };
   const [open, setOpen] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -47,6 +77,9 @@ export function QuickTermLookup({ quick, onInsert, onUseQuery }: {
   const seed = useRef<(text: string) => void>(() => {});
   useEffect(() => () => { controllerRef.current?.abort(); }, []);
   useEffect(() => {
+    if (persistedRef.current.seeded) return;
+    persistedRef.current = { ...persistedRef.current, seeded: true };
+    if (onPersistedChange) onPersistedChange(persistedRef.current);
     const initial = new URLSearchParams(window.location.search).get('q');
     if (initial && initial.trim() && Array.from(initial.trim()).length <= 200) {
       const trimmed = initial.trim();
@@ -56,6 +89,7 @@ export function QuickTermLookup({ quick, onInsert, onUseQuery }: {
       }, 0);
       return () => clearTimeout(timer);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function runLookup(text: string) {
@@ -98,11 +132,11 @@ export function QuickTermLookup({ quick, onInsert, onUseQuery }: {
     if (termQuery) setBrowserQuery(null);
   }
 
-  const shown = quick || open;
-  return <section className="term-lookup" data-open={shown ? 'true' : 'false'} aria-labelledby="terms-title">
+  const shown = quick || embedded || open;
+  return <section className={`term-lookup${embedded ? ' inspector-section' : ''}`} data-open={shown ? 'true' : 'false'} aria-labelledby="terms-title">
     <div className="lookup-heading">
       <h2 id="terms-title" tabIndex={-1}>{m.terms.title}</h2>
-      {!quick && <button type="button" className="text-button" aria-expanded={open} aria-controls="term-lookup-body" onClick={() => setOpen(value => !value)}>{open ? m.workspace.lookupHide : m.workspace.lookupShow}</button>}
+      {!quick && !embedded && <button type="button" className="text-button" aria-expanded={open} aria-controls="term-lookup-body" onClick={() => setOpen(value => !value)}>{open ? m.workspace.lookupHide : m.workspace.lookupShow}</button>}
     </div>
     <div id="term-lookup-body" hidden={!shown}>
       <form onSubmit={submit}>

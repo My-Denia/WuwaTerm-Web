@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { expectEditorValue, fillEditor, readEditorValue } from '../helpers/editor.mjs';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { readFileSync } from 'node:fs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
@@ -34,8 +35,8 @@ async function open(page, data = engine.cases[0], responder) {
   await page.goto(BASE + '/');
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
   await openManuscript(page);
-  await page.locator('#review-source').fill(data.before_request.source);
-  await page.locator('#review-target').fill(data.before_request.target);
+  await fillEditor(page, '#review-source', data.before_request.source);
+  await fillEditor(page, '#review-target', data.before_request.target);
   if (data.before_request.direction === 'zh') await page.getByLabel('译文语言').selectOption('zh');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.locator('.review-summary')).toContainText('当前报告');
@@ -65,7 +66,7 @@ for (const padding of [1998, 1994]) {
     const requests = await open(page, { before_request: draft, before_report: report });
     await page.getByRole('button', { name: '替换已定位词语', exact: true }).click();
     const expected = padding === 1998 ? target : '😀'.repeat(padding) + 'Jinhsi';
-    await expect(page.locator('#review-target')).toHaveValue(expected);
+    await expectEditorValue(page, '#review-target', expected);
     if (padding === 1998) {
       await expect(page.locator('.notice-state')).toContainText('替换后超过 2,000 字符');
       await expect(page.locator('.review-current')).toBeVisible();
@@ -86,7 +87,7 @@ for (const [caseIndex, fragment] of [[0, 'sound shell'], [1, 'Jinxi'], [2, '回�
     await select(page, fragment, caseIndex === 3 ? 1 : 0);
     await expect(dialog(page).locator('.revision-preview')).toContainText(fragment);
     await dialog(page).getByRole('button', { name: confirmName }).click();
-    await expect(page.locator('#review-target')).toHaveValue(data.after_request.target);
+    await expectEditorValue(page, '#review-target', data.after_request.target);
     await expect(page.locator('#review-target')).toBeFocused();
     expect(requests.length).toBe(1);
     const edited = JSON.parse(await download(page, '保存稿件'));
@@ -101,7 +102,7 @@ for (const [caseIndex, fragment] of [[0, 'sound shell'], [1, 'Jinxi'], [2, '回�
     expect(markdown).toContain('需要重新核对'); expect(markdown).toContain(data.after_request.target);
     await info.attach('saved-after-one-splice', { body: JSON.stringify(edited, null, 2), contentType: 'application/json' });
     await page.getByRole('button', { name: '撤销修订', exact: true }).click();
-    await expect(page.locator('#review-target')).toHaveValue(data.before_request.target);
+    await expectEditorValue(page, '#review-target', data.before_request.target);
     await expect(page.locator('.review-summary')).not.toContainText('当前报告与文本');
     await start(page, findingIndex); await select(page, fragment, caseIndex === 3 ? 1 : 0);
     await dialog(page).getByRole('button', { name: confirmName }).click();
@@ -135,7 +136,7 @@ test('cancel and Escape preserve canonical manuscript; changed fragment clears e
 test('adoption is separate; unchanged-text staged choice can revise and explicit recheck submits ready choice', async ({ page }) => {
   const data = engine.cases[0], requests = await open(page, data);
   await page.locator('.review-findings .term-result').first().getByRole('button', { name: '采用此官方词对' }).click();
-  await expect(page.locator('#review-target')).toHaveValue(data.before_request.target);
+  await expectEditorValue(page, '#review-target', data.before_request.target);
   const adopted = JSON.parse(await download(page, '保存稿件'));
   expect(adopted.choices).toHaveLength(1);
   await start(page); await select(page, 'sound shell'); await dialog(page).getByRole('button', { name: confirmName }).click();
@@ -171,7 +172,7 @@ test('imported choices/provenance, explicit alignments and historical reports su
   const stale = JSON.parse(await download(page, '导出当前结果')); expect(stale.report_is_current).toBe(false);
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'revised.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(edited)) });
   await page.getByRole('dialog', { name: '用导入的稿件替换当前稿件？' }).getByRole('button', { name: '导入并替换', exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue(data.after_request.target);
+  await expectEditorValue(page, '#review-target', data.after_request.target);
   expect(JSON.parse(await download(page, '保存稿件'))).toEqual(edited);
 });
 
@@ -179,7 +180,7 @@ test('imported choices/provenance, explicit alignments and historical reports su
 for (const mutation of ['source', 'target', 'direction', 'alignment', 'choice', 'undo', 'new-check', 'import']) {
   test(`pending revision cancels before ${mutation}; retained confirm cannot splice`, async ({ page }) => {
     const requests = await open(page); await start(page); await select(page, 'sound shell');
-    const target = await page.locator('#review-target').inputValue();
+    const target = await readEditorValue(page, '#review-target');
     if (mutation === 'import') {
       const content = serializeWorkfile({ source: '今汐。', target: 'Jinxi.', direction: 'en', alignments: null, choices: [], history: [] });
       await page.getByLabel('选择稿件文件').setInputFiles({ name: 'new.json', mimeType: 'application/json', buffer: Buffer.from(content) });
@@ -189,8 +190,13 @@ for (const mutation of ['source', 'target', 'direction', 'alignment', 'choice', 
       const clickText = text => [...document.querySelectorAll('button')].find(b => b.textContent === text).click();
       if (mutation === 'source' || mutation === 'target') {
         const box = document.querySelector('#review-' + mutation);
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-        setter.call(box, box.value + '!'); box.dispatchEvent(new Event('input', { bubbles: true }));
+        const view = box.__cm6View ?? box.cmView?.view;
+        if (view) {
+          view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+        } else {
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(box, box.value + '!'); box.dispatchEvent(new Event('input', { bubbles: true }));
+        }
       } else if (mutation === 'direction') { const box = document.querySelector('.manuscript-editor-pane select'); box.value = 'zh'; box.dispatchEvent(new Event('change', { bubbles: true })); }
       else if (mutation === 'alignment') clickText('确认全文为一个对应段');
       else if (mutation === 'choice') clickText('采用此官方词对');
@@ -200,7 +206,7 @@ for (const mutation of ['source', 'target', 'direction', 'alignment', 'choice', 
     }, mutation);
     await expect(dialog(page)).not.toBeVisible();
     const expected = mutation === 'target' ? target + '!' : mutation === 'import' ? 'Jinxi.' : mutation === 'undo' ? '' : target;
-    await expect(page.locator('#review-target')).toHaveValue(expected);
+    await expectEditorValue(page, '#review-target', expected);
     expect(requests.length).toBe(mutation === 'new-check' ? 2 : 1);
   });
 }
@@ -232,7 +238,7 @@ test('keyboard selects an occurrence and confirms; language rerender retains fra
   await expect(english.getByLabel('Exact translation fragment to replace')).toHaveValue('sound shell');
   await expect(english.getByRole('radio').nth(1)).toBeChecked();
   await page.keyboard.press('Tab'); await page.keyboard.press('Tab'); await page.keyboard.press('Enter');
-  await expect(page.locator('#review-target')).toHaveValue(data.after_request.target);
+  await expectEditorValue(page, '#review-target', data.after_request.target);
 });
 
 test('null-span no-op and length excess are disabled without mutation', async ({ page }) => {
@@ -244,7 +250,7 @@ test('null-span no-op and length excess are disabled without mutation', async ({
   const before = await download(page, '保存稿件'); await start(page); await select(page, 'Echo');
   await expect(dialog(page)).toContainText('替换前后完全相同'); await expect(dialog(page).getByRole('button', { name: confirmName })).toBeDisabled();
   await page.keyboard.press('Escape'); expect(await download(page, '保存稿件')).toBe(before);
-  await page.locator('#review-target').fill('x'.repeat(1999) + 'a'); await page.getByRole('button', { name: '核对术语', exact: true }).click();
+  await fillEditor(page, '#review-target', 'x'.repeat(1999) + 'a'); await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.getByRole('button', { name: openName })).toBeEnabled(); await start(page); await select(page, 'a');
   await expect(dialog(page)).toContainText('超过 2,000'); await expect(dialog(page).getByRole('button', { name: confirmName })).toBeDisabled();
 });
@@ -259,7 +265,7 @@ test.describe('touch input on emitted client', () => {
     await dialog(page).getByRole('radio').nth(1).tap();
     await info.attach('touch-selected', { body: await page.screenshot(), contentType: 'image/png' });
     await dialog(page).getByRole('button', { name: confirmName }).tap();
-    await expect(page.locator('#review-target')).toHaveValue(data.after_request.target); expect(requests.length).toBe(1);
+    await expectEditorValue(page, '#review-target', data.after_request.target); expect(requests.length).toBe(1);
     await page.getByRole('button', { name: '撤销修订', exact: true }).tap();
     await page.setViewportSize({ width: 375, height: 844 }); await page.getByRole('button', { name: 'English', exact: true }).tap();
     await page.locator('.review-findings .term-result').nth(1).getByRole('button', { name: 'Specify a translation fragment to replace once' }).tap();
@@ -267,7 +273,7 @@ test.describe('touch input on emitted client', () => {
     await english.getByLabel('Exact translation fragment to replace').fill('sound shell'); await english.getByRole('radio').nth(1).tap();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     expect(await english.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
-    await english.getByRole('button', { name: 'Cancel revision' }).tap(); await expect(page.locator('#review-target')).toHaveValue(data.before_request.target);
+    await english.getByRole('button', { name: 'Cancel revision' }).tap(); await expectEditorValue(page, '#review-target', data.before_request.target);
   });
 });
 
@@ -283,6 +289,6 @@ test('trusted located shortcut replaces one official-form span and does not adop
   });
   await page.getByRole('button', { name: '全部 2', exact: true }).click();
   await page.locator('.review-findings .term-result').nth(1).getByRole('button', { name: '替换已定位词语', exact: true }).nth(1).click();
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi. Echo.');
+  await expectEditorValue(page, '#review-target', 'Jinhsi. Echo.');
   expect(JSON.parse(await download(page, '保存稿件')).choices).toEqual([]);
 });

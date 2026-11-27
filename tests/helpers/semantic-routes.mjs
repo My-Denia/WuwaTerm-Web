@@ -3,6 +3,7 @@
 import { expect } from '@playwright/test';
 import { FRESH_MATCHER_REVISION, fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 import { capabilitiesBody, defaultSemanticResponse, semanticResponse } from './semantic-fixture.mjs';
+import { fillEditor } from './editor.mjs';
 import { semanticMsg } from '../../lib/semantic-messages.ts';
 
 export const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -140,8 +141,8 @@ export async function switchTo(page, language) {
 }
 
 export async function fillPair(page, source, target) {
-  await page.locator('#review-source').fill(source);
-  await page.locator('#review-target').fill(target);
+  await fillEditor(page, '#review-source', source);
+  await fillEditor(page, '#review-target', target);
 }
 
 export async function downloadFrom(page, name) {

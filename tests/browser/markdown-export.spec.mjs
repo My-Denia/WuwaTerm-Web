@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { fillEditor } from '../helpers/editor.mjs';
 import { fixture, candidate, freshApiReport } from '../fixtures/manuscript.mjs';
 import { makeChoice, serializeWorkfile } from '../../lib/manuscript.js';
 
@@ -53,8 +54,8 @@ async function download(page, button, language) {
 }
 
 async function prepare(page, target = TARGET_PARTIAL) {
-  await page.locator('#review-source').fill(SOURCE);
-  await page.locator('#review-target').fill(target);
+  await fillEditor(page, '#review-source', SOURCE);
+  await fillEditor(page, '#review-target', target);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.locator('.review-summary')).toContainText('规则 review-v2');
 }
@@ -103,7 +104,7 @@ test('a UI filter never clips the exported report', async ({ page }) => {
 test('edited manuscripts export with stale wording, imported history with untrusted wording', async ({ page }) => {
   const { reviews } = await open(page);
   await prepare(page);
-  await page.locator('#review-target').fill(TARGET_PARTIAL + ' Edit.');
+  await fillEditor(page, '#review-target', TARGET_PARTIAL + ' Edit.');
   const stale = await download(page, '导出 Markdown 报告');
   expect(stale.text).toContain('需要重新核对');
 

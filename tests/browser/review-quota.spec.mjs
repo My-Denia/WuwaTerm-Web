@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { fillEditor } from '../helpers/editor.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -49,8 +50,8 @@ async function switchTo(page, language) {
 }
 
 async function fillPair(page) {
-  await page.locator('#review-source').fill(SOURCE);
-  await page.locator('#review-target').fill(TARGET);
+  await fillEditor(page, '#review-source', SOURCE);
+  await fillEditor(page, '#review-target', TARGET);
 }
 
 test('first-run shows a full shared review allowance in Chinese and English', async ({ page }) => {
@@ -107,7 +108,7 @@ test('a full review quota disables the two admission buttons and leaves local ac
   for (const name of ['保存稿件', '导入稿件', '导出译文', '导出当前结果', '导出 Markdown 报告']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeEnabled();
   }
-  await page.locator('#review-source').fill('今汐在。');
+  await fillEditor(page, '#review-source', '今汐在。');
   await expect(page.getByRole('button', { name: '撤销修订', exact: true })).toBeEnabled();
   await page.locator('.alignment-panel > summary').click();
   await expect(page.getByRole('button', { name: '确认选中范围对应', exact: true })).toBeEnabled();

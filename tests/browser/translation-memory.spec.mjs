@@ -8,6 +8,7 @@ import {
   serializeTranslationMemory,
 } from '../../lib/translation-memory.ts';
 import { fixture, freshApiReport, dictionary as fixtureDictionary } from '../fixtures/manuscript.mjs';
+import { expectEditorValue, fillEditor, openInspectorTab, setEditorSelection } from '../helpers/editor.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const SCREENSHOT_DIR = '/tmp/wuwaterm-web-tm-freshness-verify';
@@ -282,6 +283,7 @@ test('meta error retries after cooldown, TTL refresh drops stale verified_fresh,
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
 
   // Even with a live review, failed /api/meta must NOT grant verified_fresh.
+  await openInspectorTab(page, 'memory');
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
 
   // Re-opening inside 30s cooldown skips retry.
@@ -446,6 +448,7 @@ test('skip-segment fill never overwrites later segment, multi-paragraph suggesti
 
   // Move to segment 1 (`首段原文。`): verified_fresh before TTL; applying multi-paragraph suggestion
   // without explicit multi-paragraph protection is refused when alignments are cleared.
+  await openInspectorTab(page, 'memory');
   await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
 
@@ -471,7 +474,7 @@ test('skip-segment fill never overwrites later segment, multi-paragraph suggesti
   await expect(hits(page).filter({ hasText: 'Multi line A.' })).toHaveCount(1);
   await hits(page).filter({ hasText: 'Multi line A.' }).getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.multiParagraphSuggestion);
-  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos\n\nTres');
+  await expectEditorValue(page, '#review-target', 'Uno\n\nDos\n\nTres');
 
   // Import a CRLF `.txt` manuscript (`第一段CRLF。\r\n\r\n第二段CRLF。`) and click at DOM offset of second paragraph:
   // DOM normalized selectionStart (`5`) must map back to raw CRLF offset (`7`) and select segment 2 / 2!
@@ -485,11 +488,7 @@ test('skip-segment fill never overwrites later segment, multi-paragraph suggesti
     tmMsg.segmentScope.replace('{i}', '1').replace('{n}', '2'),
   );
   const domSeg2Start = '第一段CRLF。\n\n'.length;
-  await page.locator('#review-source').evaluate((el, pos) => {
-    el.focus();
-    el.setSelectionRange(pos, pos);
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  }, domSeg2Start);
+  await setEditorSelection(page, '#review-source', domSeg2Start, domSeg2Start);
   await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
     tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '2'),
   );
@@ -528,12 +527,13 @@ test('three-state freshness badges after term check and merge 8 MiB overflow pro
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
 
   // Matching revision and game version -> verified_fresh with zero stale badges.
+  await openInspectorTab(page, 'memory');
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
   await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'false');
   await expect(hits(page).first().locator('.my-memory-stale-badge')).toHaveCount(0);
 
   // Mismatched revision -> known_stale with terms_revision_changed badge.
-  await page.locator('#review-source').fill('声骸。');
+  await fillEditor(page, '#review-source', '声骸。');
   await expect(hits(page)).toHaveCount(1);
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'known_stale');
   await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'true');
@@ -593,21 +593,18 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
 
+  await openInspectorTab(page, 'memory');
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)\n\nTres (TM)');
+  await expectEditorValue(page, '#review-target', 'Uno (TM)\n\nTres (TM)');
 
   // Manually type handwritten text into the unaligned middle gap in target, keeping segment 2 aligned as null.
-  await page.locator('#review-target').fill('Uno (TM)\n\nDos manual draft\n\nTres (TM)');
+  await fillEditor(page, '#review-target', 'Uno (TM)\n\nDos manual draft\n\nTres (TM)');
   // Clicking directly inside handwritten `Dos manual draft` must NOT fall back to segment 1 (`Uno (TM)`);
   // segment label reports unmapped caret (NOT `当前第 1 / 3 段`), displays unaligned hint, and disables Apply & Confirm!
   const unalignedTargetCaret = 'Uno (TM)\n\nDos '.length;
-  await page.locator('#review-target').evaluate((el, pos) => {
-    el.focus();
-    el.setSelectionRange(pos, pos);
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  }, unalignedTargetCaret);
+  await setEditorSelection(page, '#review-target', unalignedTargetCaret, unalignedTargetCaret);
   await expect(panel(page).getByTestId('my-memory-segment-scope')).toHaveAttribute('data-target-unaligned', 'true');
   await expect(panel(page).locator('.my-memory-segment-label')).toHaveText(
     tmMsg.segmentScopeUnaligned.replace('{n}', '3'),
@@ -615,7 +612,7 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentTargetCursorUnalignedHint);
   await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeDisabled();
   await expect(hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true })).toBeDisabled();
-  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)\n\nDos manual draft\n\nTres (TM)');
+  await expectEditorValue(page, '#review-target', 'Uno (TM)\n\nDos manual draft\n\nTres (TM)');
 
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await expect(panel(page).getByTestId('my-memory-segment-scope')).toHaveAttribute('data-target-unaligned', 'false');
@@ -626,12 +623,12 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   await expect(hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true })).toBeEnabled();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.targetGapOccupied);
-  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)\n\nDos manual draft\n\nTres (TM)');
+  await expectEditorValue(page, '#review-target', 'Uno (TM)\n\nDos manual draft\n\nTres (TM)');
 
   // Even when a segment's aligned target spans multiple paragraphs (targetSegmentTotal > sourceSegmentTotal),
   // clear explicit alignment suppresses the false segmentUnalignedHint banner!
-  await page.locator('#review-source').fill('首段原文。\n\n末段原文。');
-  await page.locator('#review-target').fill('One A.\n\nOne B.\n\nTres (TM)');
+  await fillEditor(page, '#review-source', '首段原文。\n\n末段原文。');
+  await fillEditor(page, '#review-target', 'One A.\n\nOne B.\n\nTres (TM)');
   await page.locator('.alignment-panel summary').click();
   await page.getByRole('button', { name: m.review.alignmentReset, exact: true }).click();
   // After clearing alignments on unaligned 3-para target vs 2-para source, warning banner shows;
@@ -641,34 +638,24 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
     const start = text.indexOf(needle);
     return { start, end: start + needle.length };
   };
-  await page.locator('#review-source').evaluate((el, r) => {
-    el.focus();
-    el.setSelectionRange(r.start, r.end);
-    el.dispatchEvent(new Event('select', { bubbles: true }));
-  }, selectSourceSpan('首段原文。\n\n末段原文。', '首段原文。'));
-  await page.locator('#review-target').evaluate((el, r) => {
-    el.focus();
-    el.setSelectionRange(r.start, r.end);
-    el.dispatchEvent(new Event('select', { bubbles: true }));
-  }, selectSourceSpan('One A.\n\nOne B.\n\nTres (TM)', 'One A.\n\nOne B.'));
+  const s1Span = selectSourceSpan('首段原文。\n\n末段原文。', '首段原文。');
+  await setEditorSelection(page, '#review-source', s1Span.start, s1Span.end);
+  const t1Span = selectSourceSpan('One A.\n\nOne B.\n\nTres (TM)', 'One A.\n\nOne B.');
+  await setEditorSelection(page, '#review-target', t1Span.start, t1Span.end);
   await page.getByRole('button', { name: m.review.alignmentConfirm, exact: true }).click();
-  await page.locator('#review-source').evaluate((el, r) => {
-    el.focus();
-    el.setSelectionRange(r.start, r.end);
-    el.dispatchEvent(new Event('select', { bubbles: true }));
-  }, selectSourceSpan('首段原文。\n\n末段原文。', '末段原文。'));
-  await page.locator('#review-target').evaluate((el, r) => {
-    el.focus();
-    el.setSelectionRange(r.start, r.end);
-    el.dispatchEvent(new Event('select', { bubbles: true }));
-  }, selectSourceSpan('One A.\n\nOne B.\n\nTres (TM)', 'Tres (TM)'));
+  const s2Span = selectSourceSpan('首段原文。\n\n末段原文。', '末段原文。');
+  await setEditorSelection(page, '#review-source', s2Span.start, s2Span.end);
+  const t2Span = selectSourceSpan('One A.\n\nOne B.\n\nTres (TM)', 'Tres (TM)');
+  await setEditorSelection(page, '#review-target', t2Span.start, t2Span.end);
   await page.getByRole('button', { name: m.review.alignmentConfirm, exact: true }).click();
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveCount(0);
 
   // Move to segment 1, advance Date.now() past 10m TTL without firing setTimeout, then click Apply immediately:
   // Apply must recompute live basis at click time, show the recheck notice, and degrade the hit badge!
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await openInspectorTab(page, 'review');
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+  await openInspectorTab(page, 'memory');
   await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
   await page.evaluate(() => window.__advanceMockNow(10 * 60 * 1000 + 50));
@@ -682,21 +669,22 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   // 1) Skip-fill past empty segments must be refused without rewriting `[]` to auto-generated alignments;
   // 2) Sequential replace/apply keeps `alignments: []` intact so backend review-v2 keeps receiving `alignments: []`.
   await page.getByRole('button', { name: m.review.alignmentClear, exact: true }).click();
-  await page.locator('#review-source').fill('首段原文。\n\n中段原文。\n\n末段原文。');
-  await page.locator('#review-target').fill('Uno');
+  await fillEditor(page, '#review-source', '首段原文。\n\n中段原文。\n\n末段原文。');
+  await fillEditor(page, '#review-target', 'Uno');
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentClearedSkipHint);
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.clearedAlignmentsSkip);
-  await expect(page.locator('#review-target')).toHaveValue('Uno');
+  await expectEditorValue(page, '#review-target', 'Uno');
 
-  await page.locator('#review-source').fill('首段原文。');
-  await page.locator('#review-target').fill('Draft with empty alignments');
+  await fillEditor(page, '#review-source', '首段原文。');
+  await fillEditor(page, '#review-target', 'Draft with empty alignments');
   await expect(panel(page).getByRole('button', { name: tmMsg.confirmButton, exact: true })).toBeEnabled();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)');
+  await expectEditorValue(page, '#review-target', 'Uno (TM)');
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await openInspectorTab(page, 'review');
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
   expect(traffic.reviews.at(-1)?.alignments).toEqual([]);
 });
@@ -747,6 +735,7 @@ for (const viewport of [
       await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
       await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
 
+      await openInspectorTab(page, 'memory');
       await expect(hits(page)).toHaveCount(3);
       await expect(hits(page).nth(0)).toHaveAttribute('data-freshness', 'verified_fresh');
       await expect(hits(page).nth(1)).toHaveAttribute('data-freshness', 'provenance_unknown');
@@ -841,14 +830,11 @@ test('direct /api/dictionary identity, P1-03 partial-target guard, and batch inc
   const s2 = '中段：暴击率提高 20%。';
   const s3 = '末段：攻击力提高 30%。';
   await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
-  await page.locator('#review-source').fill(`${s1}\n\n${s2}\n\n${s3}`);
-  await page.locator('#review-target').fill('First: Jinhsi Energy Regen +10%.\n\nMiddle: CRIT Rate +20%.\n\nLast: ATK +30%.');
+  await fillEditor(page, '#review-source', `${s1}\n\n${s2}\n\n${s3}`);
+  await fillEditor(page, '#review-target', 'First: Jinhsi Energy Regen +10%.\n\nMiddle: CRIT Rate +20%.\n\nLast: ATK +30%.');
   // Move caret to segment 1 so we confirm segments 1, 2, 3 in order.
-  await page.locator('#review-source').evaluate(el => {
-    el.focus();
-    el.setSelectionRange(0, 0);
-    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  });
+  await setEditorSelection(page, '#review-source', 0, 0);
+  await openInspectorTab(page, 'memory');
   await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
     tmMsg.segmentScope.replace('{i}', '1').replace('{n}', '3'),
   );
@@ -860,23 +846,26 @@ test('direct /api/dictionary identity, P1-03 partial-target guard, and batch inc
   await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '3'));
 
   // Verify P1-03 guard on partial target A'/C' vs A/B/C: refuses overwrite and disables Confirm!
-  await page.locator('#review-target').fill("First: Jinhsi Energy Regen +10%.\n\nLast: ATK +30%.");
+  await fillEditor(page, '#review-target', "First: Jinhsi Energy Regen +10%.\n\nLast: ATK +30%.");
   await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveAttribute('data-alignment-status', 'target_fewer_paragraphs');
   await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeDisabled();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
   await expect(panel(page).locator('.my-terms-feedback')).toContainText('少于原文');
-  await expect(page.locator('#review-target')).toHaveValue("First: Jinhsi Energy Regen +10%.\n\nLast: ATK +30%.");
+  await expectEditorValue(page, '#review-target', "First: Jinhsi Energy Regen +10%.\n\nLast: ATK +30%.");
 
   // Now clear target and run incremental translation on identical 3-paragraph source:
   // all 3 segments reuse from verified TM with 0 /api/translations calls, 1 Layer 1 structure check, and non-text receipt!
-  await page.locator('#review-target').fill('');
+  await fillEditor(page, '#review-target', '');
   await page.getByRole('button', { name: m.review.translateIdle, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue(
+  await expectEditorValue(
+    page,
+    '#review-target',
     'First: Jinhsi Energy Regen +10%.\n\nMiddle: CRIT Rate +20%.\n\nLast: ATK +30%.',
   );
   expect(traffic.translations).toHaveLength(0);
   expect(traffic.structureChecks).toBe(1);
+  await openInspectorTab(page, 'review');
   const receipt = page.getByTestId('tm-run-receipt');
   await expect(receipt).toBeVisible();
   await expect(receipt).toHaveAttribute('data-reused', '3');

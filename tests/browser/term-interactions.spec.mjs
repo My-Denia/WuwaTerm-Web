@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, fillEditor, openInspectorTab } from '../helpers/editor.mjs';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
@@ -132,10 +133,10 @@ test('term match actions: copy and insert into the source', async ({ page }) => 
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
   await expect(page.locator('#review-source')).toHaveValue('今汐');
 
-  // Manuscript review folds the lookup and offers copying only.
+  // Manuscript review moves term lookup into the right-hand Inspector tab and offers copying only.
   await openManuscript(page);
   await expect(page.locator('#term-lookup-body')).toBeHidden();
-  await page.locator('.term-lookup').getByRole('button', { name: '展开', exact: true }).click();
+  await openInspectorTab(page, 'terms');
   await expect(first).toBeVisible();
   await expect(first.getByRole('button', { name: '填入翻译', exact: true })).toHaveCount(0);
   await expect(first.getByRole('button', { name: '复制中文', exact: true })).toBeVisible();
@@ -206,36 +207,36 @@ test('editing a submitted nonempty query drops q so return cannot rerun the stal
 test('clear draft in review workbench empties manuscript and undo restores it', async ({ page }) => {
   await open(page);
   await openManuscript(page);
-  await page.locator('#review-source').fill('测试原文');
-  await page.locator('#review-target').fill('Test target');
+  await fillEditor(page, '#review-source', '测试原文');
+  await fillEditor(page, '#review-target', 'Test target');
   const clearBtn = page.getByRole('button', { name: '清空稿件', exact: true });
   await expect(clearBtn).toBeEnabled();
   await clearBtn.click();
-  await expect(page.locator('#review-source')).toHaveValue('');
-  await expect(page.locator('#review-target')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '');
+  await expectEditorValue(page, '#review-target', '');
   await expect(page.locator('.notice-state')).toContainText('已清空审校稿件与选择');
 
   // Undo restores the cleared draft
   const undoBtn = page.getByRole('button', { name: '撤销修订', exact: true });
   await expect(undoBtn).toBeEnabled();
   await undoBtn.click();
-  await expect(page.locator('#review-source')).toHaveValue('测试原文');
-  await expect(page.locator('#review-target')).toHaveValue('Test target');
+  await expectEditorValue(page, '#review-source', '测试原文');
+  await expectEditorValue(page, '#review-target', 'Test target');
 
   // Empty alignments array is also treated as clearable work
   await page.locator('.alignment-panel > summary').click();
   await page.getByRole('button', { name: '清空对应', exact: true }).click();
-  await page.locator('#review-source').fill('');
-  await page.locator('#review-target').fill('');
+  await fillEditor(page, '#review-source', '');
+  await fillEditor(page, '#review-target', '');
   await expect(clearBtn).toBeEnabled();
   await clearBtn.click();
   await expect(page.locator('.notice-state')).toContainText('已清空审校稿件与选择');
 
   // Whitespace-only manuscript is also treated as clearable work
-  await page.locator('#review-source').fill('   \n  ');
+  await fillEditor(page, '#review-source', '   \n  ');
   await expect(clearBtn).toBeEnabled();
   await clearBtn.click();
-  await expect(page.locator('#review-source')).toHaveValue('');
+  await expectEditorValue(page, '#review-source', '');
 });
 
 test('section pills have at least 40px touch targets and allow direct navigation', async ({ page }) => {

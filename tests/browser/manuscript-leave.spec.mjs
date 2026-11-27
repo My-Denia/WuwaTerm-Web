@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
 import { makeChoice, serializeWorkfile } from '../../lib/manuscript.js';
 import { candidate, fixture, freshApiReport } from '../fixtures/manuscript.mjs';
@@ -64,7 +65,7 @@ test('blank workbench opens privacy without a leave dialog', async ({ page }) =>
 
 test('typed work stays when leaving is cancelled and goes when leaving is confirmed', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('只在此页。');
+  await fillEditor(page, '#review-source', '只在此页。');
   await expect(state(page)).toContainText('目前只在此页');
   await expect(state(page)).not.toContainText('已保存本地稿件文件');
   await page.getByRole('link', { name: '隐私说明' }).first().click();
@@ -72,12 +73,12 @@ test('typed work stays when leaving is cancelled and goes when leaving is confir
   await page.getByRole('button', { name: '留在此页', exact: true }).click();
   await expect(leaveDialog(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.locator('#review-source')).toHaveValue('只在此页。');
+  await expectEditorValue(page, '#review-source', '只在此页。');
   await page.getByRole('button', { name: 'English', exact: true }).click();
   await expect(state(page)).toContainText('only on this page');
-  await expect(page.locator('#review-source')).toHaveValue('只在此页。');
+  await expectEditorValue(page, '#review-source', '只在此页。');
   await page.getByRole('button', { name: '中文', exact: true }).click();
-  await page.locator('#review-target').fill('Jinhsi.');
+  await fillEditor(page, '#review-target', 'Jinhsi.');
   await page.getByRole('link', { name: '隐私说明' }).first().click();
   await expect(leaveDialog(page)).toBeVisible();
   const saving = page.waitForEvent('download');
@@ -86,7 +87,7 @@ test('typed work stays when leaving is cancelled and goes when leaving is confir
   await expect(page).toHaveURL(/\/$/);
   await expect(leaveDialog(page)).toBeVisible();
   await expect(state(page)).toContainText('不能确认文件已写入磁盘');
-  await expect(page.locator('#review-source')).toHaveValue('只在此页。');
+  await expectEditorValue(page, '#review-source', '只在此页。');
   await Promise.all([
     page.waitForURL(/\/privacy$/),
     page.getByRole('button', { name: '仍要离开', exact: true }).click(),
@@ -95,8 +96,8 @@ test('typed work stays when leaving is cancelled and goes when leaving is confir
 
 test('a manuscript download is not a confirmed disk write and still asks before leaving', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('今汐。');
-  await page.locator('#review-target').fill('Jinhsi.');
+  await fillEditor(page, '#review-source', '今汐。');
+  await fillEditor(page, '#review-target', 'Jinhsi.');
   await download(page, '保存稿件');
   await expect(state(page)).toContainText('不能确认文件已写入磁盘');
   await expect(page.locator('.notice-state')).toContainText('不能确认文件已写入磁盘');
@@ -104,14 +105,14 @@ test('a manuscript download is not a confirmed disk write and still asks before 
   await page.getByRole('link', { name: '隐私说明' }).first().click();
   await expect(leaveDialog(page)).toBeVisible();
   await page.getByRole('button', { name: '留在此页', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
+  await expectEditorValue(page, '#review-source', '今汐。');
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
 });
 
 test('txt, result and markdown exports do not become the recoverable manuscript', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('今汐。');
-  await page.locator('#review-target').fill('Jinhsi.');
+  await fillEditor(page, '#review-source', '今汐。');
+  await fillEditor(page, '#review-target', 'Jinhsi.');
   for (const name of ['导出译文', '导出当前结果', '导出 Markdown 报告']) {
     await download(page, name);
     await expect(state(page)).toContainText('目前只在此页');
@@ -141,7 +142,7 @@ test('import match follows the choice and returns after undo', async ({ page }) 
   await page.getByRole('link', { name: '隐私说明' }).first().click();
   await expect(leaveDialog(page)).toBeVisible();
   await page.getByRole('button', { name: '留在此页', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
+  await expectEditorValue(page, '#review-source', '今汐。');
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
   await expect(state(page)).toContainText('这次导入的稿件一致');
   await expect(page.locator('.choice-records')).toContainText('今汐');
@@ -156,13 +157,13 @@ test('undo restores an imported manuscript after a source edit', async ({ page }
   await page.getByLabel('选择稿件文件').setInputFiles({
     name: 'manuscript.json', mimeType: 'application/json', buffer: manuscriptFile(),
   });
-  await page.locator('#review-source').fill('今汐。啊');
+  await fillEditor(page, '#review-source', '今汐。啊');
   await expect(state(page)).toContainText('已经和最近一份可恢复稿件不同');
   await page.getByRole('link', { name: '隐私说明' }).first().click();
   await expect(leaveDialog(page)).toBeVisible();
   await page.getByRole('button', { name: '留在此页', exact: true }).click();
   await page.getByRole('button', { name: '撤销修订', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
+  await expectEditorValue(page, '#review-source', '今汐。');
   await expect(state(page)).toContainText('这次导入的稿件一致');
   await Promise.all([
     page.waitForURL(/\/limits$/),
@@ -172,7 +173,7 @@ test('undo restores an imported manuscript after a source edit', async ({ page }
 
 test('reload asks before discarding typed work and staying keeps it', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('刷新前的原文。');
+  await fillEditor(page, '#review-source', '刷新前的原文。');
   await page.locator('#review-source').click();
   const dialog = page.waitForEvent('dialog');
   // Dismissing the browser prompt cancels the reload, so this navigation does not settle.
@@ -181,7 +182,7 @@ test('reload asks before discarding typed work and staying keeps it', async ({ p
   expect(prompt.type()).toBe('beforeunload');
   await prompt.dismiss();
   await reloading;
-  await expect(page.locator('#review-source')).toHaveValue('刷新前的原文。');
+  await expectEditorValue(page, '#review-source', '刷新前的原文。');
 });
 
 for (const direction of ['Back', 'Forward']) {
@@ -200,8 +201,8 @@ for (const direction of ['Back', 'Forward']) {
       await openManuscript(page);
       await expect(page.locator('.review-quota')).toContainText('60', { timeout: 30_000 });
     }
-    await page.locator('#review-source').fill('今汐。');
-    await page.locator('#review-target').fill('Jinhsi.');
+    await fillEditor(page, '#review-source', '今汐。');
+    await fillEditor(page, '#review-target', 'Jinhsi.');
     await page.getByRole('button', { name: '核对术语', exact: true }).click();
     await expect(page.locator('.review-current')).toBeVisible();
     await page.getByRole('button', { name: '全部 1', exact: true }).click();
@@ -224,8 +225,8 @@ for (const direction of ['Back', 'Forward']) {
       await navigating;
       if (!accept) {
         await expect(page).toHaveURL(/\/$/);
-        await expect(page.locator('#review-source')).toHaveValue(original.source);
-        await expect(page.locator('#review-target')).toHaveValue(original.target);
+        await expectEditorValue(page, '#review-source', original.source);
+        await expectEditorValue(page, '#review-target', original.target);
         await expect(page.locator('.choice-records')).toContainText('今汐 / Jinhsi');
         await expect(page.locator('.review-summary')).toBeVisible();
         expect(await page.evaluate(() => history.length)).toBe(historyLength);
@@ -233,8 +234,8 @@ for (const direction of ['Back', 'Forward']) {
     }
     await expect(page).toHaveURL(direction === 'Back' ? /\/privacy$/ : /\/limits$/);
     await page.getByRole('link', { name: /返回 WuwaTerm/ }).click();
-    await expect(page.locator('#review-source')).toHaveValue('');
-    await expect(page.locator('#review-target')).toHaveValue('');
+    await expectEditorValue(page, '#review-source', '');
+    await expectEditorValue(page, '#review-target', '');
   });
 }
 
@@ -246,15 +247,15 @@ test('a running check is named in the leave dialog and is not released', async (
     await new Promise(() => {});
     released = true;
   });
-  await page.locator('#review-source').fill('今汐。');
-  await page.locator('#review-target').fill('Jinhsi.');
+  await fillEditor(page, '#review-source', '今汐。');
+  await fillEditor(page, '#review-target', 'Jinhsi.');
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect.poll(() => reviews).toBe(1);
   await page.getByRole('link', { name: '隐私说明' }).first().click();
   await expect(leaveDialog(page)).toContainText('尚未返回的结果');
   await page.getByRole('button', { name: '留在此页', exact: true }).click();
-  await expect(page.locator('#review-source')).toHaveValue('今汐。');
-  await expect(page.locator('#review-target')).toHaveValue('Jinhsi.');
+  await expectEditorValue(page, '#review-source', '今汐。');
+  await expectEditorValue(page, '#review-target', 'Jinhsi.');
   expect(released).toBe(false);
 });
 
@@ -262,7 +263,7 @@ test.describe('mobile leave dialog', () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test('staying keeps the draft inside a 390px viewport', async ({ page }) => {
     await open(page);
-    await page.locator('#review-source').fill('窄屏原文。');
+    await fillEditor(page, '#review-source', '窄屏原文。');
     await page.getByRole('link', { name: '隐私说明' }).first().click();
     const dialog = leaveDialog(page);
     await expect(dialog).toBeVisible();
@@ -270,15 +271,15 @@ test.describe('mobile leave dialog', () => {
     expect(box?.width ?? 0).toBeLessThanOrEqual(390);
     expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
     await page.getByRole('button', { name: '留在此页', exact: true }).click();
-    await expect(page.locator('#review-source')).toHaveValue('窄屏原文。');
+    await expectEditorValue(page, '#review-source', '窄屏原文。');
     await expect(state(page)).toContainText('目前只在此页');
   });
 });
 
 test('the in-page home link does not open the leave dialog', async ({ page }) => {
   await open(page);
-  await page.locator('#review-source').fill('只在此页。');
+  await fillEditor(page, '#review-source', '只在此页。');
   await page.getByRole('link', { name: 'WuwaTerm 首页' }).click();
   await expect(leaveDialog(page)).toHaveCount(0);
-  await expect(page.locator('#review-source')).toHaveValue('只在此页。');
+  await expectEditorValue(page, '#review-source', '只在此页。');
 });

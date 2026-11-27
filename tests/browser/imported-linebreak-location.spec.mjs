@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, readEditorSelection, readEditorValue, setEditorSelection } from '../helpers/editor.mjs';
 import { fixture } from '../fixtures/manuscript.mjs';
 import { serializeWorkfile } from '../../lib/manuscript.js';
 
@@ -50,9 +51,9 @@ for (const [label, breaks] of [['CRLF', ['\r\n', '\r\n']], ['CR', ['\r', '\r']],
     const findings = page.locator('.review-findings .term-result');
     for (let index = 0; index < 2; index += 1) {
       await findings.nth(index).getByRole('button', { name: '定位原文', exact: true }).click();
-      expect(await page.locator('#review-source').evaluate(box => box.value.slice(box.selectionStart, box.selectionEnd))).toBe(report.findings[index].source_span.text);
+      expect((await readEditorSelection(page, '#review-source')).text).toBe(report.findings[index].source_span.text);
       await findings.nth(index).getByRole('button', { name: '定位译文', exact: true }).click();
-      expect(await page.locator('#review-target').evaluate(box => box.value.slice(box.selectionStart, box.selectionEnd))).toBe(report.findings[index].target_span.text);
+      expect((await readEditorSelection(page, '#review-target')).text).toBe(report.findings[index].target_span.text);
     }
     const after = await download(page, '保存稿件');
     expect(after.equals(before)).toBe(true);
@@ -72,12 +73,11 @@ test('manual alignment uses raw CRLF report coordinates for selected normalized 
   const target = '😀prefix\r\nJinhsi.';
   const content = serializeWorkfile({ source, target, direction: 'en', alignments: null, choices: [], history: [] });
   await page.getByLabel('选择稿件文件').setInputFiles({ name: 'alignment.json', mimeType: 'application/json', buffer: Buffer.from(content) });
-  await expect(page.locator('#review-source')).toHaveValue(source.replace(/\r\n/g, '\n'));
+  await expectEditorValue(page, '#review-source', source.replace(/\r\n/g, '\n'));
   for (const [selector, term] of [['#review-source', '今汐'], ['#review-target', 'Jinhsi']]) {
-    await page.locator(selector).evaluate((box, term) => {
-      const start = box.value.indexOf(term);
-      box.setSelectionRange(start, start + term.length);
-    }, term);
+    const val = await readEditorValue(page, selector);
+    const start = val.indexOf(term);
+    await setEditorSelection(page, selector, start, start + term.length);
   }
   await page.locator('.alignment-panel > summary').click();
   await page.locator('.alignment-panel .actions button').first().click();
@@ -90,7 +90,8 @@ test('manual alignment uses raw CRLF report coordinates for selected normalized 
   // A selected range spanning a normalized newline must retain raw CRLF text.
   await page.getByRole('button', { name: '清空对应', exact: true }).click();
   for (const selector of ['#review-source', '#review-target']) {
-    await page.locator(selector).evaluate(box => box.setSelectionRange(0, box.value.length));
+    const val = await readEditorValue(page, selector);
+    await setEditorSelection(page, selector, 0, val.length);
   }
   await page.getByRole('button', { name: '确认选中范围对应', exact: true }).click();
   const whole = JSON.parse((await download(page, '保存稿件')).toString());

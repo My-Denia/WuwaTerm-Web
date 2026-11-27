@@ -2,7 +2,7 @@
 
 // Semantic review, segmented runs and manual splitting for the review workbench (W2).
 // Thin React view layer over lib/workbench-controller.ts.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import { SEGMENT_LIMIT } from '../../lib/segmentation.ts';
 import {
   classifyFailure, isQuotaPause, itemDisplayState, runDisplayState, runProgress,
@@ -65,6 +65,7 @@ type Props = {
   termTrack: (longTerms: ReactNode) => ReactNode;
   termbaseEntries: readonly TermbaseEntry[];
   onPromoteToTermbase: (item: { source: string; target: string; direction?: TermbaseDirection }) => void;
+  onActiveSemanticChange?: (placedId: string | null) => void;
 };
 
 const chars = (text: string) => Array.from(text);
@@ -104,7 +105,7 @@ function Snippet({ text, span, missing }: { text: string; span: Span | null; mis
 }
 
 export function SemanticWorkbench(props: Props) {
-  const { doc, snapshot, lang, pool, locate, termbaseEntries, onPromoteToTermbase } = props;
+  const { doc, snapshot, lang, pool, locate, termbaseEntries, onPromoteToTermbase, onActiveSemanticChange } = props;
   const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction, structure, tmReceipt } = snapshot;
   const { source, target, direction } = draft;
   const s = semanticMsg(lang);
@@ -189,6 +190,7 @@ export function SemanticWorkbench(props: Props) {
   const choice = active && choiceState.id === active.placed.id ? choiceState.value : 'suggestion';
   const setChoice = (value: 'suggestion' | 'alternative') => setChoiceState({ id: active?.placed.id ?? null, value });
   useEffect(() => { activeMark.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [active?.placed.id, activeView?.pair.index]);
+  useEffect(() => { onActiveSemanticChange?.(active?.placed.id ?? null); }, [active?.placed.id, onActiveSemanticChange]);
 
   const move = (step: number) => {
     if (!visible.length) return;
@@ -365,14 +367,23 @@ export function SemanticWorkbench(props: Props) {
   };
   const LONG_ROWS = 100;
   const targetChars = useMemo(() => chars(target), [target]);
-  // Ambiguous one-character names stay out of the term groups and their counts: they are listed after them, folded.
-  const splitTerms = useMemo(() => (long ? splitAmbiguousSegments(termSegments(semantic.long, longCtx)) : { judged: [], ambiguous: [] }), [long, semantic.long, longCtx]);
-  const termGroups = useMemo(() => (long ? groupTermOccurrences(splitTerms.judged, source, target, direction, uncheckedTermSegments(semantic.long, longCtx)) as TermGroup[] : []),
-    [long, splitTerms, semantic.long, longCtx, source, target, direction]);
+  // Defer heavy long-manuscript term grouping during rapid typing so keystrokes stay responsive.
+  const deferredSource = useDeferredValue(source);
+  const deferredTarget = useDeferredValue(target);
+  const deferredLong = useDeferredValue(semantic.long);
+  const deferredLongCtx = useDeferredValue(longCtx);
+  const splitTerms = useMemo(
+    () => (long ? splitAmbiguousSegments(termSegments(deferredLong, deferredLongCtx)) : { judged: [], ambiguous: [] }),
+    [long, deferredLong, deferredLongCtx],
+  );
+  const termGroups = useMemo(
+    () => (long ? groupTermOccurrences(splitTerms.judged, deferredSource, deferredTarget, direction, uncheckedTermSegments(deferredLong, deferredLongCtx)) as TermGroup[] : []),
+    [long, splitTerms, deferredLong, deferredLongCtx, deferredSource, deferredTarget, direction],
+  );
   const ambiguousPlaces = useMemo(() => (long && splitTerms.ambiguous.length
-    ? (groupTermOccurrences(splitTerms.ambiguous, source, target, direction) as TermGroup[]).flatMap(g => g.occurrences)
+    ? (groupTermOccurrences(splitTerms.ambiguous, deferredSource, deferredTarget, direction) as TermGroup[]).flatMap(g => g.occurrences)
       .sort((a, b) => a.segmentIndex - b.segmentIndex || a.docSource.start - b.docSource.start)
-    : []), [long, splitTerms, source, target, direction]);
+    : []), [long, splitTerms, deferredSource, deferredTarget, direction]);
   const groupCounts = useMemo(() => termGroupCounts(termGroups, selectedSegment), [termGroups, selectedSegment]);
   const filteredGroups = useMemo(() => filterTermGroups(termGroups, groupFilter, { segment: selectedSegment, expanded: openGroups }), [termGroups, groupFilter, selectedSegment, openGroups]);
   const placeCount = filteredGroups.reduce((n, g) => n + g.occurrences.length, 0);

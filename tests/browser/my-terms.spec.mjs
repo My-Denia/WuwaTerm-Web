@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { parseTermbaseText, serializeTermbase } from '../../lib/termbase.ts';
 import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { openInspectorTab } from '../helpers/editor.mjs';
 
 // My terms (reference): a person's own term list held in page memory. It is imported and exported as a file, shown as a
 // reference when the current text contains an entry, and never stored, sent or written into a manuscript.
@@ -210,9 +211,10 @@ test('with entries loaded, translation and review requests and the saved manuscr
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
   expect(traffic.reviews).toHaveLength(1);
-  // The termbase hit stays beside the official review and is labelled apart from it.
-  await expect(hits(page)).toHaveCount(1);
+  // The termbase hit stays in the Terms & glossary inspector tab apart from the official review.
   await expect(page.locator('.term-track')).not.toContainText(CANARY_TARGET);
+  await openInspectorTab(page, 'terms');
+  await expect(hits(page)).toHaveCount(1);
 
   // Every request the page made after load, in full: not one carries a termbase string or field.
   const wire = JSON.stringify(traffic.requests);
@@ -245,6 +247,7 @@ for (const viewport of [{ width: 1440, height: 900, label: '1440px' }, { width: 
         for (const label of ['quick', 'manuscript']) {
           if (label === 'manuscript') {
             await page.getByRole('button', { name: m.workspace.modeManuscript, exact: true }).click();
+            await openInspectorTab(page, 'terms');
             if (!(await page.locator('#my-terms-body').isVisible())) await expand(page);
           }
           const geometry = await page.evaluate(() => {

@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { FULL, S, openWorkbench } from '../helpers/semantic-routes.mjs';
+import { expectEditorValue, fillEditor } from '../helpers/editor.mjs';
 
 const M = msg('zh');
 // Twelve short paragraphs: the source stays under 2,000 characters, the translation goes over 1,800, so review pairs paragraphs.
@@ -20,9 +21,9 @@ const chips = page => page.locator('.segment-chip');
 
 test('with translation-context-v1 a whole-text translation sends context {} and its paragraphs pair in review', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: FULL, translate: echo });
-  await page.locator('#review-source').fill(SOURCE);
+  await fillEditor(page, '#review-source', SOURCE);
   await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue(ids.map(en).join('\n\n'));
+  await expectEditorValue(page, '#review-target', ids.map(en).join('\n\n'));
   expect(rec.translations).toEqual([{ text: SOURCE, to: 'en', context: {} }]);
   await expect(chips(page)).toHaveCount(2);
   await expect(chips(page).filter({ hasText: S.segManual })).toHaveCount(0);
@@ -30,9 +31,9 @@ test('with translation-context-v1 a whole-text translation sends context {} and 
 
 test('without translation-context-v1 no context is sent, and a folded translation needs a manual split', async ({ page }) => {
   const rec = await openWorkbench(page, { capabilities: [], translate: echo });
-  await page.locator('#review-source').fill(SOURCE);
+  await fillEditor(page, '#review-source', SOURCE);
   await page.getByRole('button', { name: M.review.translateIdle, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue(ids.map(en).join(' '));
+  await expectEditorValue(page, '#review-target', ids.map(en).join(' '));
   expect(rec.translations).toEqual([{ text: SOURCE, to: 'en' }]);
   await expect(chips(page)).toHaveCount(1);
   await expect(chips(page).filter({ hasText: S.segManual })).toHaveCount(1);

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { openManuscript } from '../helpers/semantic-routes.mjs';
+import { fillEditor, readEditorSelection, readEditorValue } from '../helpers/editor.mjs';
 import { writeFile } from 'node:fs/promises';
 import { FRESH_MATCHER_REVISION, candidate, dictionary, echo, hash } from '../fixtures/manuscript.mjs';
 import { scalarToUtf16 } from '../../lib/review-report.js';
@@ -185,16 +186,14 @@ async function preservationSequence(page) {
 }
 
 async function selection(page, selector) {
-  return page.locator(selector).evaluate(element => ({
-    start: element.selectionStart,
-    end: element.selectionEnd,
-    value: element.value,
-  }));
+  const sel = await readEditorSelection(page, selector);
+  const value = await readEditorValue(page, selector);
+  return { start: sel.start, end: sel.end, value };
 }
 
 async function check(page) {
-  await page.locator('#review-source').fill(SOURCE);
-  await page.locator('#review-target').fill(TARGET);
+  await fillEditor(page, '#review-source', SOURCE);
+  await fillEditor(page, '#review-target', TARGET);
   await page.getByRole('button', { name: '核对术语', exact: true }).click();
   await expect(page.locator('.review-current')).toBeVisible();
 }
@@ -241,8 +240,8 @@ for (const viewport of [
 
     test('navigation preserves populated exports, stale reports and imported history', async ({ page }, info) => {
       const reviews = await open(page, preservationReportFor);
-      await page.locator('#review-source').fill(SOURCE);
-      await page.locator('#review-target').fill(TARGET);
+      await fillEditor(page, '#review-source', SOURCE);
+      await fillEditor(page, '#review-target', TARGET);
       await page.locator('.alignment-panel > summary').click();
       await page.getByRole('button', { name: '确认全文为一个对应段', exact: true }).click();
       await page.getByRole('button', { name: '核对术语', exact: true }).click();
@@ -279,8 +278,8 @@ for (const viewport of [
       expect(manuscript.history[1].resolutions).toEqual(reviews[1].resolutions);
       expect(saved.translation.toString()).toBe(TARGET);
 
-      await page.locator('#review-source').fill(`${SOURCE}注`);
-      await page.locator('#review-target').fill(`${TARGET}注`);
+      await fillEditor(page, '#review-source', `${SOURCE}注`);
+      await fillEditor(page, '#review-target', `${TARGET}注`);
       await expect(page.locator('.review-current')).toHaveCount(0);
       for (const button of await page.getByRole('button', { name: /定位原文|定位译文/ }).all()) await expect(button).toBeDisabled();
       const stale = await invariantPhase(page, info, reviews, 'stale', () => preservationSequence(page));
@@ -431,13 +430,13 @@ for (const viewport of [
       expect(chosen.choices[0].source_span).toEqual(FIRST.source_span);
       expect(reviews).toHaveLength(1);
 
-      await page.locator('#review-source').fill(`${SOURCE}注`);
+      await fillEditor(page, '#review-source', `${SOURCE}注`);
       await expect(page.locator('.review-current')).toHaveCount(0);
       await expect(page.locator('.review-stale').first()).toBeVisible();
       await expect(page.getByRole('button', { name: '定位原文' })).toHaveCount(4);
       for (const button of await page.getByRole('button', { name: '定位原文' }).all()) await expect(button).toBeDisabled();
       await expect(page.locator(`[data-mention-id="${FIRST.id}"]`).getByRole('button', { name: '定位译文', exact: true })).toBeEnabled();
-      await page.locator('#review-target').fill(`${TARGET}注`);
+      await fillEditor(page, '#review-target', `${TARGET}注`);
       for (const button of await page.getByRole('button', { name: '定位译文' }).all()) await expect(button).toBeDisabled();
       await expect(page.locator('.review-findings .term-result')).toHaveCount(4);
       await page.getByRole('button', { name: '未评估 1', exact: true }).click();
