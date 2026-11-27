@@ -1319,7 +1319,7 @@ test('auto TM batch reuse force-refreshes cached dictionary identity within 10m 
           request_id: 'cap-1',
         }), { status: 200 });
       }
-      if (path === '/api/dictionary') {
+      if (path === '/api/dictionary' || path === '/api/dictionary?refresh=1') {
         dictFetches += 1;
         return new Response(JSON.stringify(activeDict), { status: 200 });
       }

@@ -129,10 +129,13 @@ export class RuntimeStore {
   private started = false;
   private poolAbort: AbortController | null = null;
   private capabilitiesPromise: Promise<string[]> | null = null;
+  private capabilitiesEpoch = 0;
   private capabilitiesLoaded = false;
   private capabilitiesFailedAt: number | null = null;
   private metaPromise: Promise<void> | null = null;
+  private metaEpoch = 0;
   private dictionaryPromise: Promise<void> | null = null;
+  private dictionaryEpoch = 0;
 
   constructor(options: RuntimeStoreOptions = {}) {
     this.fetcher = options.fetch ?? ((path, init) => fetch(workbenchPath(path), init));
@@ -196,13 +199,14 @@ export class RuntimeStore {
    */
   capabilities(force = false): Promise<string[]> {
     if (this.capabilitiesLoaded) return Promise.resolve(this.state.capabilities ?? []);
-    if (this.capabilitiesPromise) return this.capabilitiesPromise;
+    if (!force && this.capabilitiesPromise) return this.capabilitiesPromise;
     const now = this.now();
     if (!force && this.capabilitiesFailedAt !== null
       && now >= this.capabilitiesFailedAt
       && now - this.capabilitiesFailedAt < this.dictionaryErrorRetryCooldownMs) {
       return Promise.resolve([]);
     }
+    const epoch = ++this.capabilitiesEpoch;
     const promise = (async () => {
       let list: string[] = [];
       let succeeded = false;
@@ -215,6 +219,9 @@ export class RuntimeStore {
         }
       } catch {
         list = [];
+      }
+      if (this.capabilitiesEpoch !== epoch) {
+        return this.state.capabilities ?? list;
       }
       if (succeeded) {
         this.capabilitiesLoaded = true;
@@ -236,13 +243,14 @@ export class RuntimeStore {
    * Authoritative server dictionary identity (`GET /api/dictionary`, capability `dictionary-identity-v1`):
    * - checks `capabilities()` first; distinguishes a transient `/api/capabilities` error (`error`, retryable)
    *   from a verified HTTP 200 capability list lacking `dictionary-identity-v1` (`unsupported`);
-   * - in-flight reads are shared by joining the existing promise;
+   * - non-forced in-flight reads are shared by joining the existing promise;
    * - `success` is reused within `dictionaryFreshTtlMs` and refreshed once expired;
    * - `error` respects the fixed 30s `dictionaryErrorRetryCooldownMs` and retries once elapsed;
-   * - `force = true` always performs an immediate re-read (retrying capabilities first if not yet confirmed).
+   * - `force = true` never reuses a non-forced in-flight promise, appends `?refresh=1` to bypass the BFF proxy
+   *   cache, and prevents stale out-of-order responses from overwriting newer state.
    */
   loadDictionary(force = false): Promise<void> {
-    if (this.dictionaryPromise) return this.dictionaryPromise;
+    if (!force && this.dictionaryPromise) return this.dictionaryPromise;
     const current = this.state.dictionary;
     const now = this.now();
     if (!force) {
@@ -256,9 +264,11 @@ export class RuntimeStore {
         return Promise.resolve();
       }
     }
+    const epoch = ++this.dictionaryEpoch;
     const promise = (async () => {
       try {
         const caps = await this.capabilities(force);
+        if (this.dictionaryEpoch !== epoch) return;
         if (!this.capabilitiesLoaded) {
           const lastKnown = this.lastKnownDictionary();
           this.set({ dictionary: { kind: 'error', lastKnown, failedAt: this.now() } });
@@ -271,12 +281,11 @@ export class RuntimeStore {
         const lastKnown = this.lastKnownDictionary();
         this.set({ dictionary: { kind: 'loading', lastKnown } });
         const response = await this.fetcher(
-          '/api/dictionary',
-          force
-            ? { cache: 'no-store', headers: { 'cache-control': 'no-cache' } }
-            : { cache: 'no-store' },
+          force ? '/api/dictionary?refresh=1' : '/api/dictionary',
+          { cache: 'no-store' },
         );
         const value = await json(response);
+        if (this.dictionaryEpoch !== epoch) return;
         const at = this.now();
         if (response.ok && isDictionaryIdentity(value)) {
           this.set({ dictionary: { kind: 'success', data: value, fetchedAt: at } });
@@ -290,10 +299,11 @@ export class RuntimeStore {
           this.set({ dictionary: { kind: 'error', lastKnown, failedAt: at } });
         }
       } catch {
+        if (this.dictionaryEpoch !== epoch) return;
         const lastKnown = this.lastKnownDictionary();
         this.set({ dictionary: { kind: 'error', lastKnown, failedAt: this.now() } });
       } finally {
-        this.dictionaryPromise = null;
+        if (this.dictionaryEpoch === epoch) this.dictionaryPromise = null;
       }
     })();
     this.dictionaryPromise = promise;
@@ -302,13 +312,14 @@ export class RuntimeStore {
 
   /**
    * The dictionary provenance. Each read counts against the dictionary-info quota, so it is read only on request:
-   * - in-flight reads are shared by joining the existing promise;
+   * - non-forced in-flight reads are shared by joining the existing promise;
    * - `success` is reused within `metaFreshTtlMs` and refreshed once expired;
    * - `error` respects `metaErrorRetryCooldownMs` and retries automatically once the cooldown elapses;
-   * - `force = true` always performs an immediate re-read.
+   * - `force = true` never reuses a non-forced in-flight promise, appends `?refresh=1`, and prevents stale
+   *   out-of-order responses from overwriting newer state.
    */
   loadMeta(force = false): Promise<void> {
-    if (this.metaPromise) return this.metaPromise;
+    if (!force && this.metaPromise) return this.metaPromise;
     const current = this.state.meta;
     const now = this.now();
     if (!force) {
@@ -319,17 +330,17 @@ export class RuntimeStore {
         return Promise.resolve();
       }
     }
+    const epoch = ++this.metaEpoch;
     const lastKnown = this.lastKnownMeta();
     this.set({ meta: { kind: 'loading', lastKnown } });
     const promise = (async () => {
       try {
         const response = await this.fetcher(
-          '/api/meta',
-          force
-            ? { cache: 'no-store', headers: { 'cache-control': 'no-cache' } }
-            : { cache: 'no-store' },
+          force ? '/api/meta?refresh=1' : '/api/meta',
+          { cache: 'no-store' },
         );
         const value = await json(response);
+        if (this.metaEpoch !== epoch) return;
         const at = this.now();
         this.set({
           meta: response.ok && isProvenance(value)
@@ -337,9 +348,10 @@ export class RuntimeStore {
             : { kind: 'error', lastKnown, failedAt: at },
         });
       } catch {
+        if (this.metaEpoch !== epoch) return;
         this.set({ meta: { kind: 'error', lastKnown, failedAt: this.now() } });
       } finally {
-        this.metaPromise = null;
+        if (this.metaEpoch === epoch) this.metaPromise = null;
       }
     })();
     this.metaPromise = promise;

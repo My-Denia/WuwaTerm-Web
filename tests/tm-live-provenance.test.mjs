@@ -182,11 +182,13 @@ test('RuntimeStore refreshes meta after TTL, retries error after cooldown, and k
   let clock = NOW;
   let mode = 'fail';
   let calls = 0;
+  const metaPaths = [];
   const store = new RuntimeStore({
     pool: false,
     now: () => clock,
     fetch: async (path) => {
-      assert.equal(path, '/api/meta');
+      assert.ok(path === '/api/meta' || path === '/api/meta?refresh=1', `unexpected path ${path}`);
+      metaPaths.push(path);
       calls += 1;
       if (mode === 'fail') {
         return new Response('upstream-unavailable', { status: 502 });
@@ -242,6 +244,7 @@ test('RuntimeStore refreshes meta after TTL, retries error after cooldown, and k
   });
   await reread;
   assert.equal(calls, 4);
+  assert.equal(metaPaths.at(-1), '/api/meta?refresh=1');
   assert.equal(store.getSnapshot().meta.kind, 'error');
   assert.deepEqual(tmServiceBasis(store.getSnapshot().meta, liveSnapshot(), { now: clock }), {
     currentTermsDbRevision: null,
@@ -378,6 +381,7 @@ test('RuntimeStore.loadDictionary checks capabilities first, caches for 10m TTL,
   assert.deepEqual(legacyStore.getSnapshot().dictionary, { kind: 'unsupported' });
 
   // Modern server advertising dictionary-identity-v1.
+  const dictPaths = [];
   const store = new RuntimeStore({
     pool: false,
     now: () => clock,
@@ -385,7 +389,8 @@ test('RuntimeStore.loadDictionary checks capabilities first, caches for 10m TTL,
       if (path === '/api/capabilities') {
         return new Response(JSON.stringify({ capabilities: ['dictionary-identity-v1'], request_id: 'cap-2' }), { status: 200 });
       }
-      assert.equal(path, '/api/dictionary');
+      assert.ok(path === '/api/dictionary' || path === '/api/dictionary?refresh=1', `unexpected path ${path}`);
+      dictPaths.push(path);
       dictCalls += 1;
       if (dictMode === 'fail') return new Response('unavailable', { status: 503 });
       return new Response(JSON.stringify(DICT), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -423,6 +428,7 @@ test('RuntimeStore.loadDictionary checks capabilities first, caches for 10m TTL,
   dictMode = 'fail';
   await store.loadDictionary(true);
   assert.equal(dictCalls, 4);
+  assert.equal(dictPaths.at(-1), '/api/dictionary?refresh=1');
   assert.deepEqual(store.getSnapshot().dictionary, { kind: 'error', lastKnown: DICT, failedAt: clock });
   assert.deepEqual(tmConfirmBasis(store.getSnapshot().dictionary, { kind: 'idle' }, null, { now: clock }), {
     currentTermsDbRevision: null,
@@ -484,7 +490,7 @@ test('Finding #3: transient /api/capabilities 503 enters retryable error instead
         if (capStatus2 !== 200) return new Response(null, { status: capStatus2 });
         return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-ok-2' }), { status: 200 });
       }
-      if (path === '/api/dictionary') {
+      if (path === '/api/dictionary' || path === '/api/dictionary?refresh=1') {
         dictCalls2 += 1;
         return new Response(JSON.stringify(DICT), { status: 200 });
       }
@@ -545,6 +551,7 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
   let currentDict = DICT;
   let dictMode = 'ok';
 
+  const dictPaths = [];
   const store = new RuntimeStore({
     pool: false,
     now: () => clock,
@@ -552,7 +559,8 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
       if (path === '/api/capabilities') {
         return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-1' }), { status: 200 });
       }
-      if (path === '/api/dictionary') {
+      if (path === '/api/dictionary' || path === '/api/dictionary?refresh=1') {
+        dictPaths.push(path);
         dictCalls += 1;
         if (dictMode === 'fail') return new Response('unavailable', { status: 503 });
         return new Response(JSON.stringify(currentDict), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -564,6 +572,7 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
   // Initial non-forced load (e.g. opening TM panel) caches DICT for 10m TTL.
   await store.loadDictionary();
   assert.equal(dictCalls, 1);
+  assert.equal(dictPaths[0], '/api/dictionary');
   assert.deepEqual(tmDisplayMatchBasis(store.getSnapshot().dictionary, store.getSnapshot().meta, null, { now: clock }), {
     currentTermsDbRevision: REVISION,
     currentGameVersion: '3.7.0',
@@ -587,6 +596,7 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
   // Auto-reuse resolution MUST force-refresh and pick up the latest dictionary identity!
   const basis = await resolveTmAutoReuseBasisFromRuntime(store, null, { now: clock });
   assert.equal(dictCalls, 2);
+  assert.equal(dictPaths[1], '/api/dictionary?refresh=1');
   assert.deepEqual(basis, {
     currentTermsDbRevision: newRev,
     currentGameVersion: '3.8.0',
@@ -601,6 +611,7 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
   dictMode = 'fail';
   const failedBasis = await resolveTmAutoReuseBasisFromRuntime(store, null, { now: clock });
   assert.equal(dictCalls, 3);
+  assert.equal(dictPaths[2], '/api/dictionary?refresh=1');
   assert.deepEqual(failedBasis, {
     currentTermsDbRevision: null,
     currentGameVersion: null,
@@ -608,6 +619,7 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
 
   // Legacy server (dictionary unsupported): inside 10m meta TTL, backend /api/meta changes under saved review -> fails closed.
   let metaCalls = 0;
+  const metaPaths = [];
   let currentMeta = META;
   const legacyStore = new RuntimeStore({
     pool: false,
@@ -616,7 +628,8 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
       if (path === '/api/capabilities') {
         return new Response(JSON.stringify({ capabilities: ['translation-context-v1'], request_id: 'cap-legacy' }), { status: 200 });
       }
-      if (path === '/api/meta') {
+      if (path === '/api/meta' || path === '/api/meta?refresh=1') {
+        metaPaths.push(path);
         metaCalls += 1;
         return new Response(JSON.stringify(currentMeta), { status: 200 });
       }
@@ -626,13 +639,120 @@ test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even wi
   await legacyStore.loadDictionary();
   await legacyStore.loadMeta();
   assert.equal(metaCalls, 1);
+  assert.equal(metaPaths[0], '/api/meta');
 
   clock += 60_000;
   currentMeta = { ...META, source_commit: 'commit-v2', request_id: 'meta-2' };
   const legacyBasis = await resolveTmAutoReuseBasisFromRuntime(legacyStore, liveSnapshot(), { now: clock });
   assert.equal(metaCalls, 2);
+  assert.equal(metaPaths[1], '/api/meta?refresh=1');
   assert.deepEqual(legacyBasis, {
     currentTermsDbRevision: null,
     currentGameVersion: null,
+  });
+});
+
+test('forced loadDictionary(true) / loadMeta(true) bypass non-forced in-flight reads and ignore late stale responses', async () => {
+  const REV_2 = 'c'.repeat(64);
+  const DICT_2 = {
+    ...DICT,
+    revision: REV_2,
+    source_commit: 'commit-v2',
+    game_version: '3.8.0',
+    request_id: 'dict-2',
+  };
+  let releaseStaleDict;
+  let releaseForcedDict;
+  const dictPaths = [];
+  const store = new RuntimeStore({
+    pool: false,
+    now: () => NOW,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-race' }), { status: 200 });
+      }
+      if (path === '/api/dictionary') {
+        dictPaths.push(path);
+        await new Promise((resolve) => { releaseStaleDict = resolve; });
+        return new Response(JSON.stringify(DICT), { status: 200 });
+      }
+      if (path === '/api/dictionary?refresh=1') {
+        dictPaths.push(path);
+        await new Promise((resolve) => { releaseForcedDict = resolve; });
+        return new Response(JSON.stringify(DICT_2), { status: 200 });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  // Suspend initial non-forced loadDictionary(false).
+  const stalePromise = store.loadDictionary(false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(dictPaths, ['/api/dictionary']);
+
+  // While stale read is in flight, batch auto-reuse forces refresh and MUST issue a new ?refresh=1 request immediately.
+  const forcedPromise = resolveTmAutoReuseBasisFromRuntime(store, null, { now: NOW });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(dictPaths, ['/api/dictionary', '/api/dictionary?refresh=1']);
+
+  // Forced refresh resolves first with DICT_2.
+  releaseForcedDict();
+  const basis = await forcedPromise;
+  assert.deepEqual(basis, { currentTermsDbRevision: REV_2, currentGameVersion: '3.8.0' });
+  assert.equal(store.getSnapshot().dictionary.data?.revision, REV_2);
+
+  // Slower non-forced read resolves afterwards with DICT -> MUST NOT overwrite newer DICT_2!
+  releaseStaleDict();
+  await stalePromise;
+  assert.deepEqual(store.getSnapshot().dictionary, {
+    kind: 'success',
+    data: DICT_2,
+    fetchedAt: NOW,
+  });
+
+  // Same out-of-order guard for loadMeta(true) bypassing suspended loadMeta(false).
+  let releaseStaleMeta;
+  let releaseForcedMeta;
+  const META_2 = { ...META, source_commit: 'commit-meta-v2', game_version: '3.8.0', request_id: 'meta-race-2' };
+  const metaPaths = [];
+  const metaStore = new RuntimeStore({
+    pool: false,
+    now: () => NOW,
+    fetch: async (path) => {
+      metaPaths.push(path);
+      if (path === '/api/meta') {
+        await new Promise((resolve) => { releaseStaleMeta = resolve; });
+        return new Response(JSON.stringify(META), { status: 200 });
+      }
+      if (path === '/api/meta?refresh=1') {
+        await new Promise((resolve) => { releaseForcedMeta = resolve; });
+        return new Response(JSON.stringify(META_2), { status: 200 });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  const staleMetaPromise = metaStore.loadMeta(false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(metaPaths, ['/api/meta']);
+
+  const forcedMetaPromise = metaStore.loadMeta(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(metaPaths, ['/api/meta', '/api/meta?refresh=1']);
+
+  releaseForcedMeta();
+  await forcedMetaPromise;
+  assert.deepEqual(metaStore.getSnapshot().meta, {
+    kind: 'success',
+    data: META_2,
+    fetchedAt: NOW,
+  });
+
+  releaseStaleMeta();
+  await staleMetaPromise;
+  assert.deepEqual(metaStore.getSnapshot().meta, {
+    kind: 'success',
+    data: META_2,
+    fetchedAt: NOW,
   });
 });

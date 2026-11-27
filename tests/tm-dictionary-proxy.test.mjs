@@ -192,24 +192,23 @@ test('forceRefresh bypasses the 60s proxyDictionaryRequest cache within 15s and 
     assert.equal((await cached.json()).revision, REV);
     assert.equal(up.count('v1/dictionary'), 1);
 
-    // RuntimeStore + resolveTmAutoReuseBasisFromRuntime sends Cache-Control: no-cache -> penetrates 60s proxy cache!
+    // RuntimeStore + resolveTmAutoReuseBasisFromRuntime sends ?refresh=1 -> penetrates 60s proxy cache!
+    const seenPaths = [];
     const runtime = new RuntimeStore({
       pool: false,
       now: () => clock,
-      fetch: async (path, init) => {
-        if (path === '/api/capabilities') {
+      fetch: async (path) => {
+        const parsed = new URL(path, 'http://127.0.0.1');
+        seenPaths.push(path);
+        if (parsed.pathname === '/api/capabilities') {
           return proxyCapabilitiesRequest({ environment: env, fetchImpl: up.fetchImpl });
         }
-        if (path === '/api/dictionary') {
-          const headers = new Headers(init?.headers);
-          const forceRefresh = headers.get('cache-control')
-            ?.split(',')
-            .some(token => token.trim().toLowerCase() === 'no-cache') ?? false;
+        if (parsed.pathname === '/api/dictionary') {
           return proxyDictionaryRequest({
             environment: env,
             fetchImpl: up.fetchImpl,
             now: () => clock,
-            forceRefresh,
+            forceRefresh: parsed.searchParams.get('refresh') === '1',
           });
         }
         throw new Error(`Unexpected path: ${path}`);
@@ -221,6 +220,7 @@ test('forceRefresh bypasses the 60s proxyDictionaryRequest cache within 15s and 
     assert.equal(up.count('v1/dictionary'), 1);
 
     const basis = await resolveTmAutoReuseBasisFromRuntime(runtime, null, { now: clock });
+    assert.deepEqual(seenPaths, ['/api/capabilities', '/api/dictionary', '/api/dictionary?refresh=1']);
     assert.equal(up.count('v1/dictionary'), 2);
     assert.deepEqual(basis, { currentTermsDbRevision: REV_2, currentGameVersion: '3.8.0' });
 
@@ -233,7 +233,8 @@ test('forceRefresh bypasses the 60s proxyDictionaryRequest cache within 15s and 
     DB.close();
   }
 
-  // Verify /api/dictionary route handler forwards Cache-Control: no-cache and ?refresh=1 to bypass 60s cache.
+  // Verify /api/dictionary ignores Cache-Control: no-cache (attached automatically by fetch cache: 'no-store')
+  // and only bypasses the 60s cache on explicit ?refresh=1.
   const prevMode = process.env.WUWATERM_RUNTIME_MODE;
   const prevEnv = globalThis[NODE_ENVIRONMENT];
   const DB2 = createPool();
@@ -260,31 +261,36 @@ test('forceRefresh bypasses the 60s proxyDictionaryRequest cache within 15s and 
       throw new Error(`Unexpected fetch: ${u}`);
     };
 
-    const r1 = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary'));
+    const r1 = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary', {
+      headers: { 'cache-control': 'no-cache' },
+    }));
     assert.equal(r1.status, 200);
     assert.equal((await r1.json()).revision, REV);
     assert.equal(upstreamCount, 1);
 
     routeDict = validCoreDict({ revision: REV_2, request_id: 'req-route-2' });
-    DB2.prepare('UPDATE shared_pool SET second_key = second_key - 5 WHERE id = 1').first();
 
-    const rCached = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary'));
-    assert.equal((await rCached.json()).revision, REV);
-    assert.equal(upstreamCount, 1);
-
-    const rNoCache = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary', {
+    // Concurrent same-second normal display read carrying Cache-Control: no-cache MUST hit 60s BFF cache (200, NOT 429)!
+    const rNoCacheSameSec = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary', {
       headers: { 'cache-control': 'no-cache' },
     }));
-    assert.equal(rNoCache.status, 200);
-    assert.equal((await rNoCache.json()).revision, REV_2);
-    assert.equal(upstreamCount, 2);
+    assert.equal(rNoCacheSameSec.status, 200);
+    assert.equal((await rNoCacheSameSec.json()).revision, REV);
+    assert.equal(upstreamCount, 1);
 
-    routeDict = validCoreDict({ revision: 'f'.repeat(64), request_id: 'req-route-3' });
     DB2.prepare('UPDATE shared_pool SET second_key = second_key - 5 WHERE id = 1').first();
+
+    const rNoCacheNextSec = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary', {
+      headers: { 'cache-control': 'no-cache' },
+    }));
+    assert.equal(rNoCacheNextSec.status, 200);
+    assert.equal((await rNoCacheNextSec.json()).revision, REV);
+    assert.equal(upstreamCount, 1);
+
     const rQueryRefresh = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary?refresh=1'));
     assert.equal(rQueryRefresh.status, 200);
-    assert.equal((await rQueryRefresh.json()).revision, 'f'.repeat(64));
-    assert.equal(upstreamCount, 3);
+    assert.equal((await rQueryRefresh.json()).revision, REV_2);
+    assert.equal(upstreamCount, 2);
   } finally {
     globalThis.fetch = prevFetch;
     DB2.close();
@@ -292,5 +298,72 @@ test('forceRefresh bypasses the 60s proxyDictionaryRequest cache within 15s and 
     else globalThis[NODE_ENVIRONMENT] = prevEnv;
     if (prevMode === undefined) delete process.env.WUWATERM_RUNTIME_MODE;
     else process.env.WUWATERM_RUNTIME_MODE = prevMode;
+  }
+});
+
+test('429-denied forceRefresh does not advance slot.generation or prevent admitted forceRefresh from populating cache', async () => {
+  const DB = createPool();
+  const REV_2 = 'e'.repeat(64);
+  let clock = 1_700_000_000_000;
+  try {
+    const env = fixtureEnvironment(DB);
+    let releaseDict;
+    let dictStarted;
+    const dictEntered = new Promise((resolve) => { dictStarted = resolve; });
+    const dictGate = new Promise((resolve) => { releaseDict = resolve; });
+    let upstreamDictCalls = 0;
+
+    const fetchImpl = async (url) => {
+      const path = url.pathname.replace('/wuwaterm-api/', '');
+      if (path === 'v1/capabilities') {
+        return json({ api_version: 'v1', capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-1' });
+      }
+      if (path === 'v1/dictionary') {
+        upstreamDictCalls += 1;
+        dictStarted();
+        await dictGate;
+        return json(validCoreDict({ revision: REV_2, source_game_version: '3.8.0', request_id: 'req-admitted' }));
+      }
+      throw new Error(`unexpected path: ${path}`);
+    };
+
+    // Admitted forceRefresh #1 starts with empty cache (slot.entry === null) and suspends on upstream /v1/dictionary.
+    const p1 = proxyDictionaryRequest({
+      environment: env,
+      fetchImpl,
+      now: () => clock,
+      forceRefresh: true,
+    });
+    await dictEntered;
+    assert.equal(upstreamDictCalls, 1);
+
+    // Same-second forceRefresh #2 is denied locally by 1/s meta gate with 429 shared_pool_busy.
+    const p2 = await proxyDictionaryRequest({
+      environment: env,
+      fetchImpl,
+      now: () => clock,
+      forceRefresh: true,
+    });
+    assert.equal(p2.status, 429);
+    assert.equal((await p2.json()).reason, 'shared_pool_busy');
+    assert.equal(upstreamDictCalls, 1);
+
+    // Let admitted request #1 finish: it MUST return 200 AND populate slot.entry cache despite #2's 429.
+    releaseDict();
+    const res1 = await p1;
+    assert.equal(res1.status, 200);
+    assert.equal((await res1.json()).revision, REV_2);
+
+    // Subsequent same-second non-forced read MUST hit populated cache (200, 0 upstream calls, NOT 429).
+    const resCached = await proxyDictionaryRequest({
+      environment: env,
+      fetchImpl,
+      now: () => clock,
+    });
+    assert.equal(resCached.status, 200);
+    assert.equal((await resCached.json()).revision, REV_2);
+    assert.equal(upstreamDictCalls, 1);
+  } finally {
+    DB.close();
   }
 });
