@@ -25,6 +25,15 @@ const POOL = {
 };
 
 const STAMP = '2026-11-27T00:00:00Z';
+const META = {
+  schema_version: fixtureDictionary.schema_version,
+  source_commit: fixtureDictionary.source_commit,
+  game_version: '3.6.0',
+  resource_version: 'synthetic-resource',
+  changelist: null,
+  term_count: fixtureDictionary.term_count,
+  request_id: 'synthetic-meta',
+};
 const CANARY_SOURCE = '专属记忆句甲乙 20%，持续 10 秒';
 const CANARY_TARGET = 'Exclusive memory rendering +20% for 10s (canary-tm-8f2a)';
 const CANARY_NOTE = 'canary-tm-note-4d9c';
@@ -53,13 +62,17 @@ const makeEntry = (over = {}) => ({
 });
 
 async function open(page) {
-  const traffic = { requests: [], translations: [], reviews: [] };
+  const traffic = { requests: [], translations: [], reviews: [], meta: 0 };
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/capabilities') {
       return route.fulfill({ json: { capabilities: ['translation-context-v1'], request_id: 'synthetic' } });
     }
     if (path === '/api/pool') return route.fulfill({ json: POOL });
+    if (path === '/api/meta') {
+      traffic.meta += 1;
+      return route.fulfill({ json: META });
+    }
     if (path === '/api/translations') {
       const body = route.request().postDataJSON();
       traffic.translations.push(body);
@@ -112,6 +125,12 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expect(panel(page).getByTestId('my-memory-counts')).toHaveText(tmMsg.entryCount.replace('{n}', '0'));
   await expand(page);
   await expect(page.locator('#my-memory-body')).toContainText(tmMsg.memoryNote);
+  // Opening the panel asks once for the running service's dictionary; a later open reuses that read (shared meta quota).
+  await expect.poll(() => traffic.meta).toBe(1);
+  await panel(page).getByRole('button', { name: m.workspace.lookupHide, exact: true }).click();
+  await expect(page.locator('#my-memory-body')).toBeHidden();
+  await expand(page);
+  expect(traffic.meta).toBe(1);
 
   // Reject invalid JSON and unconfirmed origin with importFailed (never exportFailed).
   await importTmFile(page, Buffer.from('{not json', 'utf8'), 'broken.json');
@@ -236,7 +255,7 @@ test('three-state freshness badges after term check and merge 8 MiB overflow pro
       source_text: '今汐。',
       target_text: 'Jinhsi (verified).',
       terms_db_revision: fixtureDictionary.revision,
-      game_version: null,
+      game_version: META.game_version,
     }),
     makeEntry({
       source_text: '声骸。',
@@ -258,7 +277,7 @@ test('three-state freshness badges after term check and merge 8 MiB overflow pro
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
 
-  // Matching revision -> verified_fresh with zero stale badges.
+  // Matching revision and game version -> verified_fresh with zero stale badges.
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
   await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'false');
   await expect(hits(page).first().locator('.my-memory-stale-badge')).toHaveCount(0);
@@ -305,7 +324,7 @@ for (const viewport of [
           target_text: 'Jinhsi.',
           origin: 'human_confirmed',
           terms_db_revision: fixtureDictionary.revision,
-          game_version: null,
+          game_version: META.game_version,
           note: '已核对当前词库版本',
           use_count: 5,
         }),
