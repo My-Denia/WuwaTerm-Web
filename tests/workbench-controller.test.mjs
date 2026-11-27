@@ -104,10 +104,19 @@ async function waitUntil(predicate, limit = 80) {
   assert.fail('condition did not settle in time');
 }
 
-test('workbench-controller and workbench-model have zero React imports', () => {
-  const controllerSrc = readFileSync(fileURLToPath(new URL('../lib/workbench-controller.ts', import.meta.url)), 'utf8');
-  const modelSrc = readFileSync(fileURLToPath(new URL('../lib/workbench-model.ts', import.meta.url)), 'utf8');
-  for (const [name, src] of [['lib/workbench-controller.ts', controllerSrc], ['lib/workbench-model.ts', modelSrc]]) {
+test('workbench-controller, its submodules, and workbench-model have zero React imports', () => {
+  const files = [
+    'lib/workbench-controller.ts',
+    'lib/workbench-store.ts',
+    'lib/workbench-document-ops.ts',
+    'lib/workbench-long-ops.ts',
+    'lib/workbench-batch-runner.ts',
+    'lib/workbench-tm-translate.ts',
+    'lib/workbench-workfile-io.ts',
+    'lib/workbench-model.ts',
+  ];
+  for (const name of files) {
+    const src = readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
     assert.equal(/\bfrom\s+['"]react['"]/u.test(src), false, `${name} must not import react`);
     assert.equal(/\brequire\(\s*['"]react['"]\s*\)/u.test(src), false, `${name} must not require react`);
   }
