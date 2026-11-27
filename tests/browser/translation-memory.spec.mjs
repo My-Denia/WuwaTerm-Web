@@ -61,8 +61,16 @@ const makeEntry = (over = {}) => ({
   ...over,
 });
 
-async function open(page) {
+async function open(page, options = {}) {
   const traffic = { requests: [], translations: [], reviews: [], meta: 0 };
+  if (options.mockClock) {
+    await page.addInitScript(startNow => {
+      let currentNow = startNow;
+      window.__setMockNow = value => { currentNow = value; };
+      window.__advanceMockNow = delta => { currentNow += delta; };
+      Date.now = () => currentNow;
+    }, options.startNow ?? 1_700_000_000_000);
+  }
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/capabilities') {
@@ -71,6 +79,7 @@ async function open(page) {
     if (path === '/api/pool') return route.fulfill({ json: POOL });
     if (path === '/api/meta') {
       traffic.meta += 1;
+      if (options.metaHandler) return options.metaHandler(route, traffic);
       return route.fulfill({ json: META });
     }
     if (path === '/api/translations') {
@@ -243,6 +252,131 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await page.reload();
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
   await expect(panel(page).getByTestId('my-memory-counts')).toHaveText(tmMsg.entryCount.replace('{n}', '0'));
+  expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
+});
+
+test('meta error retries after cooldown, TTL refresh drops stale verified_fresh, and lastKnown error does not grant verified_fresh', async ({ page }) => {
+  let metaMode = 'fail';
+  const traffic = await open(page, {
+    mockClock: true,
+    metaHandler: route => metaMode === 'fail'
+      ? route.fulfill({ status: 502, body: 'upstream-unavailable' })
+      : route.fulfill({ json: META }),
+  });
+
+  // First open fails -> meta.kind === 'error', does not immediately retry within 30s cooldown.
+  await expand(page);
+  await expect.poll(() => traffic.meta).toBe(1);
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: '今汐。',
+      target_text: 'Jinhsi (fresh candidate).',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+  ]));
+  await page.locator('#review-source').fill('今汐。');
+  await page.locator('#review-target').fill('Jinhsi.');
+  await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+  await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+
+  // Even with a live review, failed /api/meta must NOT grant verified_fresh.
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+
+  // Re-opening inside 30s cooldown skips retry.
+  await panel(page).getByRole('button', { name: m.workspace.lookupHide, exact: true }).click();
+  await page.evaluate(() => window.__advanceMockNow(10_000));
+  await expand(page);
+  expect(traffic.meta).toBe(1);
+
+  // After 30s cooldown elapses, re-opening retries automatically and upgrades match to verified_fresh.
+  metaMode = 'ok';
+  await panel(page).getByRole('button', { name: m.workspace.lookupHide, exact: true }).click();
+  await page.evaluate(() => window.__advanceMockNow(25_000));
+  await expand(page);
+  await expect.poll(() => traffic.meta).toBe(2);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
+
+  // After 10-minute TTL expires and re-read fails, lastKnown does NOT confer verified_fresh.
+  metaMode = 'fail';
+  await panel(page).getByRole('button', { name: m.workspace.lookupHide, exact: true }).click();
+  await page.evaluate(() => window.__advanceMockNow(10 * 60 * 1000 + 1_000));
+  await expand(page);
+  await expect.poll(() => traffic.meta).toBe(3);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+  expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
+});
+
+test('per-segment TM matching with prevSource/nextSource context_exact, per-segment confirm, and undoable single-segment apply', async ({ page }) => {
+  await open(page);
+  await expand(page);
+
+  const shared = '共鸣效率提高 10%。';
+  const multiSource = `第一段背景。\n\n${shared}\n\n第三段尾声。`;
+  const multiTarget = 'Paragraph 1 target.\n\nOld segment 2.\n\nParagraph 3 target.';
+
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: shared,
+      target_text: 'Energy Regen +10% (wrong context).',
+      prev_source_hash: null,
+      next_source_hash: null,
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+      use_count: 10,
+    }),
+  ]));
+
+  // Populate multi-paragraph draft; move cursor to segment 2 (index 1), confirm a segment entry with neighbours,
+  // then test context_exact ranking and single-segment apply + undo.
+  await page.locator('#review-source').fill(multiSource);
+  await page.locator('#review-target').fill(multiTarget);
+  const seg2Offset = '第一段背景。\n\n'.length + 2;
+  await page.locator('#review-source').evaluate((el, pos) => {
+    el.focus();
+    el.setSelectionRange(pos, pos);
+  }, seg2Offset);
+  await page.locator('#review-source').press('ArrowRight');
+
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '3'),
+  );
+  await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeVisible();
+
+  // Confirm segment 2 ("Old segment 2.") with its surrounding context, then export & inspect saved prev/next hashes.
+  await panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.notices.confirmedAdded);
+
+  // Move to segment 3, then back to segment 2; confirm context_exact beats higher-use plain exact!
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '3').replace('{n}', '3'),
+  );
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '3'),
+  );
+  await expect(hits(page).first()).toHaveAttribute('data-match-kind', 'context_exact');
+
+  // Edit segment 2 target temporarily, then apply plain exact suggestion ("Energy Regen +10% (wrong context).")
+  // and verify ONLY segment 2 changes while segments 1 and 3 stay intact; then Undo restores exact prior target.
+  await page.locator('#review-target').fill('Paragraph 1 target.\n\nDraft segment 2.\n\nParagraph 3 target.');
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '3'),
+  );
+
+  const exactHit = hits(page).filter({ hasText: 'Energy Regen +10% (wrong context).' });
+  await exactHit.getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue(
+    'Paragraph 1 target.\n\nEnergy Regen +10% (wrong context).\n\nParagraph 3 target.',
+  );
+
+  await page.getByRole('button', { name: m.review.undo, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue(
+    'Paragraph 1 target.\n\nDraft segment 2.\n\nParagraph 3 target.',
+  );
   expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
 });
 

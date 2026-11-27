@@ -24,15 +24,26 @@ import { useUiLanguage } from './ui-language-context';
 
 type Feedback = { kind: 'notice' | 'error'; text: string } | null;
 
+export type ApplySuggestionOutcome = {
+  applied: boolean;
+  reason?: 'replaced' | 'inserted' | 'unaligned_target';
+};
+
 type Props = {
-  source: string;
-  target: string;
+  sourceText: string;
+  targetText: string;
+  prevSource?: string | null;
+  nextSource?: string | null;
+  segmentIndex?: number;
+  segmentTotal?: number;
+  targetSegmentTotal?: number;
   direction: TmDirection;
   currentTermsDbRevision?: string | null;
   currentGameVersion?: string | null;
   entries: TmEntry[];
   setEntries: Dispatch<SetStateAction<TmEntry[]>>;
-  onApplySuggestion: (targetText: string) => void;
+  onApplySuggestion: (targetText: string) => ApplySuggestionOutcome | boolean | void;
+  onSelectSegment?: (index: number) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
@@ -46,14 +57,20 @@ const LIST_PREVIEW_CAP = 50;
  * zero embedding into `.wuwaterm` manuscripts, and only human/imported confirmed entries.
  */
 export function MyMemory({
-  source,
-  target,
+  sourceText,
+  targetText,
+  prevSource = null,
+  nextSource = null,
+  segmentIndex = 0,
+  segmentTotal = 1,
+  targetSegmentTotal = 0,
   direction,
   currentTermsDbRevision = null,
   currentGameVersion = null,
   entries,
   setEntries,
   onApplySuggestion,
+  onSelectSegment,
   open: controlledOpen,
   onOpenChange,
 }: Props) {
@@ -72,16 +89,22 @@ export function MyMemory({
   const [pending, setPending] = useState<TmFile | null>(null);
   const fileBox = useRef<HTMLInputElement>(null);
 
-  const deferredSource = useDeferredValue(source);
+  const deferredSource = useDeferredValue(sourceText);
+  const deferredPrevSource = useDeferredValue(prevSource);
+  const deferredNextSource = useDeferredValue(nextSource);
   const matches = useMemo(
     () =>
       matchTranslationMemory(entries, deferredSource, direction, {
+        prevSource: deferredPrevSource,
+        nextSource: deferredNextSource,
         currentTermsDbRevision,
         currentGameVersion,
       }),
-    [entries, deferredSource, direction, currentTermsDbRevision, currentGameVersion],
+    [entries, deferredSource, deferredPrevSource, deferredNextSource, direction, currentTermsDbRevision, currentGameVersion],
   );
   const directionLabel = direction === 'en' ? t.directionEn : t.directionZh;
+  const isMultiSegment = segmentTotal > 1;
+  const targetHasMoreSegments = isMultiSegment && targetSegmentTotal > segmentTotal;
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
@@ -147,9 +170,11 @@ export function MyMemory({
 
   function confirmCurrent() {
     const outcome = confirmTranslationMemoryEntry(entries, {
-      sourceText: source,
-      targetText: target,
+      sourceText,
+      targetText,
       direction,
+      prevSource: prevSource ?? null,
+      nextSource: nextSource ?? null,
       origin: TM_ORIGIN_HUMAN,
       termsDbRevision: currentTermsDbRevision,
       gameVersion: currentGameVersion,
@@ -179,7 +204,19 @@ export function MyMemory({
   }
 
   function applySuggestion(match: TmMatch) {
-    onApplySuggestion(match.entry.target_text);
+    const outcome = onApplySuggestion(match.entry.target_text);
+    const applied = typeof outcome === 'boolean' ? outcome : outcome ? outcome.applied : true;
+    if (!applied) {
+      failure(fill(t.errors.segmentUnaligned, { sourceTotal: segmentTotal, targetTotal: targetSegmentTotal }));
+      return;
+    }
+    if (isMultiSegment) {
+      notice(fill(match.needsRecheck ? t.notices.appliedSegmentRecheck : t.notices.appliedSegment, {
+        i: segmentIndex + 1,
+        n: segmentTotal,
+      }));
+      return;
+    }
     notice(match.needsRecheck ? t.notices.appliedRecheck : t.notices.applied);
   }
 
@@ -211,6 +248,36 @@ export function MyMemory({
       <div id="my-memory-body" hidden={!open}>
         <p className="field-hint my-terms-note">{t.memoryNote}</p>
         <p className="field-hint my-terms-note">{t.referenceNote}</p>
+        {isMultiSegment && (
+          <div className="my-memory-segment-bar" data-testid="my-memory-segment-scope">
+            <span className="my-memory-segment-label">{fill(t.segmentScope, { i: segmentIndex + 1, n: segmentTotal })}</span>
+            {onSelectSegment && (
+              <div className="my-memory-segment-nav">
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={segmentIndex <= 0}
+                  onClick={() => onSelectSegment(segmentIndex - 1)}
+                >
+                  {t.segmentPrev}
+                </button>
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={segmentIndex >= segmentTotal - 1}
+                  onClick={() => onSelectSegment(segmentIndex + 1)}
+                >
+                  {t.segmentNext}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {targetHasMoreSegments && (
+          <p className="my-memory-recheck-hint" role="status">
+            {fill(t.segmentUnalignedHint, { sourceTotal: segmentTotal, targetTotal: targetSegmentTotal })}
+          </p>
+        )}
         <div className="my-terms-actions">
           <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>
             {t.importButton}
@@ -223,10 +290,10 @@ export function MyMemory({
           <button
             type="button"
             className="secondary-button my-memory-confirm-btn"
-            disabled={!source.trim() || !target.trim()}
+            disabled={!sourceText.trim() || !targetText.trim()}
             onClick={confirmCurrent}
           >
-            {t.confirmButton}
+            {isMultiSegment ? t.confirmSegmentButton : t.confirmButton}
           </button>
         </div>
         <input

@@ -15,13 +15,16 @@ export type Provenance = {
   term_count: number;
   request_id: string;
 };
+export const META_FRESH_TTL_MS = 10 * 60 * 1000;
+export const META_ERROR_RETRY_COOLDOWN_MS = 30 * 1000;
+
 export type MetaView =
   | { kind: 'idle' }
   // A re-read keeps the last successful provenance so a reader that needs the running service's identity (TM freshness)
-  // keeps judging drift against what was last confirmed, instead of silently reviving a revision a confirmed read withdrew.
+  // can keep judging game-version drift without reviving a stale or failed dictionary revision.
   | { kind: 'loading'; lastKnown: Provenance | null }
-  | { kind: 'success'; data: Provenance }
-  | { kind: 'error'; lastKnown: Provenance | null };
+  | { kind: 'success'; data: Provenance; fetchedAt: number }
+  | { kind: 'error'; lastKnown: Provenance | null; failedAt: number };
 
 export type RuntimeSnapshot = {
   pool: PoolView;
@@ -64,11 +67,17 @@ export type RuntimeStoreOptions = {
   fetch?: RuntimeFetch;
   /** Whether this page reads the pool at all (the public limits page shows the published ceilings instead). */
   pool?: boolean;
+  now?: () => number;
+  metaFreshTtlMs?: number;
+  metaErrorRetryCooldownMs?: number;
 };
 
 export class RuntimeStore {
   private readonly fetcher: RuntimeFetch;
   private readonly poolEnabled: boolean;
+  private readonly now: () => number;
+  private readonly metaFreshTtlMs: number;
+  private readonly metaErrorRetryCooldownMs: number;
   private state: RuntimeSnapshot;
   private readonly listeners = new Set<() => void>();
   private started = false;
@@ -79,6 +88,9 @@ export class RuntimeStore {
   constructor(options: RuntimeStoreOptions = {}) {
     this.fetcher = options.fetch ?? ((path, init) => fetch(workbenchPath(path), init));
     this.poolEnabled = options.pool ?? true;
+    this.now = options.now ?? (() => Date.now());
+    this.metaFreshTtlMs = options.metaFreshTtlMs ?? META_FRESH_TTL_MS;
+    this.metaErrorRetryCooldownMs = options.metaErrorRetryCooldownMs ?? META_ERROR_RETRY_COOLDOWN_MS;
     this.state = { pool: this.poolEnabled ? { kind: 'loading' } : { kind: 'off' }, capabilities: null, meta: { kind: 'idle' } };
   }
 
@@ -140,21 +152,38 @@ export class RuntimeStore {
   }
 
   /**
-   * The dictionary provenance. Each read counts against the dictionary-info quota, so it is read only on request: the
-   * first call reads it, later calls reuse it until `force`, and a call while one is in flight joins it.
+   * The dictionary provenance. Each read counts against the dictionary-info quota, so it is read only on request:
+   * - in-flight reads are shared by joining the existing promise;
+   * - `success` is reused within `metaFreshTtlMs` and refreshed once expired;
+   * - `error` respects `metaErrorRetryCooldownMs` and retries automatically once the cooldown elapses;
+   * - `force = true` always performs an immediate re-read.
    */
   loadMeta(force = false): Promise<void> {
     if (this.metaPromise) return this.metaPromise;
-    if (!force && (this.state.meta.kind === 'success' || this.state.meta.kind === 'error')) return Promise.resolve();
+    const current = this.state.meta;
+    const now = this.now();
+    if (!force) {
+      if (current.kind === 'success' && now >= current.fetchedAt && now - current.fetchedAt < this.metaFreshTtlMs) {
+        return Promise.resolve();
+      }
+      if (current.kind === 'error' && now >= current.failedAt && now - current.failedAt < this.metaErrorRetryCooldownMs) {
+        return Promise.resolve();
+      }
+    }
     const lastKnown = this.lastKnownMeta();
     this.set({ meta: { kind: 'loading', lastKnown } });
     const promise = (async () => {
       try {
         const response = await this.fetcher('/api/meta', { cache: 'no-store' });
         const value = await json(response);
-        this.set({ meta: response.ok && isProvenance(value) ? { kind: 'success', data: value } : { kind: 'error', lastKnown } });
+        const at = this.now();
+        this.set({
+          meta: response.ok && isProvenance(value)
+            ? { kind: 'success', data: value, fetchedAt: at }
+            : { kind: 'error', lastKnown, failedAt: at },
+        });
       } catch {
-        this.set({ meta: { kind: 'error', lastKnown } });
+        this.set({ meta: { kind: 'error', lastKnown, failedAt: this.now() } });
       } finally {
         this.metaPromise = null;
       }

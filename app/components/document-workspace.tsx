@@ -19,6 +19,7 @@ import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
 import { tmServiceBasis } from '../../lib/tm-live-provenance';
+import { applySegmentSuggestionResult, resolveActiveSegment, segmentParagraphs, type TmSegmentCursor } from '../../lib/tm-segment';
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
@@ -129,6 +130,7 @@ export function DocumentWorkspace() {
   const termbaseSeq = useRef(0);
   const [tmEntries, setTmEntries] = useState<TmEntry[]>([]);
   const [tmOpen, setTmOpen] = useState(false);
+  const [tmCursor, setTmCursor] = useState<TmSegmentCursor | null>(null);
   const [revision, setRevision] = useState<RevisionIntent | null>(null);
   const revisionRef = useRef<RevisionIntent | null>(null);
   const revisionDialog = useRef<HTMLDialogElement>(null);
@@ -151,13 +153,17 @@ export function DocumentWorkspace() {
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
-  // The translation memory may only call itself current against the running service: a live review's dictionary while
-  // `/api/meta` still reports that same dictionary, plus the game version `/api/meta` reports. Opening the panel asks
-  // for that read once (the same on-request policy as 「查看词典版本」; it spends one shared meta admission).
-  const tmBasis = useMemo(() => tmServiceBasis(meta, latest), [meta, latest]);
+  const sourceSegments = useMemo(() => segmentParagraphs(source), [source]);
+  const targetSegments = useMemo(() => segmentParagraphs(target), [target]);
+  const activeTmSegment = useMemo(() => resolveActiveSegment(source, target, tmCursor), [source, target, tmCursor]);
   useEffect(() => {
     if (tmOpen) void runtime.loadMeta();
   }, [runtime, tmOpen]);
+  const [tmResetSeen, setTmResetSeen] = useState(snapshot.resetSignal);
+  if (tmResetSeen !== snapshot.resetSignal) {
+    setTmResetSeen(snapshot.resetSignal);
+    setTmCursor(null);
+  }
   const reviewFeatures = useMemo(() => sessionReviewFeatures(capabilities), [capabilities]);
   const layer1 = useMemo(() => structureViews(draft, snapshot.structure), [draft, snapshot.structure]);
   const layer1Summary = structureSummary(layer1);
@@ -167,6 +173,9 @@ export function DocumentWorkspace() {
   }, [draft, semantic, basis, reviewFeatures, layer1]);
   // Ambiguous one-character names (ambiguous-mention-v1) are listed apart, folded, and never counted with the judged findings.
   const judged = useMemo(() => (latest ? judgedReport(latest.report) : null), [latest]);
+  // The translation memory may only call itself current against the running service: a live review's dictionary while
+  // `/api/meta` still reports that same dictionary within TTL, plus the game version `/api/meta` last confirmed.
+  const tmBasis = tmServiceBasis(meta, latest);
   const visibleFindings = judged ? filterFindings(judged.report.findings, verdictFilter) : [];
   const findingCounts = findingVerdictCounts(judged?.report.findings ?? []);
   const activeFindingId = reconcileActiveId(canonicalFindingId, visibleFindings);
@@ -333,9 +342,13 @@ export function DocumentWorkspace() {
     else emitTermbaseFeedback('error', fill(m.termbase.errors.fieldInvalid, { field: fieldName }));
   }
 
-  function applyMemorySuggestion(nextTarget: string) {
-    doc.editText('target', nextTarget, { coalesce: false });
+  function applyMemorySuggestion(suggestionText: string) {
+    const outcome = applySegmentSuggestionResult(target, sourceSegments, activeTmSegment.index, suggestionText);
+    if (!outcome.applied) return outcome;
+    setTmCursor({ kind: 'index', index: activeTmSegment.index });
+    doc.editText('target', outcome.target, { coalesce: false });
     targetEditor.current?.focus();
+    return outcome;
   }
 
   function promoteSelectionToTermbase() {
@@ -431,6 +444,7 @@ export function DocumentWorkspace() {
     void translateInReview();
   }
   function jumpTo(side: 'source' | 'target', span: Span) {
+    setTmCursor({ kind: 'offset', side, offset: span.start });
     suspendScrollSync();
     if (markdownPreview) {
       setMarkdownPreview(false);
@@ -742,6 +756,7 @@ export function DocumentWorkspace() {
                   previewEmptyText={w.markdownPreviewEmpty}
                   previewAriaLabel={w.markdownSourcePreviewAria}
                   onScrollRatio={ratio => handleEditorScroll('source', ratio)}
+                  onCursorChange={offset => setTmCursor(prev => (prev?.kind === 'offset' && prev.side === 'source' && prev.offset === offset ? prev : { kind: 'offset', side: 'source', offset }))}
                   onEdit={editSide('source')}
                 />
               </div>
@@ -760,6 +775,7 @@ export function DocumentWorkspace() {
                   previewEmptyText={w.markdownPreviewEmpty}
                   previewAriaLabel={w.markdownTargetPreviewAria}
                   onScrollRatio={ratio => handleEditorScroll('target', ratio)}
+                  onCursorChange={offset => setTmCursor(prev => (prev?.kind === 'offset' && prev.side === 'target' && prev.offset === offset ? prev : { kind: 'offset', side: 'target', offset }))}
                   onEdit={editSide('target')}
                 />
               </div>
@@ -888,14 +904,20 @@ export function DocumentWorkspace() {
           externalFeedback={termbaseFeedback}
         />
         <MyMemory
-          source={source}
-          target={target}
+          sourceText={activeTmSegment.sourceText}
+          targetText={activeTmSegment.targetText}
+          prevSource={activeTmSegment.prevSource}
+          nextSource={activeTmSegment.nextSource}
+          segmentIndex={activeTmSegment.index}
+          segmentTotal={activeTmSegment.total}
+          targetSegmentTotal={targetSegments.length}
           direction={effectiveTermbaseDirection}
           currentTermsDbRevision={tmBasis.currentTermsDbRevision}
           currentGameVersion={tmBasis.currentGameVersion}
           entries={tmEntries}
           setEntries={setTmEntries}
           onApplySuggestion={applyMemorySuggestion}
+          onSelectSegment={index => setTmCursor({ kind: 'index', index })}
           open={tmOpen}
           onOpenChange={setTmOpen}
         />

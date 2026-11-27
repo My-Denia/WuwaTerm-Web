@@ -3,12 +3,17 @@
 // service. Kept apart from the review history: an imported `.wuwaterm` manuscript's report is saved evidence from an
 // older session, never the running service's current basis.
 import { TM_LIMITS } from './translation-memory.ts';
-import type { MetaView, Provenance } from './runtime-store.ts';
+import { META_FRESH_TTL_MS, type MetaView, type Provenance } from './runtime-store.ts';
 import type { Snapshot } from './workbench-model.ts';
 
 export type TmServiceBasis = {
   currentTermsDbRevision: string | null;
   currentGameVersion: string | null;
+};
+
+export type TmLiveProvenanceOptions = {
+  now?: number;
+  freshTtlMs?: number;
 };
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
@@ -47,33 +52,53 @@ export function liveGameVersion(meta: MetaView): string | null {
 }
 
 /**
- * The dictionary revision a TM entry confirmed now may record, or null when no live service basis exists.
+ * True only when `/api/meta` is in a confirmed `success` state whose `fetchedAt` is still within the freshness TTL.
+ */
+export function isMetaFresh(
+  meta: MetaView,
+  options: TmLiveProvenanceOptions = {},
+): meta is Extract<MetaView, { kind: 'success' }> {
+  if (meta.kind !== 'success') return false;
+  if (typeof meta.fetchedAt !== 'number' || !Number.isFinite(meta.fetchedAt)) return false;
+  const now = options.now ?? Date.now();
+  const ttlMs = options.freshTtlMs ?? META_FRESH_TTL_MS;
+  return now >= meta.fetchedAt && now - meta.fetchedAt < ttlMs;
+}
+
+/**
+ * The dictionary revision a TM entry confirmed now may record, or null when no fresh live service basis exists.
  *
  * `latest.trusted` is true only for a report this session received from `/api/reviews` and validated; reports restored
- * from an imported manuscript are untrusted and keep their saved revision for display only. A live report still only
- * describes the running service while the last confirmed `/api/meta` read agrees on the dictionary identity drawn from
- * the same snapshot: `schema_version`, `source_commit` and `term_count`. A disagreement means the service's dictionary
- * changed under the review, so its revision is no current basis and TM freshness falls back to
- * `provenance_unknown` (or `known_stale` through the live game version). The comparison uses that last confirmed read
- * even while a re-read is in flight or after it failed, so a withdrawn revision never comes back through a reload.
- * Only a page that never confirmed any read lets the live review stand on its own.
+ * from an imported manuscript are untrusted and keep their saved revision for display only. Only a fresh (`success`
+ * within `META_FRESH_TTL_MS`) `/api/meta` read that agrees on `(schema_version, source_commit, term_count)` grants a
+ * live revision; `idle`, `loading`, `error` (even with `lastKnown`), or expired `success` all return `null` so a stale
+ * or failed metadata state never confers `verified_fresh` or revives a withdrawn revision.
  */
-export function liveTermsDbRevision(meta: MetaView, latest: Snapshot | null): string | null {
+export function liveTermsDbRevision(
+  meta: MetaView,
+  latest: Snapshot | null,
+  options: TmLiveProvenanceOptions = {},
+): string | null {
   if (!latest?.trusted) return null;
+  if (!isMetaFresh(meta, options)) return null;
   const seen = latest.report.dictionary;
   if (typeof seen.revision !== 'string' || seen.revision.length === 0) return null;
-  const live = knownProvenance(meta);
-  if (live && (seen.schema_version !== live.schema_version
+  const live = meta.data;
+  if (seen.schema_version !== live.schema_version
     || seen.source_commit !== live.source_commit
-    || seen.term_count !== live.term_count)) {
+    || seen.term_count !== live.term_count) {
     return null;
   }
   return seen.revision;
 }
 
-export function tmServiceBasis(meta: MetaView, latest: Snapshot | null): TmServiceBasis {
+export function tmServiceBasis(
+  meta: MetaView,
+  latest: Snapshot | null,
+  options: TmLiveProvenanceOptions = {},
+): TmServiceBasis {
   return {
-    currentTermsDbRevision: liveTermsDbRevision(meta, latest),
+    currentTermsDbRevision: liveTermsDbRevision(meta, latest, options),
     currentGameVersion: liveGameVersion(meta),
   };
 }
