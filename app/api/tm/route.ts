@@ -1,5 +1,6 @@
 import {
   MAX_TM_BYTES,
+  TM_ERROR_CODES,
   TM_FORMAT,
   TM_SCHEMA_VERSION,
   TranslationMemoryError,
@@ -25,11 +26,15 @@ const JSON_HEADERS = Object.freeze({
 // Allow small JSON envelope overhead above the 8 MiB `wuwaterm-tm-v1` document cap.
 const MAX_TM_REQUEST_BYTES = MAX_TM_BYTES + 16_384;
 
+const TM_ERROR_CODE_SET = new Set<string>(TM_ERROR_CODES);
+
 type TmStoreAdapter = {
   getVersion?: () => string;
   getSnapshot?: () => { entries: TmEntry[]; storageVersion: string };
   listEntries: () => TmEntry[];
   replaceEntries: (entries: TmEntry[]) => TmEntry[];
+  confirmEntry?: (candidate: TmConfirmCandidate) => TmConfirmResult & { storageVersion?: string };
+  mergeEntries?: (incoming: TmEntry[]) => { entries: TmEntry[]; storageVersion: string };
   runAtomic: <T>(
     transform: (current: TmEntry[], currentVersion: string) => { write: boolean; entries?: TmEntry[]; result: T },
   ) => T & { entries?: TmEntry[]; storageVersion?: string };
@@ -187,17 +192,19 @@ export async function POST(request: Request): Promise<Response> {
         gameVersion: typeof c.gameVersion === 'string' || c.gameVersion === null ? c.gameVersion : null,
         ...(typeof c.note === 'string' ? { note: c.note } : {}),
       };
-      const result = resolved.store.runAtomic<TmConfirmResult>(current => {
-        const outcome = confirmTranslationMemoryEntry(current, confirmInput);
-        if (outcome.status === 'invalid') {
-          return { write: false, result: outcome };
-        }
-        return {
-          write: true,
-          entries: outcome.entries,
-          result: outcome,
-        };
-      });
+      const result = resolved.store.confirmEntry
+        ? resolved.store.confirmEntry(confirmInput)
+        : resolved.store.runAtomic<TmConfirmResult>(current => {
+            const outcome = confirmTranslationMemoryEntry(current, confirmInput);
+            if (outcome.status === 'invalid') {
+              return { write: false, result: outcome };
+            }
+            return {
+              write: true,
+              entries: outcome.entries,
+              result: outcome,
+            };
+          });
       if (result.status === 'invalid') {
         const status = result.error === 'list_too_large' ? 413 : 400;
         return jsonResponse(status, { mode: 'selfhost_sqlite', ...result });
@@ -244,10 +251,12 @@ export async function POST(request: Request): Promise<Response> {
 
     if (action === 'merge') {
       const incoming = validateFilePayload(body.file ?? body.entries);
-      const result = resolved.store.runAtomic(current => {
-        const merged = mergeTranslationMemoryEntries(current, incoming);
-        return { write: true, entries: merged, result: { merged: incoming.length } };
-      });
+      const result = resolved.store.mergeEntries
+        ? resolved.store.mergeEntries(incoming)
+        : resolved.store.runAtomic(current => {
+            const merged = mergeTranslationMemoryEntries(current, incoming);
+            return { write: true, entries: merged, result: { merged: incoming.length } };
+          });
       return jsonResponse(200, {
         mode: 'selfhost_sqlite',
         entries: result.entries,
@@ -295,6 +304,14 @@ export async function POST(request: Request): Promise<Response> {
     if (error instanceof TranslationMemoryError) {
       const status = error.code === 'tm_too_large' ? 413 : 400;
       return jsonResponse(status, { status: 'invalid', code: error.code, detail: error.detail });
+    }
+    const tmCode = error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string; detail?: unknown }).code
+      : null;
+    if (tmCode && TM_ERROR_CODE_SET.has(tmCode)) {
+      const status = tmCode === 'tm_too_large' ? 413 : 400;
+      const detail = typeof (error as { detail?: unknown }).detail === 'string' ? (error as { detail: string }).detail : '';
+      return jsonResponse(status, { status: 'invalid', code: tmCode, detail });
     }
     return jsonResponse(503, { status: 'unavailable', reason: 'tm_store_unavailable' });
   }

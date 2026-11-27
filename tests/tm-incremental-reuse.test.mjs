@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWorkbenchController } from '../lib/workbench-controller.ts';
 import { confirmTranslationMemoryEntry } from '../lib/translation-memory.ts';
+import { RuntimeStore } from '../lib/runtime-store.ts';
+import { resolveTmAutoReuseBasisFromRuntime } from '../lib/tm-live-provenance.ts';
+import { CAPABILITY_DICTIONARY_IDENTITY, CAPABILITY_TRANSLATION_CONTEXT } from '../lib/semantic-review.js';
 import { CAPABILITY_STRUCTURE_CHECK, STRUCTURE_CHECKS } from '../lib/structure-check.js';
-import { CAPABILITY_TRANSLATION_CONTEXT } from '../lib/semantic-review.js';
 import { layerTwoRows, structurePlan, structureSummary, structureViews } from '../lib/structure-layer.ts';
 import { scalarOffset } from '../lib/workbench-model.ts';
 
@@ -1290,4 +1292,85 @@ test('PRRT_kwDOVe07hM68z371: oversized (3001-scalar & 2100-scalar) explicit alig
   assert.equal(viewsFull[0].result?.findings[0].source_span?.text, '555');
   assert.equal(viewsFull[2].result?.findings[0].rule_id, 'number_missing');
   assert.equal(viewsFull[2].result?.findings[0].source_span?.text, '20');
+});
+
+test('auto TM batch reuse force-refreshes cached dictionary identity within 10m TTL and refuses stale entries when backend dictionary changes', async () => {
+  const { s1, s2, s3, entries } = buildEntries();
+  let clock = 1_700_000_000_000;
+  const revV1 = REV;
+  const revV2 = 'e'.repeat(64);
+  let activeDict = {
+    revision: revV1,
+    schema_version: '2',
+    source_commit: 'commit-v1',
+    game_version: '3.7.0',
+    term_count: 1200,
+    request_id: 'dict-v1',
+  };
+  let dictFetches = 0;
+
+  const runtime = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        return new Response(JSON.stringify({
+          capabilities: [CAPABILITY_DICTIONARY_IDENTITY, CAPABILITY_STRUCTURE_CHECK, CAPABILITY_TRANSLATION_CONTEXT],
+          request_id: 'cap-1',
+        }), { status: 200 });
+      }
+      if (path === '/api/dictionary') {
+        dictFetches += 1;
+        return new Response(JSON.stringify(activeDict), { status: 200 });
+      }
+      throw new Error(`Unexpected runtime fetch: ${path}`);
+    },
+  });
+
+  // Pre-warm RuntimeStore (e.g. user opened TM panel earlier, caching revV1 for 10 minutes).
+  await runtime.loadDictionary();
+  assert.equal(dictFetches, 1);
+
+  // Within 10-minute TTL (2 minutes later), backend /v1/dictionary changes to revV2 / 3.8.0.
+  clock += 2 * 60 * 1000;
+  activeDict = {
+    revision: revV2,
+    schema_version: '2',
+    source_commit: 'commit-v2',
+    game_version: '3.8.0',
+    term_count: 1250,
+    request_id: 'dict-v2',
+  };
+
+  const calls = [];
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_DICTIONARY_IDENTITY, CAPABILITY_STRUCTURE_CHECK, CAPABILITY_TRANSLATION_CONTEXT],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: (liveLatest) => resolveTmAutoReuseBasisFromRuntime(runtime, liveLatest, { now: clock }),
+    post: async (path, body) => {
+      calls.push({ path, body });
+      if (path === '/api/translations') {
+        return {
+          response: new Response(null, { status: 200 }),
+          value: { kind: 'llm', text: `Fresh(${body.text})`, direction: 'en', dictionary_miss: false, request_id: 'req-fresh' },
+        };
+      }
+      throw new Error(`Unexpected POST to ${path}`);
+    },
+  });
+
+  doc.editText('source', `${s1}\n\n${s2}\n\n${s3}`);
+  await doc.translateInReview();
+  await flushMicrotasks();
+
+  const snap = doc.getSnapshot();
+  assert.equal(dictFetches, 2, 'batch auto-reuse must force-refresh /api/dictionary even within 10m TTL');
+  assert.equal(snap.tmReceipt?.reused, 0, 'entries from old dictionary revision must never be auto-reused');
+  assert.equal(snap.tmReceipt?.staleOrUnknown, 3);
+  assert.equal(snap.tmReceipt?.termsDbRevision, revV2);
+  assert.equal(snap.tmReceipt?.gameVersion, '3.8.0');
+  assert.equal(calls.filter(c => c.path === '/api/translations').length, 1);
+  assert.equal(calls.filter(c => c.path === '/api/structure-checks').length, 0);
+  assert.equal(snap.draft.target, `Fresh(${s1}\n\n${s2}\n\n${s3})`);
 });

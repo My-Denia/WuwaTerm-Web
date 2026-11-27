@@ -16,6 +16,7 @@ import {
   isMetaFresh,
   liveGameVersion,
   liveTermsDbRevision,
+  resolveTmAutoReuseBasisFromRuntime,
   tmAutoReuseBasis,
   tmConfirmBasis,
   tmDisplayMatchBasis,
@@ -536,4 +537,102 @@ test('Finding #4: re-confirming an existing entry with explicit null overwrites 
   assert.equal(newRevOnly.status, 'updated');
   assert.equal(newRevOnly.entry.terms_db_revision, newRev);
   assert.equal(newRevOnly.entry.game_version, null);
+});
+
+test('resolveTmAutoReuseBasisFromRuntime force-refreshes /api/dictionary even within 10m TTL when backend identity changes', async () => {
+  let clock = NOW;
+  let dictCalls = 0;
+  let currentDict = DICT;
+  let dictMode = 'ok';
+
+  const store = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-1' }), { status: 200 });
+      }
+      if (path === '/api/dictionary') {
+        dictCalls += 1;
+        if (dictMode === 'fail') return new Response('unavailable', { status: 503 });
+        return new Response(JSON.stringify(currentDict), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  // Initial non-forced load (e.g. opening TM panel) caches DICT for 10m TTL.
+  await store.loadDictionary();
+  assert.equal(dictCalls, 1);
+  assert.deepEqual(tmDisplayMatchBasis(store.getSnapshot().dictionary, store.getSnapshot().meta, null, { now: clock }), {
+    currentTermsDbRevision: REVISION,
+    currentGameVersion: '3.7.0',
+  });
+
+  // 60s later (still well inside 10m TTL), backend /api/dictionary rotates to a new revision.
+  clock += 60_000;
+  const newRev = 'f'.repeat(64);
+  currentDict = {
+    ...DICT,
+    revision: newRev,
+    source_commit: 'commit-v2',
+    game_version: '3.8.0',
+    request_id: 'dict-2',
+  };
+
+  // Non-forced loadDictionary() still uses the 10m display cache.
+  await store.loadDictionary();
+  assert.equal(dictCalls, 1);
+
+  // Auto-reuse resolution MUST force-refresh and pick up the latest dictionary identity!
+  const basis = await resolveTmAutoReuseBasisFromRuntime(store, null, { now: clock });
+  assert.equal(dictCalls, 2);
+  assert.deepEqual(basis, {
+    currentTermsDbRevision: newRev,
+    currentGameVersion: '3.8.0',
+  });
+
+  // Old entry confirmed under REVISION must NOT be verified_fresh against the refreshed basis.
+  const oldEntryMatch = matchTranslationMemory([makeEntry()], '共鸣效率提高 10%', 'en', basis)[0];
+  assert.equal(oldEntryMatch.freshness, TM_FRESHNESS_STALE);
+
+  // If /api/dictionary fails during forced re-verification inside TTL, auto-reuse MUST fail closed.
+  clock += 10_000;
+  dictMode = 'fail';
+  const failedBasis = await resolveTmAutoReuseBasisFromRuntime(store, null, { now: clock });
+  assert.equal(dictCalls, 3);
+  assert.deepEqual(failedBasis, {
+    currentTermsDbRevision: null,
+    currentGameVersion: null,
+  });
+
+  // Legacy server (dictionary unsupported): inside 10m meta TTL, backend /api/meta changes under saved review -> fails closed.
+  let metaCalls = 0;
+  let currentMeta = META;
+  const legacyStore = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        return new Response(JSON.stringify({ capabilities: ['translation-context-v1'], request_id: 'cap-legacy' }), { status: 200 });
+      }
+      if (path === '/api/meta') {
+        metaCalls += 1;
+        return new Response(JSON.stringify(currentMeta), { status: 200 });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+  await legacyStore.loadDictionary();
+  await legacyStore.loadMeta();
+  assert.equal(metaCalls, 1);
+
+  clock += 60_000;
+  currentMeta = { ...META, source_commit: 'commit-v2', request_id: 'meta-2' };
+  const legacyBasis = await resolveTmAutoReuseBasisFromRuntime(legacyStore, liveSnapshot(), { now: clock });
+  assert.equal(metaCalls, 2);
+  assert.deepEqual(legacyBasis, {
+    currentTermsDbRevision: null,
+    currentGameVersion: null,
+  });
 });
