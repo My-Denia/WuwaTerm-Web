@@ -85,10 +85,12 @@ export function MyMemory({
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
-  const errorText = (error: unknown) => {
-    if (!(error instanceof TranslationMemoryError)) return t.errors.importFailed;
-    const base = (t.errors as Record<string, string>)[error.code] ?? t.errors.importFailed;
-    return `${base}${error.detail ? ` (${error.detail})` : ''} ${t.errors.importFailed}`;
+  const errorText = (error: unknown, fallback: string = t.errors.importFailed) => {
+    if (!(error instanceof TranslationMemoryError)) return fallback;
+    const base = (t.errors as Record<string, string>)[error.code] ?? fallback;
+    return base === fallback
+      ? base
+      : `${base}${error.detail ? ` (${error.detail})` : ''} ${fallback}`;
   };
 
   function applyReplace(file: TmFile) {
@@ -124,7 +126,7 @@ export function MyMemory({
         applyReplace(parsed);
       }
     } catch (error) {
-      failure(errorText(error));
+      failure(errorText(error, t.errors.importFailed));
     }
   }
 
@@ -139,7 +141,7 @@ export function MyMemory({
       downloadFile('wuwaterm-tm.json', text);
       notice(fill(t.notices.exported, { n: entries.length }));
     } catch (error) {
-      failure(errorText(error));
+      failure(errorText(error, t.errors.exportFailed));
     }
   }
 
@@ -276,6 +278,7 @@ export function MyMemory({
                 className="my-memory-hit"
                 key={`${match.entry.direction}:${match.entry.source_text}:${match.entry.target_text}:${idx}`}
                 data-match-kind={match.matchKind}
+                data-freshness={match.freshness}
                 data-needs-recheck={match.needsRecheck ? 'true' : 'false'}
               >
                 <div className="my-memory-badges">

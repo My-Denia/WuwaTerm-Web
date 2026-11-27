@@ -7,10 +7,10 @@ import {
   parseTranslationMemoryText,
   serializeTranslationMemory,
 } from '../../lib/translation-memory.ts';
-import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { fixture, freshApiReport, dictionary as fixtureDictionary } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
-const SCREENSHOT_DIR = '/tmp/wuwaterm-web-tm-verify';
+const SCREENSHOT_DIR = '/tmp/wuwaterm-web-tm-freshness-verify';
 const m = msg('zh');
 const tmMsg = m.memory;
 
@@ -113,7 +113,13 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expand(page);
   await expect(page.locator('#my-memory-body')).toContainText(tmMsg.memoryNote);
 
-  // Reject unconfirmed origin (e.g., machine_translated) cleanly.
+  // Reject invalid JSON and unconfirmed origin with importFailed (never exportFailed).
+  await importTmFile(page, Buffer.from('{not json', 'utf8'), 'broken.json');
+  await expect(panel(page).locator('.my-terms-feedback')).toContainText(tmMsg.errors.tm_not_json);
+  await expect(panel(page).locator('.my-terms-feedback')).toContainText(tmMsg.errors.importFailed);
+  await expect(panel(page).locator('.my-terms-feedback')).not.toContainText(tmMsg.errors.exportFailed);
+  await expect(panel(page).getByTestId('my-memory-counts')).toHaveText(tmMsg.entryCount.replace('{n}', '0'));
+
   const badPayload = Buffer.from(JSON.stringify({
     format: TM_FORMAT,
     schema_version: TM_SCHEMA_VERSION,
@@ -122,6 +128,8 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   }), 'utf8');
   await importTmFile(page, badPayload, 'bad-tm.json');
   await expect(panel(page).locator('.my-terms-feedback')).toContainText(tmMsg.errors.tm_unconfirmed_origin);
+  await expect(panel(page).locator('.my-terms-feedback')).toContainText(tmMsg.errors.importFailed);
+  await expect(panel(page).locator('.my-terms-feedback')).not.toContainText(tmMsg.errors.exportFailed);
   await expect(panel(page).getByTestId('my-memory-counts')).toHaveText(tmMsg.entryCount.replace('{n}', '0'));
 
   // Import valid wuwaterm-tm-v1 file.
@@ -138,12 +146,14 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.notices.imported.replace('{n}', '2'));
   await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '2'));
 
-  // Numeric variant match shows numeric_variant badge + numeric_changed warning and NEVER silently overwrites target!
+  // Numeric variant match shows numeric_variant badge + numeric_changed + provenance_unknown warning and NEVER silently overwrites target!
   await page.locator('#review-target').fill('Original user target text');
   await page.locator('#review-source').fill('专属记忆句甲乙 25%，持续 12 秒');
   await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'known_stale');
   await expect(hits(page).first().locator('.my-memory-kind-badge')).toHaveText(tmMsg.matchKinds.numeric_variant);
-  await expect(hits(page).first().locator('.my-memory-stale-badge')).toContainText(tmMsg.staleReasons.numeric_changed);
+  await expect(hits(page).first().locator('[data-stale="numeric_changed"]')).toHaveText(tmMsg.staleReasons.numeric_changed);
+  await expect(hits(page).first().locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
   await expect(page.locator('#review-target')).toHaveValue('Original user target text');
 
   // Apply suggestion -> target updates, then Undo restores exact prior target, Redo restores suggestion.
@@ -170,7 +180,11 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.notices.confirmedAdded);
   await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '3'));
   await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+  await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'true');
   await expect(hits(page).first().locator('.my-memory-kind-badge')).toHaveText(tmMsg.matchKinds.exact);
+  await expect(hits(page).first().locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
+  await expect(hits(page).first().locator('.my-memory-recheck-hint')).toContainText(tmMsg.staleReasons.provenance_unknown);
 
   // Export JSON -> valid wuwaterm-tm-v1 with human_confirmed entry.
   const exportedText = await downloaded(page, () =>
@@ -213,9 +227,70 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
 });
 
+test('three-state freshness badges after term check and merge 8 MiB overflow protection', async ({ page }) => {
+  await open(page);
+  await expand(page);
+
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: '今汐。',
+      target_text: 'Jinhsi (verified).',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: null,
+    }),
+    makeEntry({
+      source_text: '声骸。',
+      target_text: 'Echo (stale).',
+      terms_db_revision: 'old-rev',
+      game_version: null,
+    }),
+  ]));
+
+  // Before term check, currentTermsDbRevision is null -> provenance_unknown.
+  await page.locator('#review-source').fill('今汐。');
+  await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+  await expect(hits(page).first().locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
+
+  // Run term check so currentTermsDbRevision becomes fixtureDictionary.revision.
+  await page.locator('#review-target').fill('Jinhsi.');
+  await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+  await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+
+  // Matching revision -> verified_fresh with zero stale badges.
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
+  await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'false');
+  await expect(hits(page).first().locator('.my-memory-stale-badge')).toHaveCount(0);
+
+  // Mismatched revision -> known_stale with terms_revision_changed badge.
+  await page.locator('#review-source').fill('声骸。');
+  await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'known_stale');
+  await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'true');
+  await expect(hits(page).first().locator('[data-stale="terms_revision_changed"]')).toHaveText(tmMsg.staleReasons.terms_revision_changed);
+
+  // Merge > 8 MiB guard keeps existing entries intact and shows tm_too_large error.
+  const mkChunk = (prefix, count) => tmFileBuffer(
+    Array.from({ length: count }, (_, i) => makeEntry({
+      source_text: `${prefix}-${i}-` + 'x'.repeat(1800),
+      target_text: `${prefix}-${i}-` + 'y'.repeat(1800),
+      note: '',
+    })),
+  );
+  await importTmFile(page, mkChunk('part-a', 1200), 'part-a.json');
+  await panel(page).getByRole('button', { name: tmMsg.replaceConfirm, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '1200'));
+
+  await importTmFile(page, mkChunk('part-b', 1200), 'part-b.json');
+  await panel(page).getByRole('button', { name: tmMsg.mergeConfirm, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toContainText(tmMsg.errors.tm_too_large);
+  await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '1200'));
+});
+
 for (const viewport of [
-  { width: 1440, height: 900, label: '1440px', screenshot: 'desktop-1440x900-tm-panel.png' },
-  { width: 390, height: 844, label: '390px', screenshot: 'mobile-390x844-tm-panel.png' },
+  { width: 1440, height: 900, label: '1440px', screenshot: 'desktop_1440x900_tm_freshness.png' },
+  { width: 390, height: 844, label: '390px', screenshot: 'mobile_390x844_tm_freshness.png' },
 ]) {
   test.describe(`my memory layout at ${viewport.label}`, () => {
     test.use({ viewport: { width: viewport.width, height: viewport.height }, deviceScaleFactor: 1 });
@@ -225,17 +300,46 @@ for (const viewport of [
       await open(page);
       await expand(page);
       await importTmFile(page, tmFileBuffer([
-        makeEntry(),
         makeEntry({
-          source_text: '攻击力提高 20%，持续 10 秒',
-          target_text: 'ATK +20% for 10s',
+          source_text: '今汐。',
+          target_text: 'Jinhsi.',
           origin: 'human_confirmed',
-          note: '参考已确认译文',
+          terms_db_revision: fixtureDictionary.revision,
+          game_version: null,
+          note: '已核对当前词库版本',
+          use_count: 5,
+        }),
+        makeEntry({
+          source_text: '今汐。',
+          target_text: 'Jinhsi (unverified origin).',
+          origin: 'imported_confirmed',
+          terms_db_revision: null,
+          game_version: null,
+          note: '旧文件导入，缺少词库版本',
+          use_count: 3,
+        }),
+        makeEntry({
+          source_text: '今汐。',
+          target_text: 'Jinxi (old revision).',
+          origin: 'imported_confirmed',
+          terms_db_revision: 'old-terms-r10',
+          game_version: null,
+          note: '旧版词库译法，需重新核对',
+          use_count: 2,
         }),
       ]));
-      await page.locator('#review-source').fill('专属记忆句甲乙 25%，持续 12 秒');
-      await page.locator('#review-target').fill('Draft translation');
-      await expect(hits(page)).toHaveCount(1);
+      await page.locator('#review-source').fill('今汐。');
+      await page.locator('#review-target').fill('Jinhsi.');
+      await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+      await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+      await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+
+      await expect(hits(page)).toHaveCount(3);
+      await expect(hits(page).nth(0)).toHaveAttribute('data-freshness', 'verified_fresh');
+      await expect(hits(page).nth(1)).toHaveAttribute('data-freshness', 'provenance_unknown');
+      await expect(hits(page).nth(1).locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
+      await expect(hits(page).nth(2)).toHaveAttribute('data-freshness', 'known_stale');
+      await expect(hits(page).nth(2).locator('[data-stale="terms_revision_changed"]')).toHaveText(tmMsg.staleReasons.terms_revision_changed);
 
       const geometry = await page.evaluate(() => {
         const box = document.querySelector('.my-memory').getBoundingClientRect();
@@ -251,7 +355,7 @@ for (const viewport of [
       expect(geometry.left).toBeGreaterThanOrEqual(0);
       expect(geometry.right).toBeLessThanOrEqual(geometry.clientWidth);
 
-      await page.evaluate(() => document.querySelector('.my-memory').scrollIntoView({ block: 'start' }));
+      await page.evaluate(() => document.querySelector('.my-memory-hits').scrollIntoView({ block: 'center' }));
       await page.screenshot({
         path: `${SCREENSHOT_DIR}/${viewport.screenshot}`,
         fullPage: false,
