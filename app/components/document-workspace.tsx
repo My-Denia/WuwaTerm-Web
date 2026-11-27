@@ -18,6 +18,7 @@ import { judgedReport, layerTwoCounts, layerTwoRows, structureSummary, structure
 import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { numberLocale } from '../../lib/ui-language';
+import { tmServiceBasis } from '../../lib/tm-live-provenance';
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
@@ -84,7 +85,7 @@ function unloadUrl(anchor: HTMLAnchorElement): string | null {
 export function DocumentWorkspace() {
   const { lang } = useUiLanguage();
   const runtime = useRuntimeStore();
-  const { pool } = useRuntime();
+  const { pool, meta } = useRuntime();
   const [doc] = useState(() => createWorkbenchController({
     initialLang: lang,
     fetchCapabilities: () => runtime.capabilities(),
@@ -150,6 +151,13 @@ export function DocumentWorkspace() {
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
+  // The translation memory may only call itself current against the running service: a live review's dictionary while
+  // `/api/meta` still reports that same dictionary, plus the game version `/api/meta` reports. Opening the panel asks
+  // for that read once (the same on-request policy as 「查看词典版本」; it spends one shared meta admission).
+  const tmBasis = useMemo(() => tmServiceBasis(meta, latest), [meta, latest]);
+  useEffect(() => {
+    if (tmOpen) void runtime.loadMeta();
+  }, [runtime, tmOpen]);
   const reviewFeatures = useMemo(() => sessionReviewFeatures(capabilities), [capabilities]);
   const layer1 = useMemo(() => structureViews(draft, snapshot.structure), [draft, snapshot.structure]);
   const layer1Summary = structureSummary(layer1);
@@ -883,7 +891,8 @@ export function DocumentWorkspace() {
           source={source}
           target={target}
           direction={effectiveTermbaseDirection}
-          currentTermsDbRevision={latest?.trusted ? latest.report.dictionary.revision : null}
+          currentTermsDbRevision={tmBasis.currentTermsDbRevision}
+          currentGameVersion={tmBasis.currentGameVersion}
           entries={tmEntries}
           setEntries={setTmEntries}
           onApplySuggestion={applyMemorySuggestion}

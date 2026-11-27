@@ -64,6 +64,9 @@ Optional `/api/meta` is not requested when the page loads. In 「运行详情」
 「查看词典版本」 asks once for the dictionary the running service reports: database schema
 version, source commit, game version, resource version, changelist, term count,
 and the request id. Closing and reopening that panel reuses the read.
+「我的翻译记忆」 asks for the same read the first time it is opened, so its
+freshness marks and confirmations compare against the running service's game
+version and dictionary instead of a previous session's.
 「重新读取」asks again. Each ask spends one shared meta admission (60 per UTC
 day). If the service meta body has no game, resource, or changelist fields,
 those three are null and the page says they were not provided. A failed read
