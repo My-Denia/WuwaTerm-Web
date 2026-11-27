@@ -13,6 +13,7 @@ import {
   type DictionaryView,
   type MetaView,
   type Provenance,
+  type RuntimeStore,
 } from './runtime-store.ts';
 import type { Snapshot } from './workbench-model.ts';
 
@@ -225,4 +226,23 @@ export function tmAutoReuseBasis(
     currentTermsDbRevision: null,
     currentGameVersion: null,
   };
+}
+
+/**
+ * Resolves live dictionary identity from `RuntimeStore` before auto batch reuse.
+ * Always forces a fresh verification (`loadDictionary(true)`, and `loadMeta(true)` on legacy servers) so backend
+ * dictionary changes inside the 10-minute display TTL are never treated as valid for auto-reusing older TM entries.
+ */
+export async function resolveTmAutoReuseBasisFromRuntime(
+  runtime: Pick<RuntimeStore, 'loadDictionary' | 'loadMeta' | 'getSnapshot'>,
+  liveLatest: Snapshot | null,
+  options: TmLiveProvenanceOptions = {},
+): Promise<TmServiceBasis> {
+  await runtime.loadDictionary(true);
+  const afterDict = runtime.getSnapshot();
+  if (afterDict.dictionary.kind === 'unsupported') {
+    await runtime.loadMeta(true);
+  }
+  const liveSnap = runtime.getSnapshot();
+  return tmAutoReuseBasis(liveSnap.dictionary, liveSnap.meta, liveLatest, options);
 }

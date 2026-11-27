@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createNodeEnvironment, NODE_ENVIRONMENT } from '../lib/runtime/node.js';
 import { openTmStore, TM_APPLICATION_ID, TM_SQLITE_SCHEMA_VERSION } from '../lib/runtime/tm-store.js';
+import { MAX_TM_BYTES, serializeTranslationMemory, TM_FORMAT, TM_SCHEMA_VERSION } from '../lib/translation-memory.ts';
 import { GET as getTm, POST as postTm } from '../app/api/tm/route.ts';
 
 const fixtureRoot = mkdtempSync(join(process.env.WUWATERM_TEST_TMPDIR || tmpdir(), 'wuwaterm-tm-sqlite-'));
@@ -481,6 +482,533 @@ test('/api/tm route returns 404 memory_only in public mode and persists confirme
     assert.equal(matchedBody.entries.length, 1);
     assert.equal(matchedBody.entries[0].source_text, '清空后导入');
     assert.notEqual(matchedBody.storageVersion, clearAgain.storageVersion);
+
+    runtime.TM_DB.close();
+    runtime.DB.close();
+  } finally {
+    if (prevEnv === undefined) delete globalThis[NODE_ENVIRONMENT];
+    else globalThis[NODE_ENVIRONMENT] = prevEnv;
+    if (prevMode === undefined) delete process.env.WUWATERM_RUNTIME_MODE;
+    else process.env.WUWATERM_RUNTIME_MODE = prevMode;
+  }
+});
+
+function buildBulkEntries(count, rev = 'a'.repeat(64)) {
+  const stamp = '2026-11-27T00:00:00Z';
+  const entries = [];
+  for (let i = 0; i < count; i += 1) {
+    entries.push({
+      direction: 'en',
+      source_text: `批量测试源文本_${i}：共鸣效率提升 ${(i % 50) + 1}%`,
+      target_text: `Bulk source segment ${i}: Energy Regen +${(i % 50) + 1}%`,
+      prev_source_hash: null,
+      next_source_hash: null,
+      origin: i % 2 === 0 ? 'human_confirmed' : 'imported_confirmed',
+      terms_db_revision: rev,
+      game_version: '3.7.0',
+      note: '',
+      use_count: 1,
+      created_at: stamp,
+      updated_at: stamp,
+    });
+  }
+  return entries;
+}
+
+test('incremental confirm/update/delete/merge on 3,000 TM entries touches only target row, preserves conflict checks and full replace, and measures write latency', async () => {
+  const prevMode = process.env.WUWATERM_RUNTIME_MODE;
+  const prevEnv = globalThis[NODE_ENVIRONMENT];
+  const revV1 = 'a'.repeat(64);
+  const revV2 = 'b'.repeat(64);
+  const COUNT = 3_000;
+  const { env } = selfhostConfig('incremental-3k');
+  const runtime = createNodeEnvironment(env);
+
+  try {
+    process.env.WUWATERM_RUNTIME_MODE = 'selfhost';
+    globalThis[NODE_ENVIRONMENT] = runtime;
+
+    // 1. Seed 3,000 entries via full replace.
+    const bulk = buildBulkEntries(COUNT, revV1);
+    const seeded = runtime.TM_DB.replaceEntries(bulk);
+    assert.equal(seeded.length, COUNT);
+    const initialVersion = runtime.TM_DB.getVersion();
+
+    const inspectBefore = new DatabaseSync(runtime.TM_DB.path, { readOnly: true });
+    const rowsBefore = inspectBefore.prepare('SELECT id, source_text, use_count, updated_at FROM tm_entries ORDER BY id ASC').all();
+    inspectBefore.close();
+    assert.equal(rowsBefore.length, COUNT);
+    const idBySourceBefore = new Map(rowsBefore.map(r => [r.source_text, r.id]));
+
+    // 2. Measure incremental single confirm (ADD new entry #3001) via /api/tm and direct store.
+    const tAdd0 = performance.now();
+    const addRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: '增量新增段落：今汐共鸣解放。',
+          targetText: 'Incremental added: Jinhsi Resonance Liberation.',
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: revV1,
+          gameVersion: '3.7.0',
+        },
+      }),
+    }));
+    const tAddMs = performance.now() - tAdd0;
+    assert.equal(addRes.status, 200);
+    const addBody = await addRes.json();
+    assert.equal(addBody.status, 'added');
+    assert.equal(addBody.entries.length, COUNT + 1);
+    assert.notEqual(addBody.storageVersion, initialVersion);
+
+    // Measure direct incremental confirmEntry without returning full list (pure SQLite write cost).
+    const tDirectAdd0 = performance.now();
+    const directAdd = runtime.TM_DB.confirmEntry({
+      sourceText: '纯增量新增段落：忌炎重击。',
+      targetText: 'Direct incremental added: Jiyan Heavy Attack.',
+      direction: 'en',
+      prevSource: null,
+      nextSource: null,
+      origin: 'human_confirmed',
+      termsDbRevision: revV1,
+      gameVersion: '3.7.0',
+    }, { includeEntries: false });
+    const tDirectAddMs = performance.now() - tDirectAdd0;
+    assert.equal(directAdd.status, 'added');
+
+    // Verify ALL original 3,000 rows kept their EXACT SQLite primary key `id`s (no delete-all + re-insert!).
+    const inspectAfterAdd = new DatabaseSync(runtime.TM_DB.path, { readOnly: true });
+    const rowsAfterAdd = inspectAfterAdd.prepare('SELECT id, source_text FROM tm_entries ORDER BY id ASC').all();
+    inspectAfterAdd.close();
+    assert.equal(rowsAfterAdd.length, COUNT + 2);
+    for (let i = 0; i < COUNT; i += 1) {
+      assert.equal(rowsAfterAdd[i].id, rowsBefore[i].id, `row ${i} id must remain unchanged after incremental insert`);
+      assert.equal(rowsAfterAdd[i].source_text, rowsBefore[i].source_text);
+    }
+
+    // 3. Single confirm (UPDATE existing middle row #1500) via /api/tm.
+    const midTarget = bulk[1500];
+    const tUpdate0 = performance.now();
+    const updateRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: midTarget.source_text,
+          targetText: midTarget.target_text,
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: revV2,
+          gameVersion: '3.8.0',
+          note: 'updated mid row',
+        },
+      }),
+    }));
+    const tUpdateMs = performance.now() - tUpdate0;
+    assert.equal(updateRes.status, 200);
+    const updateBody = await updateRes.json();
+    assert.equal(updateBody.status, 'updated');
+    assert.equal(updateBody.entry.use_count, 2);
+    assert.equal(updateBody.entry.terms_db_revision, revV2);
+    assert.equal(updateBody.entry.game_version, '3.8.0');
+    assert.equal(updateBody.entry.note, 'updated mid row');
+    assert.equal(updateBody.entries.length, COUNT + 2);
+
+    const inspectAfterUpdate = new DatabaseSync(runtime.TM_DB.path, { readOnly: true });
+    const rowsAfterUpdate = inspectAfterUpdate.prepare('SELECT id, source_text, use_count, updated_at FROM tm_entries ORDER BY id ASC').all();
+    inspectAfterUpdate.close();
+    for (let i = 0; i < COUNT; i += 1) {
+      assert.equal(rowsAfterUpdate[i].id, rowsBefore[i].id);
+      if (i === 1500) {
+        assert.equal(rowsAfterUpdate[i].use_count, 2);
+        assert.notEqual(rowsAfterUpdate[i].updated_at, rowsBefore[i].updated_at);
+      } else {
+        assert.equal(rowsAfterUpdate[i].use_count, 1, `untouched row ${i} use_count must not change`);
+        assert.equal(rowsAfterUpdate[i].updated_at, rowsBefore[i].updated_at, `untouched row ${i} updated_at must not change`);
+      }
+    }
+
+    // 4. Incremental delete removes ONLY target row and leaves remaining rows' IDs intact.
+    const tDel0 = performance.now();
+    const delRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'delete',
+        entry: updateBody.entries[COUNT + 1],
+      }),
+    }));
+    const tDelMs = performance.now() - tDel0;
+    assert.equal(delRes.status, 200);
+    const delBody = await delRes.json();
+    assert.equal(delBody.deleted, true);
+    assert.equal(delBody.entries.length, COUNT + 1);
+
+    const inspectAfterDel = new DatabaseSync(runtime.TM_DB.path, { readOnly: true });
+    const rowsAfterDel = inspectAfterDel.prepare('SELECT id, source_text FROM tm_entries ORDER BY id ASC').all();
+    inspectAfterDel.close();
+    assert.equal(rowsAfterDel[0].id, idBySourceBefore.get(rowsAfterDel[0].source_text));
+    assert.equal(rowsAfterDel[2999].id, idBySourceBefore.get(rowsAfterDel[2999].source_text));
+
+    // 5. Incremental merge updates 1 row without downgrading human_confirmed and adds 1 row without touching other 2,999 IDs.
+    const mergeExisting = {
+      ...bulk[0],
+      origin: 'imported_confirmed',
+      use_count: 7,
+    };
+    const mergeNew = {
+      direction: 'en',
+      source_text: '增量合并新增句段。',
+      target_text: 'Incremental merge new segment.',
+      prev_source_hash: null,
+      next_source_hash: null,
+      origin: 'imported_confirmed',
+      terms_db_revision: revV2,
+      game_version: '3.8.0',
+      note: '',
+      use_count: 1,
+      created_at: '2026-11-28T00:00:00Z',
+      updated_at: '2026-11-28T00:00:00Z',
+    };
+    const mergeRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'merge',
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-28T00:00:00Z',
+          entries: [mergeExisting, mergeNew],
+        },
+      }),
+    }));
+    assert.equal(mergeRes.status, 200);
+    const mergeBody = await mergeRes.json();
+    assert.equal(mergeBody.entries.length, COUNT + 2);
+    assert.equal(mergeBody.entries[0].origin, 'human_confirmed');
+    assert.equal(mergeBody.entries[0].use_count, 7);
+
+    const inspectAfterMerge = new DatabaseSync(runtime.TM_DB.path, { readOnly: true });
+    const rowsAfterMerge = inspectAfterMerge.prepare('SELECT id, source_text FROM tm_entries ORDER BY id ASC').all();
+    inspectAfterMerge.close();
+    assert.equal(rowsAfterMerge[1].id, rowsBefore[1].id, 'untouched row 1 id must remain unchanged after incremental merge');
+
+    // 6. Concurrency conflict check at 3,000+ entries: Tab A snapshot vs Tab B confirm -> Tab A replace gets 409 Conflict!
+    const tabASnap = await (await getTm()).json();
+    assert.equal(tabASnap.entries.length, COUNT + 2);
+
+    const tabBConfirm = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: '并发标签页B确认句段。',
+          targetText: 'Concurrent Tab B confirmed segment.',
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: revV2,
+          gameVersion: '3.8.0',
+        },
+      }),
+    }));
+    assert.equal(tabBConfirm.status, 200);
+    const afterTabB = await tabBConfirm.json();
+    assert.equal(afterTabB.entries.length, COUNT + 3);
+
+    const conflictReplace = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'replace',
+        forceReplace: true,
+        expectedVersion: tabASnap.storageVersion,
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-28T00:00:00Z',
+          entries: [mergeNew],
+        },
+      }),
+    }));
+    assert.equal(conflictReplace.status, 409);
+    const conflictBody = await conflictReplace.json();
+    assert.equal(conflictBody.code, 'tm_storage_conflict');
+    assert.equal(conflictBody.entries.length, COUNT + 3);
+    assert.equal(conflictBody.storageVersion, afterTabB.storageVersion);
+
+    // 7. Full replace baseline timing & verification with matching expectedVersion.
+    const tFullReplace0 = performance.now();
+    const fullReplaceRes = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'replace',
+        forceReplace: true,
+        expectedVersion: afterTabB.storageVersion,
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-28T00:00:00Z',
+          entries: bulk,
+        },
+      }),
+    }));
+    const tFullReplaceMs = performance.now() - tFullReplace0;
+    assert.equal(fullReplaceRes.status, 200);
+    const fullReplaceBody = await fullReplaceRes.json();
+    assert.equal(fullReplaceBody.entries.length, COUNT);
+    assert.notEqual(fullReplaceBody.storageVersion, afterTabB.storageVersion);
+
+    // Baseline comparison: runAtomic full-table rewrite for 1 confirm on 3,000 entries vs incremental confirm.
+    const tBaseline0 = performance.now();
+    runtime.TM_DB.runAtomic(current => ({
+      write: true,
+      entries: [
+        ...current,
+        {
+          direction: 'en',
+          source_text: '全量重写基准句段。',
+          target_text: 'Full rewrite baseline segment.',
+          prev_source_hash: null,
+          next_source_hash: null,
+          origin: 'human_confirmed',
+          terms_db_revision: revV1,
+          game_version: '3.7.0',
+          note: '',
+          use_count: 1,
+          created_at: '2026-11-28T00:00:00Z',
+          updated_at: '2026-11-28T00:00:00Z',
+        },
+      ],
+      result: { ok: true },
+    }));
+    const tBaselineMs = performance.now() - tBaseline0;
+
+    console.info(
+      `[TM SQLite 3,000-entry benchmark] directConfirm(includeEntries=false)=${tDirectAddMs.toFixed(2)}ms, `
+      + `apiConfirmAdd=${tAddMs.toFixed(2)}ms, apiConfirmUpdate=${tUpdateMs.toFixed(2)}ms, `
+      + `apiDelete=${tDelMs.toFixed(2)}ms, fullReplace=${tFullReplaceMs.toFixed(2)}ms, `
+      + `runAtomicFullRewriteBaseline=${tBaselineMs.toFixed(2)}ms`,
+    );
+
+    runtime.TM_DB.close();
+    runtime.DB.close();
+  } finally {
+    if (prevEnv === undefined) delete globalThis[NODE_ENVIRONMENT];
+    else globalThis[NODE_ENVIRONMENT] = prevEnv;
+    if (prevMode === undefined) delete process.env.WUWATERM_RUNTIME_MODE;
+    else process.env.WUWATERM_RUNTIME_MODE = prevMode;
+  }
+});
+
+test('confirmEntry and mergeEntries reject invalid inputs and enforce bounds atomically without partial writes', () => {
+  const dir = mkdtempSync(join(fixtureRoot, 'bounds-'));
+  const store = openTmStore(join(dir, 'tm.sqlite3'));
+  try {
+    const rev = 'c'.repeat(64);
+    const ok = store.confirmEntry({
+      sourceText: '初始句段。',
+      targetText: 'Initial segment.',
+      direction: 'en',
+      origin: 'human_confirmed',
+      termsDbRevision: rev,
+      gameVersion: '3.7.0',
+    });
+    assert.equal(ok.status, 'added');
+    const vBefore = store.getVersion();
+
+    // Validation rejections must not bump storageVersion or alter rows.
+    assert.deepEqual(store.confirmEntry({
+      sourceText: '未确认',
+      targetText: 'Machine',
+      direction: 'en',
+      origin: 'machine_translated',
+    }), { status: 'invalid', error: 'unconfirmed_origin' });
+    assert.deepEqual(store.confirmEntry({
+      sourceText: '   ',
+      targetText: 'Blank source',
+      direction: 'en',
+    }), { status: 'invalid', error: 'field_required', field: 'source' });
+    assert.deepEqual(store.confirmEntry({
+      sourceText: 'Valid',
+      targetText: 'x'.repeat(2001),
+      direction: 'en',
+    }), { status: 'invalid', error: 'field_too_long', field: 'target', max: 2000 });
+    assert.equal(store.getVersion(), vBefore);
+    assert.equal(store.listEntries().length, 1);
+
+    // Atomic rollback of mergeEntries when an invalid later entry fails validation (first valid entry must NOT persist).
+    assert.throws(() => store.mergeEntries([
+      {
+        direction: 'en',
+        source_text: '回滚测试第一条。',
+        target_text: 'Rollback test 1.',
+        prev_source_hash: null,
+        next_source_hash: null,
+        origin: 'imported_confirmed',
+        terms_db_revision: null,
+        game_version: null,
+        note: '',
+        use_count: 1,
+        created_at: '2026-11-28T00:00:00Z',
+        updated_at: '2026-11-28T00:00:00Z',
+      },
+      {
+        direction: 'en',
+        source_text: '回滚测试第二条。',
+        target_text: 'Rollback test 2.',
+        prev_source_hash: null,
+        next_source_hash: null,
+        origin: 'machine_translated',
+        terms_db_revision: null,
+        game_version: null,
+        note: '',
+        use_count: 1,
+        created_at: '2026-11-28T00:00:00Z',
+        updated_at: '2026-11-28T00:00:00Z',
+      },
+    ]), /tm_unconfirmed_origin/);
+    assert.equal(store.listEntries().length, 1);
+    assert.equal(store.getVersion(), vBefore);
+  } finally {
+    store.close();
+  }
+});
+
+test('confirmEntry rejects re-confirming a use_count=9 entry (+1 byte to 10) when store is at exact 8 MiB MAX_TM_BYTES', async () => {
+  const prevMode = process.env.WUWATERM_RUNTIME_MODE;
+  const prevEnv = globalThis[NODE_ENVIRONMENT];
+  const { env } = selfhostConfig('exact-8mib');
+  const runtime = createNodeEnvironment(env);
+  const stamp = '2026-11-28T00:00:00Z';
+  const rev = 'a'.repeat(64);
+
+  try {
+    process.env.WUWATERM_RUNTIME_MODE = 'selfhost';
+    globalThis[NODE_ENVIRONMENT] = runtime;
+
+    // Build a valid store at EXACTLY MAX_TM_BYTES (8 * 1,048,576 = 8,388,608 bytes) with target entry at use_count=9.
+    const measureBytes = (list) => Buffer.byteLength(JSON.stringify({
+      format: TM_FORMAT,
+      schema_version: TM_SCHEMA_VERSION,
+      exported_at: stamp,
+      entries: list,
+    }, null, 2) + '\n', 'utf8');
+    const makeBulkEntry = (i) => ({
+      direction: 'en',
+      source_text: `s_${i}_${'源'.repeat(600)}`,
+      target_text: `t_${i}_${'a'.repeat(1800)}`,
+      prev_source_hash: null,
+      next_source_hash: null,
+      origin: 'human_confirmed',
+      terms_db_revision: rev,
+      game_version: '3.7.0',
+      note: '',
+      use_count: i === 0 ? 9 : 1,
+      created_at: stamp,
+      updated_at: stamp,
+    });
+    const sampleSize = measureBytes([makeBulkEntry(0), makeBulkEntry(1)]) - measureBytes([makeBulkEntry(0)]);
+    const approxCount = Math.floor((MAX_TM_BYTES - 4500) / sampleSize);
+    const entries = Array.from({ length: approxCount }, (_, i) => makeBulkEntry(i));
+    while (measureBytes(entries) + 1200 <= MAX_TM_BYTES) {
+      entries.push(makeBulkEntry(entries.length));
+    }
+    while (measureBytes(entries) + 600 > MAX_TM_BYTES) {
+      entries.pop();
+    }
+    const emptyBase = measureBytes([
+      ...entries,
+      {
+        direction: 'en',
+        source_text: 's',
+        target_text: 't',
+        prev_source_hash: null,
+        next_source_hash: null,
+        origin: 'human_confirmed',
+        terms_db_revision: rev,
+        game_version: '3.7.0',
+        note: '',
+        use_count: 1,
+        created_at: stamp,
+        updated_at: stamp,
+      },
+    ]);
+    const extraBytes = MAX_TM_BYTES - emptyBase;
+    assert.ok(extraBytes >= 0 && extraBytes <= 3998, `expected extraBytes in 0..3998, got ${extraBytes}`);
+    const srcPad = Math.min(1999, extraBytes);
+    const tgtPad = extraBytes - srcPad;
+    entries.push({
+      direction: 'en',
+      source_text: 's'.repeat(1 + srcPad),
+      target_text: 't'.repeat(1 + tgtPad),
+      prev_source_hash: null,
+      next_source_hash: null,
+      origin: 'human_confirmed',
+      terms_db_revision: rev,
+      game_version: '3.7.0',
+      note: '',
+      use_count: 1,
+      created_at: stamp,
+      updated_at: stamp,
+    });
+    const exactBytes = Buffer.byteLength(serializeTranslationMemory({
+      format: TM_FORMAT,
+      schema_version: TM_SCHEMA_VERSION,
+      exported_at: stamp,
+      entries,
+    }), 'utf8');
+    assert.equal(exactBytes, MAX_TM_BYTES);
+
+    runtime.TM_DB.replaceEntries(entries);
+    const vBefore = runtime.TM_DB.getVersion();
+
+    // Re-confirming entry[0] with identical revision, gameVersion, and note bumps use_count 9 -> 10 (+1 byte) -> MUST reject 413 list_too_large!
+    const res = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: entries[0].source_text,
+          targetText: entries[0].target_text,
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: rev,
+          gameVersion: '3.7.0',
+          note: '',
+        },
+      }),
+    }));
+    assert.equal(res.status, 413);
+    const body = await res.json();
+    assert.equal(body.status, 'invalid');
+    assert.equal(body.error, 'list_too_large');
+    assert.equal(runtime.TM_DB.getVersion(), vBefore);
+    assert.equal(runtime.TM_DB.listEntries()[0].use_count, 9);
+
+    // Export serialization must still succeed within MAX_TM_BYTES.
+    const exported = serializeTranslationMemory({
+      format: TM_FORMAT,
+      schema_version: TM_SCHEMA_VERSION,
+      exported_at: stamp,
+      entries: runtime.TM_DB.listEntries(),
+    });
+    assert.equal(Buffer.byteLength(exported, 'utf8'), MAX_TM_BYTES);
 
     runtime.TM_DB.close();
     runtime.DB.close();
