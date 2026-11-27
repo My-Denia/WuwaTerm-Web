@@ -424,6 +424,64 @@ test('/api/tm route returns 404 memory_only in public mode and persists confirme
     assert.equal(forcedBody.entries[0].source_text, '单条覆盖');
     assert.notEqual(forcedBody.storageVersion, staleForceBody.storageVersion);
 
+    // Item #3: After clearing the store (entries === [], storageVersion > 0), omitting expectedVersion
+    // on replace (even with forceReplace: true) MUST return 409 Conflict without writing; passing
+    // the exact cleared storageVersion succeeds with 200!
+    const clearAgain = await (await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'clear' }),
+    }))).json();
+    assert.deepEqual(clearAgain.entries, []);
+    assert.ok(Number(clearAgain.storageVersion) > 0);
+
+    const replacePayload = {
+      format: 'wuwaterm-tm-v1',
+      schema_version: 1,
+      exported_at: '2026-11-27T00:00:00Z',
+      entries: [{
+        direction: 'en',
+        source_text: '清空后导入',
+        target_text: 'Import after clear',
+        prev_source_hash: null,
+        next_source_hash: null,
+        origin: 'imported_confirmed',
+        terms_db_revision: null,
+        game_version: null,
+        note: '',
+        use_count: 1,
+        created_at: '2026-11-27T00:00:00Z',
+        updated_at: '2026-11-27T00:00:00Z',
+      }],
+    };
+    const missingVersionAfterClear = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'replace', forceReplace: true, file: replacePayload }),
+    }));
+    assert.equal(missingVersionAfterClear.status, 409);
+    const missingBody = await missingVersionAfterClear.json();
+    assert.equal(missingBody.code, 'tm_storage_conflict');
+    assert.deepEqual(missingBody.entries, []);
+    assert.equal(missingBody.storageVersion, clearAgain.storageVersion);
+    assert.deepEqual((await (await getTm()).json()).entries, [], '409 replace after clear must not write');
+
+    const matchingVersionAfterClear = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'replace',
+        forceReplace: true,
+        expectedVersion: clearAgain.storageVersion,
+        file: replacePayload,
+      }),
+    }));
+    assert.equal(matchingVersionAfterClear.status, 200);
+    const matchedBody = await matchingVersionAfterClear.json();
+    assert.equal(matchedBody.entries.length, 1);
+    assert.equal(matchedBody.entries[0].source_text, '清空后导入');
+    assert.notEqual(matchedBody.storageVersion, clearAgain.storageVersion);
+
     runtime.TM_DB.close();
     runtime.DB.close();
   } finally {

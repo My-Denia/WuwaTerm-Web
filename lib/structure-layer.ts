@@ -34,7 +34,7 @@ export const emptyStructure = (): StructureState => ({ phase: 'idle', results: {
 const CHECKED: readonly PairStatus[] = ['ready', 'untranslated'];
 const keyOf = (sourceHash: string, targetHash: string) => `${sourceHash}:${targetHash}`;
 
-function explicitAlignmentUnits(draft: Draft): {
+type ExplicitAlignmentUnit = {
   index: number;
   key: string;
   source: string;
@@ -44,7 +44,9 @@ function explicitAlignmentUnits(draft: Draft): {
   targetStart: ScalarOffset;
   targetEnd: ScalarOffset;
   checkable: boolean;
-}[] | null {
+};
+
+function explicitAlignmentUnits(draft: Draft): ExplicitAlignmentUnit[] | null {
   const alignments = draft.alignments;
   if (!alignments || alignments.length <= 1) return null;
   if (alignmentsLeaveGaps(draft.source, draft.target, alignments)) return null;
@@ -76,15 +78,42 @@ function explicitAlignmentUnits(draft: Draft): {
   });
 }
 
+function shouldUseExplicitAlignmentUnits(
+  explicit: readonly ExplicitAlignmentUnit[] | null,
+  segItems: ReturnType<typeof segmentInputs>['items'],
+): explicit is readonly ExplicitAlignmentUnit[] {
+  if (!explicit) return false;
+  const boundariesMatch = explicit.length === segItems.length
+    && explicit.every((u, i) => {
+      const s = segItems[i]!;
+      return u.sourceStart === s.range.source_start
+        && u.sourceEnd === s.range.source_end
+        && u.targetStart === s.range.target_start
+        && u.targetEnd === s.range.target_end;
+    });
+  if (boundariesMatch) return false;
+  // Prefer explicit alignment units whenever segmentation merged multiple alignments into one
+  // segment (so per-segment TM reuse checks are never masked), or when every alignment fits
+  // within Core's single-segment structure-check ceiling.
+  const hasMergedExplicit = segItems.some(s =>
+    explicit.filter(u => u.sourceStart < s.range.source_end && s.range.source_start < u.sourceEnd).length > 1,
+  );
+  if (hasMergedExplicit) return true;
+  return explicit.every(u =>
+    Array.from(u.source).length <= STRUCTURE_LIMITS.side
+    && Array.from(u.target).length <= STRUCTURE_LIMITS.side,
+  );
+}
+
 /**
  * The segments of a draft a structure check sends, with the key its result is stored under. `id` is the request `segment_id`.
- * When a short draft carries explicit per-segment alignments (e.g. after incremental TM reuse), each aligned segment is
- * checked individually so per-segment findings cannot be masked by a merged whole-document view.
+ * When explicit alignments differ from segmentation-v1 boundaries (e.g. merged short TM-reused segments), each aligned
+ * segment is checked individually so per-segment findings cannot be masked by a merged view.
  */
 export function structureItems(draft: Draft): { id: string; index: number; key: string; source: string; target: string }[] {
   const segItems = segmentInputs(draft).items;
   const explicit = explicitAlignmentUnits(draft);
-  if (explicit && explicit.length > segItems.length) {
+  if (shouldUseExplicitAlignmentUnits(explicit, segItems)) {
     return explicit.flatMap(unit => (unit.checkable
       ? [{ id: `s${unit.index}`, index: unit.index, key: unit.key, source: unit.source, target: unit.target }]
       : []));
@@ -119,7 +148,7 @@ const shift = (span: StructureSpan | null, by: number): Span | null =>
 export function structureViews(draft: Draft, structure: StructureState): StructureView[] {
   const segItems = segmentInputs(draft).items;
   const explicit = explicitAlignmentUnits(draft);
-  if (explicit && explicit.length > segItems.length) {
+  if (shouldUseExplicitAlignmentUnits(explicit, segItems)) {
     return explicit.map(unit => {
       const stored = structure.results[unit.key];
       return {
@@ -226,13 +255,21 @@ export function layerTwoRows(semantic: SemanticState, views: readonly PairView[]
     const result = resultOf(p);
     return result ? views.find(v => overlaps(result.region.source, { start: v.pair.source.core_start, end: v.pair.source.core_end })) ?? null : null;
   };
+  const boundariesAligned = layer1.length === views.length
+    && layer1.every((l1, i) => {
+      const pair = views[i]!.pair;
+      return l1.sourceStart === pair.source.core_start
+        && l1.sourceEnd === pair.source.core_end
+        && l1.targetStart === pair.target.core_start
+        && l1.targetEnd === pair.target.core_end;
+    });
   return semantic.placed.map(p => {
     const info = issueStatus(semantic, p) as { status: string; decision: Decision | null; reference: Decision | null };
     const view = segmentOf(p);
     const segment = view ? view.pair.index : null;
     const position = p.live.source_span?.start ?? p.live.target_span?.start ?? resultOf(p)?.region.source.start ?? 0;
     const issueCheck = { category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span };
-    const matchingLayer1 = layer1.length === views.length
+    const matchingLayer1 = boundariesAligned
       ? (segment !== null && layer1[segment] ? [layer1[segment]!] : [])
       : layer1.filter(v => {
           if (p.live.source_span) {

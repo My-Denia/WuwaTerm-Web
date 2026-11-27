@@ -222,6 +222,7 @@ type TranslateRunPlan = {
     draft: Draft;
     structure: StructureState;
     tmReceipt: TmRunReceipt;
+    baseAlignmentsJson: string;
   };
 };
 
@@ -2608,11 +2609,6 @@ export class WorkbenchController {
       if (!live()) return;
       this.onPoolRefresh();
       if (!response.ok || typeof body?.text !== 'string') {
-        if (plan.staged) {
-          // Keep the user's original editor draft intact when the first staged update fails;
-          // still expose the accurate receipt (0 model calls, 0 retranslated, N pending).
-          this.setState({ tmReceipt: plan.staged.tmReceipt });
-        }
         this.failRun({
           type: 'failed',
           key: item.key,
@@ -2623,7 +2619,9 @@ export class WorkbenchController {
       }
       const countModelCall = plan.trackTmModelCalls && body.kind === 'llm';
       const latest = this.state.draft;
-      if (latest.source !== plan.source || latest.direction !== plan.direction || latest.target !== plan.expectedTarget) {
+      const stagedAlignmentsChanged = plan.staged !== undefined
+        && JSON.stringify(latest.alignments) !== plan.staged.baseAlignmentsJson;
+      if (latest.source !== plan.source || latest.direction !== plan.direction || latest.target !== plan.expectedTarget || stagedAlignmentsChanged) {
         this.failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: this.clock.now() });
         this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
         return;
@@ -2728,7 +2726,6 @@ export class WorkbenchController {
       this.dispatchRun({ type: 'done', key: item.key });
     } catch {
       if (live() && !signal.aborted) {
-        if (plan.staged) this.setState({ tmReceipt: plan.staged.tmReceipt });
         this.failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'stop' }, now: this.clock.now() });
       }
     }
@@ -3195,7 +3192,12 @@ export class WorkbenchController {
       if (options.stageUntilFirstSuccess && updatedDraft !== startDraft) {
         // Keep the existing translation visible in the editor until the first untranslated segment
         // succeeds, so a pool rejection or upstream error never wipes the user's prior translation.
-        built.plan.staged = { draft: updatedDraft, structure: nextStructure, tmReceipt };
+        built.plan.staged = {
+          draft: updatedDraft,
+          structure: nextStructure,
+          tmReceipt,
+          baseAlignmentsJson: JSON.stringify(startDraft.alignments),
+        };
         built.plan.expectedTarget = startDraft.target;
         this.translateRun = built.plan;
         this.startBatch('translate', built.items);

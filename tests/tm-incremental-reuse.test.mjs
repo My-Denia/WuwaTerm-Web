@@ -644,9 +644,222 @@ test('Item #2: sourceDirtyForTranslation incremental update keeps original 3-par
 
   const snap = doc.getSnapshot();
   assert.equal(snap.draft.target, originalTarget, 'existing 3-paragraph translation must stay intact when first remaining request fails');
-  assert.equal(snap.tmReceipt?.modelCalls, 0);
-  assert.equal(snap.tmReceipt?.retranslated, 0);
-  assert.equal(snap.tmReceipt?.pendingRetranslate, 2);
+  assert.equal(snap.tmReceipt, null, 'uncommitted staged update must not emit a fake reuse receipt when first request fails');
+});
+
+test('Item #1 (staged invariants): late failure after edit does not restore receipt, and late first success after new alignment does not overwrite it', async () => {
+  const { s1, s2, s3, entries } = buildEntries();
+  const s3Edited = '末段修改：暴击伤害提升 50%。';
+  const originalTarget = 'Para 1: ATK +10%.\n\nPara 2: CRIT Rate +20%.\n\nPara 3: Energy Regen +30%.';
+
+  // Scenario B: user edits target while first staged request is in flight -> late 429 must keep tmReceipt null.
+  let resolveFail;
+  const failGate = new Promise(resolve => { resolveFail = resolve; });
+  const docEdit = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      if (path === '/api/structure-checks') {
+        return { response: new Response(null, { status: 200 }), value: okStructureResponse(body) };
+      }
+      if (path === '/api/translations') {
+        await failGate;
+        return {
+          response: new Response(null, { status: 429 }),
+          value: { status: 'unavailable', reason: 'translation_pool_exhausted' },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+  docEdit.edit({ source: `${s1}\n\n${s2}\n\n${s3}`, target: originalTarget, direction: 'en', alignments: null });
+  docEdit.editText('source', `${s1}\n\n${s2}\n\n${s3Edited}`);
+  const runPromiseB = docEdit.translateInReview();
+  await flushMicrotasks();
+  docEdit.editText('target', `${originalTarget} edited`);
+  resolveFail();
+  await runPromiseB;
+  await flushMicrotasks();
+  assert.equal(docEdit.getSnapshot().tmReceipt, null);
+  assert.equal(docEdit.getSnapshot().draft.target, `${originalTarget} edited`);
+
+  // Scenario C: user adds an explicit alignment while first staged request is in flight -> late 200 must abort commit and preserve new alignment!
+  let resolveOk;
+  const okGate = new Promise(resolve => { resolveOk = resolve; });
+  const docAlign = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      if (path === '/api/structure-checks') {
+        return { response: new Response(null, { status: 200 }), value: okStructureResponse(body) };
+      }
+      if (path === '/api/translations') {
+        await okGate;
+        return {
+          response: new Response(null, { status: 200 }),
+          value: { kind: 'llm', text: 'Late translated Para 2.', direction: 'en', dictionary_miss: false, request_id: 'tr-late' },
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+  docAlign.edit({ source: `${s1}\n\n${s2}\n\n${s3}`, target: originalTarget, direction: 'en', alignments: null });
+  docAlign.editText('source', `${s1}\n\n${s2}\n\n${s3Edited}`);
+  const runPromiseC = docAlign.translateInReview();
+  await flushMicrotasks();
+  const s1Len = Array.from(s1).length;
+  const t1Len = Array.from('Para 1: ATK +10%.').length;
+  const recorded = docAlign.recordAlignment(
+    { start: scalarOffset(0), end: scalarOffset(s1Len), text: s1 },
+    { start: scalarOffset(0), end: scalarOffset(t1Len), text: 'Para 1: ATK +10%.' },
+  );
+  assert.equal(recorded, true);
+  const alignmentsBeforeResolve = docAlign.getSnapshot().draft.alignments;
+  resolveOk();
+  await runPromiseC;
+  await flushMicrotasks();
+  assert.equal(docAlign.getSnapshot().draft.target, originalTarget, 'late staged success must not overwrite draft after user added alignment');
+  assert.deepEqual(docAlign.getSnapshot().draft.alignments, alignmentsBeforeResolve, 'user-added alignment must be preserved');
+  assert.equal(docAlign.getSnapshot().tmReceipt, null);
+});
+
+test('Item #2 (PRRT_kwDOVe07hM68zizN): 1899-scalar split para + 2 merged TM-reused short paras (3 alignments vs 3 semantic pairs) keeps Layer 1 findings visible and layerTwoRows scoped', async () => {
+  const longSource = `长首段：${'文'.repeat(1895)}`; // 1899 scalars -> hard-split into 2 semantic pairs by segmentation-v1
+  const longTarget = `Long first para: ${'a'.repeat(1882)}`; // 1899 scalars
+  const s2 = '中段：暴击率提高 20%。';
+  const s3 = '末段：共鸣效率提高 30%。';
+  const t2Wrong = 'Para 2: CRIT Rate +99%.'; // triggers number_missing on alignment 1
+  const t3Ok = 'Para 3: Energy Regen +30%.';
+
+  let entries = [];
+  entries = confirmTranslationMemoryEntry(entries, {
+    sourceText: s2,
+    targetText: t2Wrong,
+    direction: 'en',
+    prevSource: longSource,
+    nextSource: s3,
+    termsDbRevision: REV,
+    gameVersion: GAME,
+  }).entries;
+  entries = confirmTranslationMemoryEntry(entries, {
+    sourceText: s3,
+    targetText: t3Ok,
+    direction: 'en',
+    prevSource: s2,
+    nextSource: null,
+    termsDbRevision: REV,
+    gameVersion: GAME,
+  }).entries;
+
+  const s0Len = Array.from(longSource).length;
+  const s1Start = s0Len + 2;
+  const s1End = s1Start + Array.from(s2).length;
+  const s2Start = s1End + 2;
+  const s2End = s2Start + Array.from(s3).length;
+  const t0Len = Array.from(longTarget).length;
+
+  const doc = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    getTmEntries: () => entries,
+    resolveTmAutoReuseBasis: async () => BASIS,
+    post: async (path, body) => {
+      assert.equal(path, '/api/structure-checks');
+      return {
+        response: new Response(null, { status: 200 }),
+        value: okStructureResponse(body, {
+          'tm-1': [{ rule_id: 'number_missing', source_span: { start: 9, end: 11, text: '20' }, target_span: null }],
+        }),
+      };
+    },
+  });
+
+  doc.edit({
+    source: `${longSource}\n\n${s2}\n\n${s3}`,
+    target: longTarget,
+    direction: 'en',
+    alignments: [
+      { source: { start: scalarOffset(0), end: scalarOffset(s0Len), text: longSource }, target: { start: scalarOffset(0), end: scalarOffset(t0Len), text: longTarget } },
+      { source: { start: scalarOffset(s1Start), end: scalarOffset(s1End), text: s2 }, target: null },
+      { source: { start: scalarOffset(s2Start), end: scalarOffset(s2End), text: s3 }, target: null },
+    ],
+  });
+
+  await doc.startTranslateRun();
+  const snap = doc.getSnapshot();
+  assert.equal(snap.tmReceipt?.reused, 2);
+  assert.equal(snap.tmReceipt?.demotedByStructureCheck, 1);
+
+  // Explicit alignments (3) equal semantic pair count (3) because para 0 hard-split into 2 while para 1+2 merged into 1,
+  // yet boundaries differ -> structureViews MUST pick explicit alignment units so para 1's number_missing stays visible!
+  const l1Views = structureViews(snap.draft, snap.structure);
+  assert.equal(l1Views.length, 3);
+  assert.deepEqual(structureSummary(l1Views), { checked: 2, withFindings: 1, findings: 1, omitted: 0, unchecked: 1 });
+  assert.equal(l1Views[1].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(l1Views[1].result?.findings[0].source_span?.text, '20');
+
+  // Also verify layerTwoRows does NOT index l1Views[1] for semantic pair 1 (which is the 2nd half of para 0, [950..1899))!
+  const l1WithEmptyAt1 = l1Views.map((v, idx) => (idx === 1 ? {
+    ...v,
+    result: {
+      findings: [{ rule_id: 'empty_target', source_span: null, target_span: null }],
+      omitted: 0,
+      layout: { source_paragraphs: 1, target_paragraphs: 0, source_lines: 1, target_lines: 0 },
+    },
+  } : v));
+  const semanticPairViews = [
+    {
+      pair: {
+        index: 0,
+        status: 'ready',
+        hard_cut: true,
+        source: { start: scalarOffset(0), end: scalarOffset(950), core_start: scalarOffset(0), core_end: scalarOffset(950) },
+        target: { start: scalarOffset(0), end: scalarOffset(950), core_start: scalarOffset(0), core_end: scalarOffset(950) },
+      },
+    },
+    {
+      pair: {
+        index: 1,
+        status: 'ready',
+        hard_cut: true,
+        source: { start: scalarOffset(950), end: scalarOffset(s0Len), core_start: scalarOffset(950), core_end: scalarOffset(s0Len) },
+        target: { start: scalarOffset(950), end: scalarOffset(t0Len), core_start: scalarOffset(950), core_end: scalarOffset(t0Len) },
+      },
+    },
+    {
+      pair: {
+        index: 2,
+        status: 'ready',
+        hard_cut: false,
+        source: { start: scalarOffset(s1Start), end: scalarOffset(s2End), core_start: scalarOffset(s1Start), core_end: scalarOffset(s2End) },
+        target: { start: scalarOffset(t0Len + 2), end: scalarOffset(Array.from(snap.draft.target).length), core_start: scalarOffset(t0Len + 2), core_end: scalarOffset(Array.from(snap.draft.target).length) },
+      },
+    },
+  ];
+  const semanticState = {
+    results: [{
+      id: 'res-p0-second-half',
+      imported: false,
+      region: { source: { start: scalarOffset(950), end: scalarOffset(s0Len) }, target: { start: scalarOffset(950), end: scalarOffset(t0Len) } },
+    }],
+    placed: [{
+      id: 'pl-omission-p0-half2',
+      resultId: 'res-p0-second-half',
+      stale: false,
+      issue: { category: 'omission', confidence: 'high' },
+      live: { source_span: { start: scalarOffset(960), end: scalarOffset(965), text: '文文文文文' }, target_span: null },
+    }],
+    decisions: [],
+    outcomes: [],
+    long: { records: [], history: [], progress: { current: null, completed: [] } },
+  };
+  const l2Rows = layerTwoRows(semanticState, semanticPairViews, l1WithEmptyAt1);
+  assert.equal(l2Rows.length, 1);
+  assert.equal(l2Rows[0].covered, false, 'equal counts with mismatched boundaries must not index l1Views[1] for semantic pair 1');
 });
 
 test('Item #3a & #3b: whitespace-padded TM target matches Layer 1 core key, and empty_target on para 1 does not hide para 3 omission', async () => {
