@@ -688,11 +688,9 @@ function buildMatch(
     staleReasons.push(TM_STALE_NUMERIC);
   }
   const provenanceUnknown =
-    !termsChanged &&
-    !gameChanged &&
-    (currentTermsDbRevision === null ||
-      entry.terms_db_revision === null ||
-      (currentGameVersion === null) !== (entry.game_version === null));
+    currentTermsDbRevision === null ||
+    entry.terms_db_revision === null ||
+    (currentGameVersion === null) !== (entry.game_version === null);
   if (provenanceUnknown) {
     staleReasons.push(TM_STALE_PROVENANCE_UNKNOWN);
   }

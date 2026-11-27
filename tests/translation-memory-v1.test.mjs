@@ -403,7 +403,24 @@ test('three-state freshness classifies verified_fresh, known_stale, and provenan
     currentGameVersion: null,
   });
   assert.equal(termsChangedOneNullGame[0].freshness, TM_FRESHNESS_STALE);
-  assert.deepEqual(termsChangedOneNullGame[0].staleReasons, ['terms_revision_changed']);
+  assert.deepEqual(termsChangedOneNullGame[0].staleReasons, [
+    'terms_revision_changed',
+    TM_STALE_PROVENANCE_UNKNOWN,
+  ]);
+  assert.equal(termsChangedOneNullGame[0].needsRecheck, true);
+
+  const gameChangedMissingTerms = matchTranslationMemory([
+    makeEntry({ source_text: '仅游戏版本', target_text: 'Game only', terms_db_revision: null, game_version: '3.0' }),
+  ], '仅游戏版本', 'en', {
+    currentTermsDbRevision: 'r15',
+    currentGameVersion: '3.1',
+  });
+  assert.equal(gameChangedMissingTerms[0].freshness, TM_FRESHNESS_STALE);
+  assert.deepEqual(gameChangedMissingTerms[0].staleReasons, [
+    'game_version_changed',
+    TM_STALE_PROVENANCE_UNKNOWN,
+  ]);
+  assert.equal(gameChangedMissingTerms[0].needsRecheck, true);
 
   // provenance_unknown: current revision unknown, entry revision null, or one-sided game_version null
   const unknownCurrent = matchTranslationMemory(entries, '挑战成功', 'en');

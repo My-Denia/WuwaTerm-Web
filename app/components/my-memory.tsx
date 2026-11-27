@@ -132,7 +132,7 @@ export function MyMemory({
         applyReplace(parsed);
       }
     } catch (error) {
-      failure(errorText(error, t.errors.exportFailed));
+      failure(errorText(error, t.errors.importFailed));
     }
   }
 
