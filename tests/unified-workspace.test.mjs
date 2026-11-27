@@ -240,7 +240,8 @@ test('a newer pool read replaces one in flight; a page without the pool never re
 
 test('dictionary provenance is read only on request, joined while in flight, kept, and read again only when forced', async () => {
   let release;
-  const { calls, fetch } = fakeFetch({ '/api/meta': async () => { await new Promise(resolve => { release = resolve; }); return json(META); } });
+  const metaHandler = async () => { await new Promise(resolve => { release = resolve; }); return json(META); };
+  const { calls, fetch } = fakeFetch({ '/api/meta': metaHandler, '/api/meta?refresh=1': metaHandler });
   const store = new RuntimeStore({ fetch, pool: false });
   store.start();
   assert.deepEqual(calls, []);
@@ -257,7 +258,7 @@ test('dictionary provenance is read only on request, joined while in flight, kep
   await tick();
   release();
   await again;
-  assert.equal(calls.length, 2);
+  assert.deepEqual(calls, ['/api/meta', '/api/meta?refresh=1']);
   const bad = new RuntimeStore({ fetch: async () => json({ ...META, extra: 1 }), pool: false });
   await bad.loadMeta();
   assert.equal(bad.getSnapshot().meta.kind, 'error');

@@ -1,7 +1,18 @@
-import { proxyMetaRequest, runtimeEnvironment } from '@/lib/wuwaterm-proxy.js';
+import { proxyMetaRequest, runtimeEnvironment } from '../../../lib/wuwaterm-proxy.js';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(): Promise<Response> {
-  return proxyMetaRequest({ environment: await runtimeEnvironment() });
+function wantsFreshRevalidation(request: Request): boolean {
+  try {
+    return new URL(request.url).searchParams.get('refresh') === '1';
+  } catch {
+    return false;
+  }
+}
+
+export async function GET(request: Request): Promise<Response> {
+  return proxyMetaRequest({
+    environment: await runtimeEnvironment(),
+    forceRefresh: wantsFreshRevalidation(request),
+  });
 }

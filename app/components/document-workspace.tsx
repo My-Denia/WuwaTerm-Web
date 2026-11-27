@@ -23,8 +23,8 @@ import { isSelfHosted, workbenchPath } from '../../lib/ui-runtime';
 import {
   isDictionaryFresh,
   isMetaFresh,
+  resolveTmAutoReuseBasisFromRuntime,
   sanitizeGameVersion,
-  tmAutoReuseBasis,
   tmConfirmBasis,
   tmDisplayMatchBasis,
 } from '../../lib/tm-live-provenance';
@@ -104,15 +104,7 @@ export function DocumentWorkspace() {
     initialLang: lang,
     fetchCapabilities: () => runtime.capabilities(),
     onPoolRefresh: () => runtime.refreshPool(),
-    resolveTmAutoReuseBasis: async (liveLatest) => {
-      await runtime.loadDictionary();
-      const afterDict = runtime.getSnapshot();
-      if (afterDict.dictionary.kind === 'unsupported') {
-        await runtime.loadMeta();
-      }
-      const liveSnap = runtime.getSnapshot();
-      return tmAutoReuseBasis(liveSnap.dictionary, liveSnap.meta, liveLatest);
-    },
+    resolveTmAutoReuseBasis: (liveLatest) => resolveTmAutoReuseBasisFromRuntime(runtime, liveLatest),
   }));
   const snapshot = useSyncExternalStore(doc.subscribe, doc.getSnapshot, doc.getSnapshot);
   const {
