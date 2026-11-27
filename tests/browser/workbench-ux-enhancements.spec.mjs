@@ -310,3 +310,29 @@ test('Markdown reading preview renders formatting safely, neutralizes XSS, and p
   await expectEditorValue(page, '#review-target', targetMd);
   expect(await storageState(page)).toEqual({ local: 0, session: 0, idb: 0 });
 });
+
+test('manuscript CM6 editors expose accessible names, preserve MyTerms drafts across mode switches, and never steal focus on exit', async ({ page }) => {
+  await openQuick(page);
+  // Open MyTerms in quick mode and type an unsaved term draft.
+  const myTerms = page.locator('.my-terms');
+  await myTerms.getByRole('button', { name: M.workspace.lookupShow, exact: true }).click();
+  await myTerms.getByLabel(M.termbase.fieldSource, { exact: true }).fill('未保存词条');
+  await myTerms.getByLabel(M.termbase.fieldTarget, { exact: true }).fill('unsaved entry');
+
+  // Switch to manuscript mode -> CM6 mounts with accessible textbox names via aria-labelledby.
+  await openManuscript(page);
+  await expect(page.getByRole('textbox', { name: M.review.sourceLabel })).toHaveAttribute('id', 'review-source');
+  await expect(page.getByRole('textbox', { name: M.review.targetLabel })).toHaveAttribute('id', 'review-target');
+
+  // Unsaved MyTerms draft survives the quick -> manuscript layout switch.
+  await openInspectorTab(page, 'terms');
+  await expect(myTerms.getByLabel(M.termbase.fieldSource, { exact: true })).toHaveValue('未保存词条');
+  await expect(myTerms.getByLabel(M.termbase.fieldTarget, { exact: true })).toHaveValue('unsaved entry');
+
+  // Click the quick-mode switch button (blurring CM6): exiting manuscript mode must NOT steal focus into #review-source.
+  await page.locator('.mode-switch button').first().click();
+  await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'quick');
+  expect(await page.evaluate(() => document.activeElement?.id ?? '')).not.toBe('review-source');
+  await expect(myTerms.getByLabel(M.termbase.fieldSource, { exact: true })).toHaveValue('未保存词条');
+  await expect(myTerms.getByLabel(M.termbase.fieldTarget, { exact: true })).toHaveValue('unsaved entry');
+});

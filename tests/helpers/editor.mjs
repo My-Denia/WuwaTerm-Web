@@ -35,6 +35,10 @@ export async function expectEditorNotValue(page, selector, unexpected, options =
 export async function fillEditor(page, selector, text) {
   const loc = page.locator(selector);
   await loc.waitFor({ state: 'visible' });
+  const workspace = page.locator('.document-workspace');
+  if (await workspace.count() && await workspace.getAttribute('data-mode') === 'manuscript') {
+    await expect(loc).toHaveAttribute('data-editor-surface', 'cm6', { timeout: 15_000 });
+  }
   const isNative = await loc.evaluate(el => el.tagName === 'TEXTAREA' || el.tagName === 'INPUT');
   if (isNative) {
     await loc.fill(text);

@@ -123,13 +123,15 @@ export async function openWorkbench(page, options = {}) {
   return rec;
 }
 
-/** Switch the document workspace to manuscript review (zh or en interface). */
+/** Switch the document workspace to manuscript review (zh or en interface) and wait for CM6 editors to mount. */
 export async function openManuscript(page) {
   // Retried like switchTo: a click that lands before hydration has no handler yet.
   await expect(async () => {
     await page.locator('.mode-switch button').nth(1).click();
     await expect(page.locator('.document-workspace')).toHaveAttribute('data-mode', 'manuscript', { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
+  await expect(page.locator('#review-source')).toHaveAttribute('data-editor-surface', 'cm6', { timeout: 15_000 });
+  await expect(page.locator('#review-target')).toHaveAttribute('data-editor-surface', 'cm6', { timeout: 15_000 });
 }
 
 export async function switchTo(page, language) {

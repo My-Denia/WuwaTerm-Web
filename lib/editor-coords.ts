@@ -39,6 +39,35 @@ export function domUtf16ToScalar(rawText: string, domPos: number): ScalarOffset 
   return scalarOffset(Array.from(rawText.slice(0, raw)).length);
 }
 
+export type DomChange = {
+  fromA: number;
+  toA: number;
+  inserted: string;
+};
+
+/**
+ * Apply ascending, disjoint LF-normalized DOM/CodeMirror change ranges back onto
+ * the raw document text so untouched regions keep their exact `\r\n` / `\r` bytes.
+ * Returns null if any offset falls outside the raw text.
+ */
+export function applyDomChangesToRaw(rawText: string, changes: readonly DomChange[]): string | null {
+  if (changes.length === 0) return rawText;
+  let out = '';
+  let rawCursor = 0;
+  for (const change of changes) {
+    const rawFrom = rawOffset(rawText, change.fromA);
+    const rawTo = rawOffset(rawText, change.toA);
+    if (rawFrom === null || rawTo === null || rawFrom < rawCursor || rawTo < rawFrom) {
+      return null;
+    }
+    out += rawText.slice(rawCursor, rawFrom);
+    out += change.inserted;
+    rawCursor = rawTo;
+  }
+  out += rawText.slice(rawCursor);
+  return out;
+}
+
 /** Build a raw-text Span (preserving CRLF bytes) from an LF-normalized UTF-16 range. */
 export function rawSpanFromDomRange(rawText: string, domFrom: number, domTo: number): Span | null {
   if (domFrom === domTo) return null;

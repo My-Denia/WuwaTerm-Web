@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { domUtf16ToScalar, rawSpanFromDomRange, scalarToDomUtf16 } from '../../lib/editor-coords';
 import { highlightSegments } from '../../lib/review-report.js';
 import type { ScalarOffset, Span } from '../../lib/workbench-model';
@@ -13,8 +13,8 @@ import type { Cm6Editor as Cm6EditorComponent, Cm6EditorHandle, Cm6HandoffState 
  * composition events, scroll ratio sync, inline highlights, and read-only Markdown preview).
  *
  * In `quick` mode (`enhanced = false`), this stays a zero-overhead native `<textarea>` with no CodeMirror bundle loaded.
- * In `manuscript` mode (`enhanced = true`), CodeMirror 6 is lazily imported on the client only and inherits focus, selection
- * and scroll position seamlessly.
+ * In `manuscript` mode (`enhanced = true`), CodeMirror 6 is lazily imported on the client only and inherits live focus,
+ * selection direction, and scroll position seamlessly across every switch.
  */
 export type EditorSurfaceHandle = {
   focus(): void;
@@ -44,6 +44,8 @@ export type EditorHighlight = {
   end: ScalarOffset;
   kind: EditorHighlightKind;
   title?: string;
+  /** Optional expected text at `[start, end]` verified against current document text before painting. */
+  expectedText?: string;
 };
 
 type Props = {
@@ -53,6 +55,8 @@ type Props = {
   rows?: number;
   disabled?: boolean;
   describedBy?: string;
+  /** Accessible label element id, used to wire `aria-labelledby` onto CodeMirror 6's `role="textbox"`. */
+  labelledBy?: string;
   /** Enable lazy-loaded CodeMirror 6 surface (manuscript mode); false stays native `<textarea>` (quick mode). */
   enhanced?: boolean;
   /** Inline highlight spans (raw Unicode scalar offsets) rendered in manuscript CM6 mode. */
@@ -126,14 +130,160 @@ function readScrollRatio(element: HTMLElement | null): number | null {
   return Math.min(1, Math.max(0, element.scrollTop / max));
 }
 
+function captureTextareaSnapshot(element: HTMLTextAreaElement, rawText: string): Cm6HandoffState {
+  const backward = element.selectionDirection === 'backward';
+  const anchorDom = backward ? element.selectionEnd : element.selectionStart;
+  const headDom = backward ? element.selectionStart : element.selectionEnd;
+  const sAnchor = domUtf16ToScalar(rawText, anchorDom);
+  const sHead = domUtf16ToScalar(rawText, headDom);
+  return {
+    focused: document.activeElement === element,
+    selection: sAnchor !== null && sHead !== null ? { anchor: sAnchor, head: sHead } : null,
+    scrollRatio: readScrollRatio(element),
+  };
+}
+
+type TextareaPaneProps = {
+  id: string;
+  value: string;
+  placeholder?: string;
+  rows: number;
+  disabled?: boolean;
+  hidden: boolean;
+  describedBy?: string;
+  boxRef: React.RefObject<HTMLTextAreaElement | null>;
+  consumeInitialHandoff: () => Cm6HandoffState | null;
+  onStateSnapshot: (snap: Cm6HandoffState) => void;
+  suppressScrollBriefly: () => void;
+  onScrollEl: (el: HTMLElement) => void;
+  onCursorEl: (el: HTMLTextAreaElement, text: string) => void;
+  onEdit: (value: string, edit: EditorEdit) => void;
+  composingRef: React.RefObject<boolean>;
+  submittedRef: React.RefObject<string>;
+  latestRef: React.RefObject<string>;
+};
+
+/**
+ * Isolated `<textarea>` child so its `useLayoutEffect` cleanup runs right before
+ * `<Cm6Comp>` mounts in the same React commit — capturing live focus, selection
+ * direction, and scroll ratio on every quick -> manuscript transition (1st, 2nd, Nth).
+ */
+function TextareaPane({
+  id,
+  value,
+  placeholder,
+  rows,
+  disabled,
+  hidden,
+  describedBy,
+  boxRef,
+  consumeInitialHandoff,
+  onStateSnapshot,
+  suppressScrollBriefly,
+  onScrollEl,
+  onCursorEl,
+  onEdit,
+  composingRef,
+  submittedRef,
+  latestRef,
+}: TextareaPaneProps) {
+  const consumeRef = useRef(consumeInitialHandoff);
+  const snapshotRef = useRef(onStateSnapshot);
+  const suppressRef = useRef(suppressScrollBriefly);
+  const onEditRef = useRef(onEdit);
+
+  useEffect(() => {
+    consumeRef.current = consumeInitialHandoff;
+    snapshotRef.current = onStateSnapshot;
+    suppressRef.current = suppressScrollBriefly;
+    onEditRef.current = onEdit;
+  });
+
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const handoff = consumeRef.current();
+    if (handoff) {
+      if (handoff.selection) {
+        const anchor = scalarToDomUtf16(latestRef.current, handoff.selection.anchor);
+        const head = scalarToDomUtf16(latestRef.current, handoff.selection.head);
+        if (anchor !== null && head !== null) {
+          const backward = anchor > head;
+          el.setSelectionRange(Math.min(anchor, head), Math.max(anchor, head), backward ? 'backward' : 'forward');
+        }
+      }
+      if (handoff.focused) {
+        el.focus({ preventScroll: true });
+      }
+      if (handoff.scrollRatio !== null) {
+        const ratio = handoff.scrollRatio;
+        requestAnimationFrame(() => {
+          if (boxRef.current !== el) return;
+          const max = el.scrollHeight - el.clientHeight;
+          if (max > 0) {
+            suppressRef.current();
+            el.scrollTop = Math.round(Math.min(1, Math.max(0, ratio)) * max);
+          }
+        });
+      }
+    }
+    return () => {
+      // Flush any trailing textarea DOM value before handing off to CM6, and capture live state.
+      if (el.value !== submittedRef.current) {
+        submittedRef.current = el.value;
+        latestRef.current = el.value;
+        onEditRef.current(el.value, { composing: false });
+      }
+      snapshotRef.current(captureTextareaSnapshot(el, latestRef.current));
+    };
+  }, [boxRef, latestRef, submittedRef]);
+
+  return (
+    <textarea
+      ref={boxRef}
+      id={id}
+      value={value}
+      rows={rows}
+      placeholder={placeholder}
+      disabled={disabled}
+      hidden={hidden}
+      aria-describedby={describedBy}
+      onFocus={event => onStateSnapshot(captureTextareaSnapshot(event.currentTarget, submittedRef.current))}
+      onBlur={event => {
+        const snap = captureTextareaSnapshot(event.currentTarget, submittedRef.current);
+        onStateSnapshot({ ...snap, focused: false });
+      }}
+      onScroll={event => {
+        onStateSnapshot(captureTextareaSnapshot(event.currentTarget, submittedRef.current));
+        onScrollEl(event.currentTarget);
+      }}
+      onClick={event => onCursorEl(event.currentTarget, submittedRef.current)}
+      onKeyUp={event => onCursorEl(event.currentTarget, submittedRef.current)}
+      onSelect={event => onCursorEl(event.currentTarget, submittedRef.current)}
+      onCompositionStart={() => { composingRef.current = true; }}
+      onCompositionEnd={event => {
+        composingRef.current = false;
+        submittedRef.current = event.currentTarget.value;
+        onEdit(event.currentTarget.value, { composing: false });
+        onCursorEl(event.currentTarget, event.currentTarget.value);
+      }}
+      onChange={event => {
+        const open = composingRef.current || (event.nativeEvent as InputEvent).isComposing === true;
+        submittedRef.current = event.target.value;
+        onEdit(event.target.value, { composing: open });
+        onCursorEl(event.target, event.target.value);
+      }}
+    />
+  );
+}
+
 export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(function EditorSurfaceAdapter(props, ref) {
   const box = useRef<HTMLTextAreaElement>(null);
   const cm6Ref = useRef<Cm6EditorHandle>(null);
   const previewBox = useRef<HTMLDivElement>(null);
   const [Cm6Comp, setCm6Comp] = useState<typeof Cm6EditorComponent | null>(() => (props.enhanced ? cachedCm6 : null));
-  const [pendingHandoff, setPendingHandoff] = useState<Cm6HandoffState | null>(null);
-  const lastTrackedState = useRef<Cm6HandoffState>({ focused: false, selection: null, scrollRatio: null });
-  const prevUseCm6 = useRef(false);
+  const pendingHandoffRef = useRef<Cm6HandoffState | null>(null);
+  const hasMountedOnce = useRef(false);
 
   const composing = useRef(false);
   const suppressScroll = useRef(false);
@@ -147,6 +297,7 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
   const useCm6Ref = useRef(useCm6);
 
   useEffect(() => {
+    hasMountedOnce.current = true;
     previewRef.current = !!props.preview;
     latest.current = props.value;
     submitted.current = props.value;
@@ -162,73 +313,31 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
     let active = true;
     void loadCm6Client().then(loaded => {
       if (!active || !loaded) return;
-      const el = box.current;
-      if (el) {
-        const sFrom = domUtf16ToScalar(latest.current, el.selectionStart);
-        const sTo = domUtf16ToScalar(latest.current, el.selectionEnd);
-        const snapshot: Cm6HandoffState = {
-          focused: document.activeElement === el,
-          selection: sFrom !== null && sTo !== null ? { from: sFrom, to: sTo } : null,
-          scrollRatio: readScrollRatio(el),
-        };
-        lastTrackedState.current = snapshot;
-        setPendingHandoff(snapshot);
-      } else {
-        setPendingHandoff({ ...lastTrackedState.current });
-      }
       setCm6Comp(() => loaded);
     });
     return () => { active = false; };
   }, [props.enhanced, Cm6Comp]);
 
-  // Restore focus/selection/scroll when switching between textarea <-> CM6.
-  useEffect(() => {
-    const wasCm6 = prevUseCm6.current;
-    prevUseCm6.current = useCm6;
-    if (wasCm6 && !useCm6) {
-      const el = box.current;
-      const handoff = lastTrackedState.current;
-      if (!el) return;
-      if (handoff.selection) {
-        const from = scalarToDomUtf16(latest.current, handoff.selection.from);
-        const to = scalarToDomUtf16(latest.current, handoff.selection.to);
-        if (from !== null && to !== null) {
-          el.setSelectionRange(from, to);
-        }
-      }
-      if (handoff.focused) el.focus({ preventScroll: true });
-      if (handoff.scrollRatio !== null) {
-        const ratio = handoff.scrollRatio;
-        requestAnimationFrame(() => {
-          const max = el.scrollHeight - el.clientHeight;
-          if (max > 0) {
-            suppressScrollBriefly();
-            el.scrollTop = Math.round(Math.min(1, Math.max(0, ratio)) * max);
-          }
-        });
-      }
-    }
-  }, [useCm6]);
+  const handleStateSnapshot = useCallback((snap: Cm6HandoffState) => {
+    pendingHandoffRef.current = snap;
+  }, []);
 
-  const recordTextareaState = (element: HTMLTextAreaElement, text: string) => {
-    const sFrom = domUtf16ToScalar(text, element.selectionStart);
-    const sTo = domUtf16ToScalar(text, element.selectionEnd);
-    lastTrackedState.current = {
-      focused: document.activeElement === element,
-      selection: sFrom !== null && sTo !== null ? { from: sFrom, to: sTo } : null,
-      scrollRatio: readScrollRatio(element),
-    };
-  };
+  const consumeInitialHandoff = useCallback((): Cm6HandoffState | null => {
+    if (!hasMountedOnce.current) return null;
+    const snap = pendingHandoffRef.current;
+    pendingHandoffRef.current = null;
+    return snap;
+  }, []);
 
-  const reportCursor = (element: HTMLTextAreaElement, text: string) => {
-    recordTextareaState(element, text);
+  const reportCursor = useCallback((element: HTMLTextAreaElement, text: string) => {
+    pendingHandoffRef.current = captureTextareaSnapshot(element, text);
     const callback = onCursorChangeRef.current;
     if (!callback) return;
     const scalar = domUtf16ToScalar(text, element.selectionStart);
     if (scalar !== null) callback(scalar);
-  };
+  }, []);
 
-  const suppressScrollBriefly = () => {
+  const suppressScrollBriefly = useCallback(() => {
     suppressScroll.current = true;
     if (suppressRaf.current !== null) cancelAnimationFrame(suppressRaf.current);
     suppressRaf.current = requestAnimationFrame(() => {
@@ -237,7 +346,7 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
         suppressRaf.current = null;
       });
     });
-  };
+  }, []);
 
   useEffect(() => () => {
     if (suppressRaf.current !== null) cancelAnimationFrame(suppressRaf.current);
@@ -310,16 +419,15 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
       suppressScrollBriefly();
       element.scrollTop = nextTop;
     },
-  }), []);
+  }), [suppressScrollBriefly]);
 
-  const handleScroll = (element: HTMLElement) => {
+  const handleScroll = useCallback((element: HTMLElement) => {
     if (suppressScroll.current || composing.current) return;
     const ratio = readScrollRatio(element);
     if (ratio !== null) {
-      lastTrackedState.current.scrollRatio = ratio;
       onScrollRatioRef.current?.(ratio);
     }
-  };
+  }, []);
 
   return <>
     {useCm6 && Cm6Comp ? (
@@ -330,23 +438,15 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
         placeholder={props.placeholder}
         disabled={props.disabled}
         describedBy={props.describedBy}
+        labelledBy={props.labelledBy}
         hidden={!!props.preview}
         highlights={props.highlights}
-        initialHandoff={pendingHandoff}
-        onHandoffConsumed={() => setPendingHandoff(null)}
+        consumeInitialHandoff={consumeInitialHandoff}
+        onStateSnapshot={handleStateSnapshot}
         onScrollRatio={ratio => {
-          lastTrackedState.current.scrollRatio = ratio;
           onScrollRatioRef.current?.(ratio);
         }}
         onCursorChange={offset => {
-          const cm = cm6Ref.current;
-          if (cm) {
-            lastTrackedState.current = {
-              focused: cm.isFocused(),
-              selection: cm.caretOrSelection(),
-              scrollRatio: cm.scrollRatio(),
-            };
-          }
           onCursorChangeRef.current?.(offset);
         }}
         onEdit={props.onEdit}
@@ -354,37 +454,24 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
         onRedo={props.onRedo}
       />
     ) : (
-      <textarea
-        ref={box}
+      <TextareaPane
         id={props.id}
         value={props.value}
         rows={props.rows ?? 5}
         placeholder={props.placeholder}
         disabled={props.disabled}
         hidden={!!props.preview}
-        aria-describedby={props.describedBy}
-        onFocus={event => recordTextareaState(event.currentTarget, submitted.current)}
-        onBlur={event => {
-          recordTextareaState(event.currentTarget, submitted.current);
-          lastTrackedState.current.focused = false;
-        }}
-        onScroll={event => handleScroll(event.currentTarget)}
-        onClick={event => reportCursor(event.currentTarget, submitted.current)}
-        onKeyUp={event => reportCursor(event.currentTarget, submitted.current)}
-        onSelect={event => reportCursor(event.currentTarget, submitted.current)}
-        onCompositionStart={() => { composing.current = true; }}
-        onCompositionEnd={event => {
-          composing.current = false;
-          submitted.current = event.currentTarget.value;
-          props.onEdit(event.currentTarget.value, { composing: false });
-          reportCursor(event.currentTarget, event.currentTarget.value);
-        }}
-        onChange={event => {
-          const open = composing.current || (event.nativeEvent as InputEvent).isComposing === true;
-          submitted.current = event.target.value;
-          props.onEdit(event.target.value, { composing: open });
-          reportCursor(event.target, event.target.value);
-        }}
+        describedBy={props.describedBy}
+        boxRef={box}
+        consumeInitialHandoff={consumeInitialHandoff}
+        onStateSnapshot={handleStateSnapshot}
+        suppressScrollBriefly={suppressScrollBriefly}
+        onScrollEl={handleScroll}
+        onCursorEl={reportCursor}
+        onEdit={props.onEdit}
+        composingRef={composing}
+        submittedRef={submitted}
+        latestRef={latest}
       />
     )}
     {props.preview && (

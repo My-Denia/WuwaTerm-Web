@@ -2,9 +2,10 @@
 
 // Lazy-loaded CodeMirror 6 editor for manuscript mode.
 // Keeps quick mode free of CM6 bundle weight, preserves raw Unicode scalar
-// coordinates & CRLF semantics, renders inline highlight decorations, and
-// uses native EditorSelection + EditorView.scrollIntoView (zero mirror DOM).
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+// coordinates & CRLF bytes on untouched regions, keeps cross-line IME replacements
+// as one undo step, renders verified inline highlight decorations, and uses native
+// EditorSelection + EditorView.scrollIntoView (zero mirror DOM).
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react';
 import {
   Annotation,
   Compartment,
@@ -25,10 +26,12 @@ import {
 } from '@codemirror/view';
 import { defaultKeymap } from '@codemirror/commands';
 import {
+  applyDomChangesToRaw,
   domUtf16ToScalar,
   normalizeLineBreaks,
   rawSpanFromDomRange,
   scalarToDomUtf16,
+  type DomChange,
 } from '../../lib/editor-coords';
 import { highlightSegments } from '../../lib/review-report.js';
 import type { ScalarOffset, Span } from '../../lib/workbench-model';
@@ -36,7 +39,7 @@ import type { EditorEdit, EditorHighlight, EditorSurfaceHandle } from './editor-
 
 export type Cm6HandoffState = {
   focused: boolean;
-  selection: { from: ScalarOffset; to: ScalarOffset } | null;
+  selection: { anchor: ScalarOffset; head: ScalarOffset } | null;
   scrollRatio: number | null;
 };
 
@@ -46,10 +49,13 @@ export type Cm6EditorProps = {
   placeholder?: string;
   disabled?: boolean;
   describedBy?: string;
+  labelledBy?: string;
   hidden?: boolean;
   highlights?: readonly EditorHighlight[];
-  initialHandoff?: Cm6HandoffState | null;
-  onHandoffConsumed?: () => void;
+  /** Reads the latest handoff snapshot captured from the outgoing textarea immediately before CM6 mounts. */
+  consumeInitialHandoff?: () => Cm6HandoffState | null;
+  /** Called on focus/blur and right before CM6 unmounts so returning to textarea preserves live focus/selection/scroll. */
+  onStateSnapshot?: (snapshot: Cm6HandoffState) => void;
   onScrollRatio?: (ratio: number) => void;
   onCursorChange?: (offset: ScalarOffset) => void;
   onEdit(value: string, edit: EditorEdit): void;
@@ -79,6 +85,10 @@ function buildDecorations(rawText: string, docLength: number, highlights?: reado
   const ranges: Range<Decoration>[] = [];
   for (const item of highlights) {
     if (item.start >= item.end) continue;
+    if (item.expectedText !== undefined) {
+      const verified = highlightSegments(rawText, { start: item.start, end: item.end, text: item.expectedText });
+      if (!verified) continue;
+    }
     const from = scalarToDomUtf16(rawText, item.start);
     const to = scalarToDomUtf16(rawText, item.end);
     if (from === null || to === null) continue;
@@ -101,6 +111,16 @@ function readScrollRatio(element: HTMLElement | null): number | null {
   const max = element.scrollHeight - element.clientHeight;
   if (max <= 0) return null;
   return Math.min(1, Math.max(0, element.scrollTop / max));
+}
+
+function buildContentAttrs(props: Pick<Cm6EditorProps, 'id' | 'describedBy' | 'labelledBy'>): Record<string, string> {
+  return {
+    id: props.id,
+    'aria-multiline': 'true',
+    'data-editor-surface': 'cm6',
+    ...(props.labelledBy ? { 'aria-labelledby': props.labelledBy } : {}),
+    ...(props.describedBy ? { 'aria-describedby': props.describedBy } : {}),
+  };
 }
 
 const editorTheme = EditorView.theme({
@@ -150,8 +170,7 @@ const editorTheme = EditorView.theme({
 });
 
 export type Cm6EditorHandle = EditorSurfaceHandle & {
-  caretOrSelection(): { from: ScalarOffset; to: ScalarOffset } | null;
-  isFocused(): boolean;
+  snapshotState(): Cm6HandoffState | null;
 };
 
 export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm6Editor(props, ref) {
@@ -176,13 +195,27 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
   onUndoRef.current = props.onUndo;
   const onRedoRef = useRef(props.onRedo);
   onRedoRef.current = props.onRedo;
-  const initialHandoffRef = useRef(props.initialHandoff);
-  const onHandoffConsumedRef = useRef(props.onHandoffConsumed);
-  onHandoffConsumedRef.current = props.onHandoffConsumed;
+  const consumeInitialHandoffRef = useRef(props.consumeInitialHandoff);
+  consumeInitialHandoffRef.current = props.consumeInitialHandoff;
+  const onStateSnapshotRef = useRef(props.onStateSnapshot);
+  onStateSnapshotRef.current = props.onStateSnapshot;
 
   const composingRef = useRef(false);
+  const pendingCompositionEndRef = useRef(false);
   const suppressScroll = useRef(false);
   const suppressRaf = useRef<number | null>(null);
+
+  const captureViewSnapshot = (view: EditorView | null): Cm6HandoffState | null => {
+    if (!view) return null;
+    const { anchor, head } = view.state.selection.main;
+    const sAnchor = domUtf16ToScalar(latestRaw.current, anchor);
+    const sHead = domUtf16ToScalar(latestRaw.current, head);
+    return {
+      focused: view.hasFocus || document.activeElement === view.contentDOM,
+      selection: sAnchor !== null && sHead !== null ? { anchor: sAnchor, head: sHead } : null,
+      scrollRatio: readScrollRatio(view.scrollDOM),
+    };
+  };
 
   const suppressScrollBriefly = () => {
     suppressScroll.current = true;
@@ -195,17 +228,14 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     });
   };
 
-  useEffect(() => {
+  // Use useLayoutEffect so mount/unmount snapshot handoff executes synchronously
+  // in the exact DOM commit phase with outgoing/incoming <textarea>.
+  useLayoutEffect(() => {
     const parent = containerRef.current;
     if (!parent) return;
 
     const initialDoc = normalizeLineBreaks(latestRaw.current);
-    const contentAttrs: Record<string, string> = {
-      id: props.id,
-      'aria-multiline': 'true',
-      'data-editor-surface': 'cm6',
-      ...(props.describedBy ? { 'aria-describedby': props.describedBy } : {}),
-    };
+    const contentAttrs = buildContentAttrs(props);
 
     const workbenchKeymap = keymap.of([
       {
@@ -235,6 +265,21 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
       ...defaultKeymap,
     ]);
 
+    const finalizeComposition = (view: EditorView) => {
+      composingRef.current = false;
+      pendingCompositionEndRef.current = false;
+      const docStr = view.state.doc.toString();
+      if (normalizeLineBreaks(latestRaw.current) !== docStr) {
+        latestRaw.current = docStr;
+      }
+      onEditRef.current(latestRaw.current, { composing: false });
+      const cb = onCursorChangeRef.current;
+      if (cb) {
+        const scalar = domUtf16ToScalar(latestRaw.current, view.state.selection.main.from);
+        if (scalar !== null) cb(scalar);
+      }
+    };
+
     const state = EditorState.create({
       doc: initialDoc,
       extensions: [
@@ -249,38 +294,37 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
         placeholderComp.current.of(cmPlaceholder(props.placeholder ?? '')),
         contentAttrsComp.current.of(EditorView.contentAttributes.of(contentAttrs)),
         EditorView.updateListener.of(update => {
-          if (update.docChanged) {
-            const isExternal = update.transactions.some(tr => tr.annotation(externalSync));
-            if (!isExternal) {
-              const nextVal = update.state.doc.toString();
-              const isComposing = composingRef.current || update.view.composing;
-              latestRaw.current = nextVal;
-              onEditRef.current(nextVal, { composing: isComposing });
+          const isExternal = update.transactions.some(tr => tr.annotation(externalSync));
+          const isComposeEvent = update.transactions.some(tr => tr.isUserEvent('input.type.compose'));
+          if (isComposeEvent) composingRef.current = true;
+
+          if (update.docChanged && !isExternal) {
+            const edits: DomChange[] = [];
+            update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+              edits.push({ fromA, toA, inserted: inserted.toString() });
+            });
+            const nextRaw = applyDomChangesToRaw(latestRaw.current, edits) ?? update.state.doc.toString();
+            latestRaw.current = nextRaw;
+
+            if (pendingCompositionEndRef.current && !update.view.composing) {
+              composingRef.current = false;
+              pendingCompositionEndRef.current = false;
+              onEditRef.current(nextRaw, { composing: false });
+            } else {
+              const isComposing = composingRef.current || update.view.composing || isComposeEvent;
+              onEditRef.current(nextRaw, { composing: isComposing });
             }
           }
-          if (update.selectionSet || update.docChanged) {
+
+          if (!isExternal && (update.selectionSet || update.docChanged)) {
+            const snap = captureViewSnapshot(update.view);
+            if (snap) onStateSnapshotRef.current?.(snap);
             const cb = onCursorChangeRef.current;
             if (cb) {
               const scalar = domUtf16ToScalar(latestRaw.current, update.state.selection.main.from);
               if (scalar !== null) cb(scalar);
             }
           }
-        }),
-        EditorView.domEventHandlers({
-          compositionstart: () => {
-            composingRef.current = true;
-          },
-          compositionend: (_event, view) => {
-            composingRef.current = false;
-            const committed = view.state.doc.toString();
-            latestRaw.current = committed;
-            onEditRef.current(committed, { composing: false });
-            const cb = onCursorChangeRef.current;
-            if (cb) {
-              const scalar = domUtf16ToScalar(latestRaw.current, view.state.selection.main.from);
-              if (scalar !== null) cb(scalar);
-            }
-          },
         }),
       ],
     });
@@ -289,31 +333,71 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     viewRef.current = view;
     Object.defineProperty(view.contentDOM, '__cm6View', { value: view, configurable: true });
 
-    const initialDecos = buildDecorations(latestRaw.current, view.state.doc.length, latestHighlights.current);
-    if (initialDecos !== Decoration.none) {
-      view.dispatch({ effects: setHighlightsEffect.of(initialDecos) });
-    }
-
+    // Capture-phase compositionstart & beforeinput fire BEFORE CM6's bubble-phase
+    // DOMObserver deletes a cross-line selection, keeping the entire IME replacement
+    // inside a single controller composition transaction (one undo step).
+    const onBeforeInputCapture = (event: InputEvent) => {
+      if (event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'deleteCompositionText') {
+        composingRef.current = true;
+        pendingCompositionEndRef.current = false;
+      }
+    };
+    const onCompositionStartCapture = () => {
+      composingRef.current = true;
+      pendingCompositionEndRef.current = false;
+    };
+    // Bubble-phase listener registered AFTER `new EditorView` runs after CM6's own
+    // compositionend handler so `view.state.doc` already reflects the final commit.
+    const onCompositionEndBubble = () => {
+      if (!composingRef.current) return;
+      if (view.composing) {
+        pendingCompositionEndRef.current = true;
+        queueMicrotask(() => {
+          if (pendingCompositionEndRef.current && viewRef.current === view) {
+            finalizeComposition(view);
+          }
+        });
+        return;
+      }
+      finalizeComposition(view);
+    };
+    const onFocusOrBlur = () => {
+      const snap = captureViewSnapshot(view);
+      if (snap) onStateSnapshotRef.current?.(snap);
+    };
     const onScroll = () => {
       if (suppressScroll.current || composingRef.current || view.composing) return;
       const ratio = readScrollRatio(view.scrollDOM);
-      if (ratio !== null) onScrollRatioRef.current?.(ratio);
+      if (ratio !== null) {
+        const snap = captureViewSnapshot(view);
+        if (snap) onStateSnapshotRef.current?.(snap);
+        onScrollRatioRef.current?.(ratio);
+      }
     };
+
+    view.contentDOM.addEventListener('beforeinput', onBeforeInputCapture, true);
+    view.contentDOM.addEventListener('compositionstart', onCompositionStartCapture, true);
+    view.contentDOM.addEventListener('compositionend', onCompositionEndBubble, false);
+    view.contentDOM.addEventListener('focus', onFocusOrBlur);
+    view.contentDOM.addEventListener('blur', onFocusOrBlur);
     view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
 
-    const handoff = initialHandoffRef.current;
+    const initialDecos = buildDecorations(latestRaw.current, view.state.doc.length, latestHighlights.current);
+    if (initialDecos !== Decoration.none) {
+      view.dispatch({ effects: setHighlightsEffect.of(initialDecos), annotations: externalSync.of(true) });
+    }
+
+    const handoff = consumeInitialHandoffRef.current?.() ?? null;
     if (handoff) {
-      initialHandoffRef.current = null;
-      onHandoffConsumedRef.current?.();
       if (handoff.selection) {
-        const from = scalarToDomUtf16(latestRaw.current, handoff.selection.from);
-        const to = scalarToDomUtf16(latestRaw.current, handoff.selection.to);
-        if (from !== null && to !== null) {
+        const anchor = scalarToDomUtf16(latestRaw.current, handoff.selection.anchor);
+        const head = scalarToDomUtf16(latestRaw.current, handoff.selection.head);
+        if (anchor !== null && head !== null) {
           const docLen = view.state.doc.length;
           view.dispatch({
             selection: EditorSelection.range(
-              Math.max(0, Math.min(docLen, from)),
-              Math.max(0, Math.min(docLen, to)),
+              Math.max(0, Math.min(docLen, anchor)),
+              Math.max(0, Math.min(docLen, head)),
             ),
             annotations: externalSync.of(true),
           });
@@ -325,6 +409,7 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
       if (handoff.scrollRatio !== null) {
         const targetRatio = handoff.scrollRatio;
         requestAnimationFrame(() => {
+          if (viewRef.current !== view) return;
           const scroller = view.scrollDOM;
           const max = scroller.scrollHeight - scroller.clientHeight;
           if (max > 0) {
@@ -336,8 +421,15 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     }
 
     return () => {
-      delete (view.contentDOM as unknown as { __cm6View?: unknown }).__cm6View;
+      const exitSnap = captureViewSnapshot(view);
+      if (exitSnap) onStateSnapshotRef.current?.(exitSnap);
+      view.contentDOM.removeEventListener('beforeinput', onBeforeInputCapture, true);
+      view.contentDOM.removeEventListener('compositionstart', onCompositionStartCapture, true);
+      view.contentDOM.removeEventListener('compositionend', onCompositionEndBubble, false);
+      view.contentDOM.removeEventListener('focus', onFocusOrBlur);
+      view.contentDOM.removeEventListener('blur', onFocusOrBlur);
       view.scrollDOM.removeEventListener('scroll', onScroll);
+      delete (view.contentDOM as unknown as { __cm6View?: unknown }).__cm6View;
       if (suppressRaf.current !== null) {
         cancelAnimationFrame(suppressRaf.current);
         suppressRaf.current = null;
@@ -349,7 +441,7 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.id]);
 
-  // Sync external value changes (undo, redo, import, translation) without clobbering CRLF bytes or caret.
+  // Sync external value changes (undo, redo, import, translation, TM apply) without clobbering CRLF bytes or emitting cursor jumps.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
@@ -366,51 +458,38 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     });
   }, [props.value]);
 
-  // Sync inline highlights.
+  // Sync verified inline highlights.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     const decos = buildDecorations(props.value, view.state.doc.length, props.highlights);
-    view.dispatch({ effects: setHighlightsEffect.of(decos) });
+    view.dispatch({ effects: setHighlightsEffect.of(decos), annotations: externalSync.of(true) });
   }, [props.value, props.highlights]);
 
-  // Sync disabled / placeholder / aria-describedby compartments.
+  // Sync disabled / placeholder / aria-describedby / aria-labelledby compartments.
+  const { disabled, placeholder, describedBy, labelledBy, id } = props;
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     view.dispatch({
       effects: [
-        editableComp.current.reconfigure(EditorView.editable.of(!props.disabled)),
-        readOnlyComp.current.reconfigure(EditorState.readOnly.of(!!props.disabled)),
-        placeholderComp.current.reconfigure(cmPlaceholder(props.placeholder ?? '')),
+        editableComp.current.reconfigure(EditorView.editable.of(!disabled)),
+        readOnlyComp.current.reconfigure(EditorState.readOnly.of(!!disabled)),
+        placeholderComp.current.reconfigure(cmPlaceholder(placeholder ?? '')),
         contentAttrsComp.current.reconfigure(
-          EditorView.contentAttributes.of({
-            id: props.id,
-            'aria-multiline': 'true',
-            'data-editor-surface': 'cm6',
-            ...(props.describedBy ? { 'aria-describedby': props.describedBy } : {}),
-          }),
+          EditorView.contentAttributes.of(buildContentAttrs({ id, describedBy, labelledBy })),
         ),
       ],
+      annotations: externalSync.of(true),
     });
-  }, [props.disabled, props.placeholder, props.describedBy, props.id]);
+  }, [disabled, placeholder, describedBy, labelledBy, id]);
 
   useImperativeHandle(ref, () => ({
     focus() {
       viewRef.current?.contentDOM.focus();
     },
-    isFocused() {
-      const view = viewRef.current;
-      return !!view && (view.hasFocus || document.activeElement === view.contentDOM);
-    },
-    caretOrSelection() {
-      const view = viewRef.current;
-      if (!view) return null;
-      const { from, to } = view.state.selection.main;
-      const sFrom = domUtf16ToScalar(latestRaw.current, from);
-      const sTo = domUtf16ToScalar(latestRaw.current, to);
-      if (sFrom === null || sTo === null) return null;
-      return { from: sFrom, to: sTo };
+    snapshotState() {
+      return captureViewSnapshot(viewRef.current);
     },
     reveal(span: Span) {
       const view = viewRef.current;

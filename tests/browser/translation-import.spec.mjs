@@ -165,7 +165,6 @@ test('a late file read neither cancels a newer translation nor paints its stale 
 
 test('normal import, strict UTF-8 and the real 1 MiB file limit still hold', async ({ page }) => {
   await open(page);
-  const source = page.locator('#review-source');
   const fileInput = page.getByLabel('选择稿件文件');
 
   // A 2,005-character file imports: that is the one-request translation limit, not the 1 MiB file limit. The document is

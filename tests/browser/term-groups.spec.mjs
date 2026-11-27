@@ -17,7 +17,6 @@ const groupOf = (page, surface) => page.locator(`.term-group[data-group-surface=
 const filterButton = (page, id) => page.locator(`[data-group-filter="${id}"]`);
 const summary = page => page.locator('.group-filter-summary');
 const places = group => group.locator('article.long-term');
-const target = page => page.locator('#review-target');
 const open = (page, options = {}) => openWorkbench(page, { capabilities: [], reviewReport: termGroupReport, ...options });
 
 async function load(page, manuscript, ready) {

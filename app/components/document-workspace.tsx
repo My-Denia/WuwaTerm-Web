@@ -41,11 +41,11 @@ import { createCanonicalComputer, type CanonicalComputer } from '../../lib/canon
 import {
   createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
-import { scalarOffset, type Candidate, type Choice, type Draft, type Finding, type PairView, type PendingWorkfile, type Snapshot, type Span } from '../../lib/workbench-model';
+import { scalarOffset, type Candidate, type Choice, type Draft, type Finding, type PairView, type PendingWorkfile, type SemanticState, type SessionBasis, type Snapshot, type Span } from '../../lib/workbench-model';
 import { EditorSurfaceAdapter, type EditorEdit, type EditorHighlight, type EditorSurfaceHandle } from './editor-surface';
 import { MyMemory, type TmDictionaryStatusView, type TmPersistenceAdapter } from './my-memory';
-import { MyTerms, type TermbaseDraftSeed, type TermbaseExternalFeedback } from './my-terms';
-import { QuickTermLookup, type QuickTermLookupPersisted } from './quick-term-lookup';
+import { INITIAL_MY_TERMS_PERSISTED, MyTerms, type MyTermsPersisted, type TermbaseDraftSeed, type TermbaseExternalFeedback } from './my-terms';
+import { QuickTermLookup, type QuickTermLookupPersisted, type QuickTermLookupRequestManager } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
 import { RuntimeStatus } from './runtime-status';
 import { useUiLanguage } from './ui-language-context';
@@ -147,6 +147,24 @@ export function DocumentWorkspace() {
   const [inspectorTab, setInspectorTab] = useState<'review' | 'terms' | 'memory'>('review');
   const [activeSemanticId, setActiveSemanticId] = useState<string | null>(null);
   const [lookupPersisted, setLookupPersisted] = useState<QuickTermLookupPersisted>({ query: '', terms: { kind: 'idle' }, seeded: false });
+  const lookupControllerRef = useRef<AbortController | null>(null);
+  const lookupRequestManager = useMemo<QuickTermLookupRequestManager>(() => ({
+    set(next) {
+      lookupControllerRef.current?.abort();
+      lookupControllerRef.current = next;
+    },
+    isCurrent(controller) {
+      return lookupControllerRef.current === controller;
+    },
+    clearIfCurrent(controller) {
+      if (lookupControllerRef.current === controller) lookupControllerRef.current = null;
+    },
+  }), []);
+  const [myTermsPersisted, setMyTermsPersisted] = useState<MyTermsPersisted>(INITIAL_MY_TERMS_PERSISTED);
+  useEffect(() => () => {
+    lookupControllerRef.current?.abort();
+    lookupControllerRef.current = null;
+  }, []);
   const syncSuspended = useRef(false);
   const syncSuspendRaf = useRef<number | null>(null);
   const [termbaseEntries, setTermbaseEntries] = useState<TermbaseEntry[]>([]);
@@ -335,10 +353,22 @@ export function DocumentWorkspace() {
   const canonicalGenRef = useRef(0);
   const canonicalPendingRef = useRef(false);
   const prevSavedMarkersRef = useRef({ importedCanonical, downloadedCanonical, resetSignal: snapshot.resetSignal });
-  const [canonicalState, setCanonicalState] = useState<{ value: string | null; pending: boolean; computed: boolean }>({
+  const [canonicalState, setCanonicalState] = useState<{
+    value: string | null;
+    computed: boolean;
+    forDraft: Draft | null;
+    forChoices: Choice[] | null;
+    forReports: Snapshot[] | null;
+    forSemantic: SemanticState | null;
+    forBasis: SessionBasis | null;
+  }>({
     value: null,
-    pending: false,
     computed: false,
+    forDraft: null,
+    forChoices: null,
+    forReports: null,
+    forSemantic: null,
+    forBasis: null,
   });
 
   useEffect(() => {
@@ -353,13 +383,22 @@ export function DocumentWorkspace() {
   const holdsWork = workPresent(draft, choices, reports, semantic);
 
   // Offload expensive canonicalOf() serialization/validation to a debounced Web Worker
-  // so typing in large manuscripts never stalls the main thread.
+  // (small drafts stay on a microtask with zero Worker network overhead) and bind
+  // each result strictly to its exact manuscript snapshot.
   useEffect(() => {
     if (!holdsWork) {
       canonicalGenRef.current += 1;
       canonicalPendingRef.current = false;
       const timer = setTimeout(() => {
-        setCanonicalState(prev => (prev.value === null && !prev.pending && !prev.computed ? prev : { value: null, pending: false, computed: false }));
+        setCanonicalState(prev => (!prev.computed && prev.value === null ? prev : {
+          value: null,
+          computed: false,
+          forDraft: null,
+          forChoices: null,
+          forReports: null,
+          forSemantic: null,
+          forBasis: null,
+        }));
       }, 0);
       return () => clearTimeout(timer);
     }
@@ -371,21 +410,36 @@ export function DocumentWorkspace() {
       || prevSavedMarkersRef.current.resetSignal !== snapshot.resetSignal;
     prevSavedMarkersRef.current = { importedCanonical, downloadedCanonical, resetSignal: snapshot.resetSignal };
     const delayMs = markersChanged ? 0 : 120;
+    const inputSnap = { draft, choices, reports, semantic, basis };
     const timer = setTimeout(() => {
       const computer = canonicalComputerRef.current ?? createCanonicalComputer({ disableWorker: true });
-      void computer.compute({ draft, choices, reports, semantic, basis }).then(result => {
+      void computer.compute(inputSnap).then(result => {
         if (canonicalGenRef.current !== gen) return;
         canonicalPendingRef.current = false;
-        setCanonicalState({ value: result, pending: false, computed: true });
+        setCanonicalState({
+          value: result,
+          computed: true,
+          forDraft: inputSnap.draft,
+          forChoices: inputSnap.choices,
+          forReports: inputSnap.reports,
+          forSemantic: inputSnap.semantic,
+          forBasis: inputSnap.basis,
+        });
       });
     }, delayMs);
     return () => clearTimeout(timer);
   }, [holdsWork, draft, choices, reports, semantic, basis, importedCanonical, downloadedCanonical, snapshot.resetSignal]);
 
-  const canonical = canonicalState.value;
+  const canonicalMatchesCurrent = canonicalState.computed
+    && canonicalState.forDraft === draft
+    && canonicalState.forChoices === choices
+    && canonicalState.forReports === reports
+    && canonicalState.forSemantic === semantic
+    && canonicalState.forBasis === basis;
+  const canonical = canonicalMatchesCurrent ? canonicalState.value : null;
   const saveView = !holdsWork
     ? 'empty'
-    : !canonicalState.computed
+    : !canonicalMatchesCurrent
       ? (importedCanonical !== null || downloadedCanonical !== null ? 'diverged' : 'page-only')
       : manuscriptSaveView({ holdsWork, canonical, importedCanonical, downloadedCanonical });
   const semanticRunActive = isRunActive(run, pairTranslating);
@@ -395,7 +449,7 @@ export function DocumentWorkspace() {
   useEffect(() => {
     liveLeaveGuardRef.current = () => {
       if (!holdsWork) return checkInFlight;
-      const latestCanonical = canonicalPendingRef.current || !canonicalState.computed
+      const latestCanonical = !canonicalMatchesCurrent || canonicalPendingRef.current
         ? (canonicalComputerRef.current ?? createCanonicalComputer({ disableWorker: true })).computeSync({ draft, choices, reports, semantic, basis })
         : canonicalState.value;
       const liveView = manuscriptSaveView({ holdsWork, canonical: latestCanonical, importedCanonical, downloadedCanonical });
@@ -862,42 +916,68 @@ export function DocumentWorkspace() {
   // Over 2,000 characters the whole-text check and translation are disabled; the segment panel's run buttons are the main action.
   const longInput = sourceLength > 2000 || targetLength > 2000;
 
-  // Inline CodeMirror 6 highlight ranges (deferred so typing stays 60fps on long manuscripts).
-  const deferredJudged = useDeferredValue(judged);
-  const deferredLayer1 = useDeferredValue(layer1);
-  const deferredPlaced = useDeferredValue(semantic.placed);
-  const deferredLongRecords = useDeferredValue(semantic.long);
+  // Inline CodeMirror 6 highlight ranges built from one atomic deferred snapshot and
+  // verified against the current text so stale ranges never land on edited characters.
+  const highlightInput = useMemo(() => ({
+    source,
+    target,
+    draft,
+    basis,
+    reviewFeatures,
+    judged,
+    latest,
+    longDocument,
+    long: semantic.long,
+    layer1,
+    placed: semantic.placed,
+    activeSemanticId,
+  }), [source, target, draft, basis, reviewFeatures, judged, latest, longDocument, semantic.long, layer1, semantic.placed, activeSemanticId]);
+  const deferredHighlightInput = useDeferredValue(highlightInput);
   const { sourceHighlights, targetHighlights } = useMemo(() => {
     if (quick) return { sourceHighlights: [] as EditorHighlight[], targetHighlights: [] as EditorHighlight[] };
+    const snap = deferredHighlightInput;
+    // Never paint deferred highlights computed for a previous text onto freshly edited text.
+    if (snap.source !== source || snap.target !== target) {
+      return { sourceHighlights: [] as EditorHighlight[], targetHighlights: [] as EditorHighlight[] };
+    }
     const CAP = 400;
     const src: EditorHighlight[] = [];
     const tgt: EditorHighlight[] = [];
-    const pushSrc = (h: EditorHighlight) => { if (src.length < CAP) src.push(h); };
-    const pushTgt = (h: EditorHighlight) => { if (tgt.length < CAP) tgt.push(h); };
+    const pushSrc = (h: EditorHighlight) => {
+      if (src.length >= CAP) return;
+      if (h.expectedText !== undefined && !highlightSegments(snap.source, { start: h.start, end: h.end, text: h.expectedText })) return;
+      src.push(h);
+    };
+    const pushTgt = (h: EditorHighlight) => {
+      if (tgt.length >= CAP) return;
+      if (h.expectedText !== undefined && !highlightSegments(snap.target, { start: h.start, end: h.end, text: h.expectedText })) return;
+      tgt.push(h);
+    };
 
-    if (deferredJudged && latest && latest.source === source) {
-      const targetOk = latest.target === target;
-      for (const f of deferredJudged.report.findings) {
+    if (snap.judged && snap.latest && snap.latest.source === snap.source) {
+      const targetOk = snap.latest.target === snap.target;
+      for (const f of snap.judged.report.findings) {
         const kind = f.verdict === 'confirmed_conflict' ? 'term-conflict'
           : f.verdict === 'verified_constraint' ? 'term-verified' : 'term-review';
-        pushSrc({ start: f.source_span.start, end: f.source_span.end, kind, title: f.source_span.text });
+        pushSrc({ start: f.source_span.start, end: f.source_span.end, kind, title: f.source_span.text, expectedText: f.source_span.text });
         if (targetOk && f.target_span) {
-          pushTgt({ start: f.target_span.start, end: f.target_span.end, kind, title: f.target_span.text });
+          pushTgt({ start: f.target_span.start, end: f.target_span.end, kind, title: f.target_span.text, expectedText: f.target_span.text });
         }
       }
-    } else if (longDocument) {
-      const segs = termSegments(deferredLongRecords, { draft, basis, features: reviewFeatures });
+    } else if (snap.longDocument) {
+      const segs = termSegments(snap.long, { draft: snap.draft, basis: snap.basis, features: snap.reviewFeatures });
       for (const seg of segs) {
+        if (seg.state !== 'current' && seg.state !== 'saved') continue;
         for (const f of seg.report.findings) {
           if (isAmbiguousMention(f)) continue;
-          const kind = f.verdict === 'confirmed_conflict' ? 'term-conflict'
-            : f.verdict === 'verified_constraint' ? 'term-review' : 'term-review';
-          const resolvedKind = f.verdict === 'verified_constraint' ? 'term-verified' : kind;
+          const resolvedKind = f.verdict === 'confirmed_conflict' ? 'term-conflict'
+            : f.verdict === 'verified_constraint' ? 'term-verified' : 'term-review';
           pushSrc({
             start: scalarOffset(seg.source_start + f.source_span.start),
             end: scalarOffset(seg.source_start + f.source_span.end),
             kind: resolvedKind,
             title: f.source_span.text,
+            expectedText: f.source_span.text,
           });
           if (f.target_span) {
             pushTgt({
@@ -905,31 +985,40 @@ export function DocumentWorkspace() {
               end: scalarOffset(seg.target_start + f.target_span.end),
               kind: resolvedKind,
               title: f.target_span.text,
+              expectedText: f.target_span.text,
             });
           }
         }
       }
     }
 
-    for (const view of deferredLayer1) {
-      if (!view.result) continue;
+    for (const view of snap.layer1) {
+      if (!view.result || !view.checkable) continue;
       for (const f of view.result.findings) {
         const label = sm.layers.rules[f.rule_id] ?? f.rule_id;
-        if (f.source_span) pushSrc({ start: f.source_span.start, end: f.source_span.end, kind: 'structure', title: label });
-        if (f.target_span) pushTgt({ start: f.target_span.start, end: f.target_span.end, kind: 'structure', title: label });
+        if (f.source_span) {
+          pushSrc({ start: f.source_span.start, end: f.source_span.end, kind: 'structure', title: label, expectedText: f.source_span.text });
+        }
+        if (f.target_span) {
+          pushTgt({ start: f.target_span.start, end: f.target_span.end, kind: 'structure', title: label, expectedText: f.target_span.text });
+        }
       }
     }
 
-    for (const p of deferredPlaced) {
+    for (const p of snap.placed) {
       if (p.stale) continue;
-      const kind = p.id === activeSemanticId ? 'semantic-active' : 'semantic';
+      const kind = p.id === snap.activeSemanticId ? 'semantic-active' : 'semantic';
       const title = sm.categories[p.issue.category] ?? p.issue.category;
-      if (p.live.source_span) pushSrc({ start: p.live.source_span.start, end: p.live.source_span.end, kind, title });
-      if (p.live.target_span) pushTgt({ start: p.live.target_span.start, end: p.live.target_span.end, kind, title });
+      if (p.live.source_span) {
+        pushSrc({ start: p.live.source_span.start, end: p.live.source_span.end, kind, title, expectedText: p.live.source_span.text });
+      }
+      if (p.live.target_span) {
+        pushTgt({ start: p.live.target_span.start, end: p.live.target_span.end, kind, title, expectedText: p.live.target_span.text });
+      }
     }
 
     return { sourceHighlights: src, targetHighlights: tgt };
-  }, [quick, deferredJudged, latest, source, target, longDocument, deferredLongRecords, draft, basis, reviewFeatures, deferredLayer1, deferredPlaced, activeSemanticId, sm.layers.rules, sm.categories]);
+  }, [quick, deferredHighlightInput, source, target, sm.layers.rules, sm.categories]);
 
   const reviewBadgeCount = (layer1Summary.findings + layer1Summary.omitted)
     + (longDocument ? termTotal : findingCounts.actionable)
@@ -1163,7 +1252,7 @@ export function DocumentWorkspace() {
             <div className="editor-panes" data-layout={quick ? 'split' : editorLayout}>
               <div className="editor-pane">
                 <div className="label-row">
-                  <label htmlFor="review-source">{m.review.sourceLabel}</label>
+                  <label id="review-source-label" htmlFor="review-source">{m.review.sourceLabel}</label>
                   <select aria-label={quick ? m.translation.directionAria : m.review.directionAria} value={quick && autoDirection ? 'auto' : direction} onChange={e => {
                     const value = e.target.value as 'auto' | 'en' | 'zh';
                     if (quick) doc.setQuickDirection(value);
@@ -1177,6 +1266,7 @@ export function DocumentWorkspace() {
                 <EditorSurfaceAdapter
                   ref={sourceEditor}
                   id="review-source"
+                  labelledBy="review-source-label"
                   value={source}
                   rows={6}
                   placeholder={quick ? m.translation.placeholder : m.review.sourcePlaceholder}
@@ -1194,12 +1284,13 @@ export function DocumentWorkspace() {
               </div>
               <div className="editor-pane">
                 <div className="label-row">
-                  <label htmlFor="review-target">{quick ? w.targetLabel : m.review.targetLabel}</label>
+                  <label id="review-target-label" htmlFor="review-target">{quick ? w.targetLabel : m.review.targetLabel}</label>
                   {quick && !!target && <button type="button" className="text-button" onClick={() => void copyTranslation()}>{copied === 'done' ? m.translation.copied : m.translation.copy}</button>}
                 </div>
                 <EditorSurfaceAdapter
                   ref={targetEditor}
                   id="review-target"
+                  labelledBy="review-target-label"
                   value={target}
                   rows={6}
                   placeholder={quick ? m.translation.idlePlaceholder : m.review.targetPlaceholder}
@@ -1382,7 +1473,7 @@ export function DocumentWorkspace() {
             className="inspector-panel inspector-stack"
             hidden={inspectorTab !== 'terms'}
           >
-            <QuickTermLookup quick={false} embedded persisted={lookupPersisted} onPersistedChange={setLookupPersisted} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+            <QuickTermLookup quick={false} embedded persisted={lookupPersisted} onPersistedChange={setLookupPersisted} requestManager={lookupRequestManager} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
             <MyTerms
               source={source}
               direction={effectiveTermbaseDirection}
@@ -1392,6 +1483,8 @@ export function DocumentWorkspace() {
               onOpenChange={setTermbaseOpen}
               draftSeed={termbaseDraftSeed}
               externalFeedback={termbaseFeedback}
+              persisted={myTermsPersisted}
+              onPersistedChange={setMyTermsPersisted}
             />
           </div>
           <div
@@ -1430,7 +1523,7 @@ export function DocumentWorkspace() {
         </aside>}
       </div>
       {quick && <div className="workspace-side">
-        <QuickTermLookup quick={quick} persisted={lookupPersisted} onPersistedChange={setLookupPersisted} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
+        <QuickTermLookup quick={quick} persisted={lookupPersisted} onPersistedChange={setLookupPersisted} requestManager={lookupRequestManager} onInsert={insertTerm} onUseQuery={moveQueryToSource} />
         <MyTerms
           source={source}
           direction={effectiveTermbaseDirection}
@@ -1440,6 +1533,8 @@ export function DocumentWorkspace() {
           onOpenChange={setTermbaseOpen}
           draftSeed={termbaseDraftSeed}
           externalFeedback={termbaseFeedback}
+          persisted={myTermsPersisted}
+          onPersistedChange={setMyTermsPersisted}
         />
         <MyMemory
           sourceText={activeTmSegment.sourceText}

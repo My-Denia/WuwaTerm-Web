@@ -11,8 +11,27 @@ import type { Termbase, TermbaseDirection, TermbaseEntry, TermbaseKind } from '.
 import { TERMBASE_LIMITS } from '../../lib/generated/termbase-contract';
 import { useUiLanguage } from './ui-language-context';
 
-type Draft = { source: string; target: string; direction: TermbaseDirection | null; kind: TermbaseKind; note: string };
+export type MyTermsDraft = { source: string; target: string; direction: TermbaseDirection | null; kind: TermbaseKind; note: string };
+type Draft = MyTermsDraft;
 type Feedback = { kind: 'notice' | 'error'; text: string } | null;
+
+export type MyTermsPersisted = {
+  draft: MyTermsDraft;
+  editing: string | null;
+  feedback: Feedback;
+  pending: Termbase | null;
+  seenSeed: number | null;
+  seenFeedback: number | null;
+};
+
+export const INITIAL_MY_TERMS_PERSISTED: MyTermsPersisted = {
+  draft: { source: '', target: '', direction: null, kind: 'community_term', note: '' },
+  editing: null,
+  feedback: null,
+  pending: null,
+  seenSeed: null,
+  seenFeedback: null,
+};
 
 export type TermbaseDraftSeed = {
   key: number;
@@ -38,9 +57,12 @@ type Props = {
   onOpenChange?: (open: boolean) => void;
   draftSeed?: TermbaseDraftSeed | null;
   externalFeedback?: TermbaseExternalFeedback | null;
+  /** Optional parent-owned state so unsaved form drafts survive quick <-> manuscript layout switches. */
+  persisted?: MyTermsPersisted;
+  onPersistedChange?: Dispatch<SetStateAction<MyTermsPersisted>>;
 };
 
-const BLANK: Draft = { source: '', target: '', direction: null, kind: 'community_term', note: '' };
+const BLANK: Draft = INITIAL_MY_TERMS_PERSISTED.draft;
 const scalars = (text: string) => Array.from(text).length;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
@@ -49,7 +71,7 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
  * manuscript. It reads the current source text and the document's direction and lists which entries occur in it. Import
  * and export are explicit file actions; a reload empties the list.
  */
-export function MyTerms({ source, direction, entries, setEntries, open: controlledOpen, onOpenChange, draftSeed, externalFeedback }: Props) {
+export function MyTerms({ source, direction, entries, setEntries, open: controlledOpen, onOpenChange, draftSeed, externalFeedback, persisted, onPersistedChange }: Props) {
   const { lang } = useUiLanguage();
   const t = msg(lang).termbase;
   const [localOpen, setLocalOpen] = useState(false);
@@ -59,31 +81,43 @@ export function MyTerms({ source, direction, entries, setEntries, open: controll
     if (onOpenChange) onOpenChange(resolved);
     else setLocalOpen(resolved);
   };
-  const [draft, setDraft] = useState<Draft>(BLANK);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<Feedback>(null);
-  const [pending, setPending] = useState<Termbase | null>(null);
+  const [localState, setLocalState] = useState<MyTermsPersisted>(INITIAL_MY_TERMS_PERSISTED);
+  const state = persisted ?? localState;
+  const setState = onPersistedChange ?? setLocalState;
+  const { draft, editing, feedback, pending, seenSeed, seenFeedback } = state;
+  const setDraft = (next: Draft | ((prev: Draft) => Draft)) =>
+    setState(prev => ({ ...prev, draft: typeof next === 'function' ? next(prev.draft) : next }));
+  const setEditing = (next: string | null) => setState(prev => ({ ...prev, editing: next }));
+  const setFeedback = (next: Feedback) => setState(prev => ({ ...prev, feedback: next }));
+  const setPending = (next: Termbase | null) => setState(prev => ({ ...prev, pending: next }));
   const fileBox = useRef<HTMLInputElement>(null);
   const sourceInput = useRef<HTMLInputElement>(null);
   const targetInput = useRef<HTMLInputElement>(null);
-  const [seenSeed, setSeenSeed] = useState<number | null>(null);
-  const [seenFeedback, setSeenFeedback] = useState<number | null>(null);
 
-  if (draftSeed && draftSeed.key !== seenSeed) {
-    setSeenSeed(draftSeed.key);
-    setEditing(null);
-    setDraft({
-      source: draftSeed.source,
-      target: draftSeed.target,
-      direction: draftSeed.direction,
-      kind: draftSeed.kind,
-      note: draftSeed.note ?? '',
-    });
-  }
-  if (externalFeedback && externalFeedback.key !== seenFeedback) {
-    setSeenFeedback(externalFeedback.key);
-    setFeedback({ kind: externalFeedback.kind, text: externalFeedback.text });
-  }
+  useEffect(() => {
+    if (!draftSeed || draftSeed.key === seenSeed) return;
+    setState(prev => (prev.seenSeed === draftSeed.key ? prev : {
+      ...prev,
+      seenSeed: draftSeed.key,
+      editing: null,
+      draft: {
+        source: draftSeed.source,
+        target: draftSeed.target,
+        direction: draftSeed.direction,
+        kind: draftSeed.kind,
+        note: draftSeed.note ?? '',
+      },
+    }));
+  }, [draftSeed, seenSeed, setState]);
+
+  useEffect(() => {
+    if (!externalFeedback || externalFeedback.key === seenFeedback) return;
+    setState(prev => (prev.seenFeedback === externalFeedback.key ? prev : {
+      ...prev,
+      seenFeedback: externalFeedback.key,
+      feedback: { kind: externalFeedback.kind, text: externalFeedback.text },
+    }));
+  }, [externalFeedback, seenFeedback, setState]);
 
   useEffect(() => {
     if (!draftSeed || !open) return;
