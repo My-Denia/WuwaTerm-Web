@@ -367,3 +367,77 @@ test('429-denied forceRefresh does not advance slot.generation or prevent admitt
     DB.close();
   }
 });
+
+test('concurrent force-refresh RuntimeStore calls coalesce before hitting 1/s shared_pool', async () => {
+  const DB = createPool();
+  const REV_2 = 'a'.repeat(64);
+  let clock = 1_700_000_000_000;
+  try {
+    const env = fixtureEnvironment(DB);
+    let releaseDict;
+    const dictGate = new Promise((resolve) => { releaseDict = resolve; });
+    let proxyRequests = 0;
+    let upstreamDictCalls = 0;
+
+    const fetchImpl = async (url) => {
+      const path = url.pathname.replace('/wuwaterm-api/', '');
+      if (path === 'v1/capabilities') {
+        return json({ api_version: 'v1', capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-pool' });
+      }
+      if (path === 'v1/dictionary') {
+        upstreamDictCalls += 1;
+        await dictGate;
+        return json(validCoreDict({ revision: REV_2, source_game_version: '3.8.0', request_id: 'req-pool' }));
+      }
+      throw new Error(`unexpected path: ${path}`);
+    };
+
+    const runtime = new RuntimeStore({
+      pool: false,
+      now: () => clock,
+      fetch: async (path) => {
+        const parsed = new URL(path, 'http://127.0.0.1');
+        if (parsed.pathname === '/api/capabilities') {
+          return proxyCapabilitiesRequest({ environment: env, fetchImpl });
+        }
+        if (parsed.pathname === '/api/dictionary') {
+          proxyRequests += 1;
+          return proxyDictionaryRequest({
+            environment: env,
+            fetchImpl,
+            now: () => clock,
+            forceRefresh: parsed.searchParams.get('refresh') === '1',
+          });
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      },
+    });
+
+    await runtime.capabilities(true);
+
+    // Trigger two concurrent forced refreshes (e.g. batch auto-reuse + manual forced refresh) in the same second.
+    const pBasis = resolveTmAutoReuseBasisFromRuntime(runtime, null, { now: clock });
+    const pManual = runtime.loadDictionary(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(proxyRequests, 1);
+    assert.equal(upstreamDictCalls, 1);
+
+    releaseDict();
+    const [basis] = await Promise.all([pBasis, pManual]);
+    assert.deepEqual(basis, { currentTermsDbRevision: REV_2, currentGameVersion: '3.8.0' });
+    assert.deepEqual(runtime.getSnapshot().dictionary, {
+      kind: 'success',
+      data: {
+        revision: REV_2,
+        schema_version: '2',
+        source_commit: '9ddee819abcd',
+        game_version: '3.8.0',
+        term_count: 12097,
+        request_id: 'req-pool',
+      },
+      fetchedAt: clock,
+    });
+  } finally {
+    DB.close();
+  }
+});

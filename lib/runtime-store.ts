@@ -128,13 +128,13 @@ export class RuntimeStore {
   private readonly listeners = new Set<() => void>();
   private started = false;
   private poolAbort: AbortController | null = null;
-  private capabilitiesPromise: Promise<string[]> | null = null;
+  private capabilitiesInFlight: { promise: Promise<string[]>; force: boolean } | null = null;
   private capabilitiesEpoch = 0;
   private capabilitiesLoaded = false;
   private capabilitiesFailedAt: number | null = null;
-  private metaPromise: Promise<void> | null = null;
+  private metaInFlight: { promise: Promise<void>; force: boolean } | null = null;
   private metaEpoch = 0;
-  private dictionaryPromise: Promise<void> | null = null;
+  private dictionaryInFlight: { promise: Promise<void>; force: boolean } | null = null;
   private dictionaryEpoch = 0;
 
   constructor(options: RuntimeStoreOptions = {}) {
@@ -199,7 +199,9 @@ export class RuntimeStore {
    */
   capabilities(force = false): Promise<string[]> {
     if (this.capabilitiesLoaded) return Promise.resolve(this.state.capabilities ?? []);
-    if (!force && this.capabilitiesPromise) return this.capabilitiesPromise;
+    if (this.capabilitiesInFlight && (!force || this.capabilitiesInFlight.force)) {
+      return this.capabilitiesInFlight.promise;
+    }
     const now = this.now();
     if (!force && this.capabilitiesFailedAt !== null
       && now >= this.capabilitiesFailedAt
@@ -207,6 +209,7 @@ export class RuntimeStore {
       return Promise.resolve([]);
     }
     const epoch = ++this.capabilitiesEpoch;
+    let settled = false;
     const promise = (async () => {
       let list: string[] = [];
       let succeeded = false;
@@ -219,6 +222,9 @@ export class RuntimeStore {
         }
       } catch {
         list = [];
+      } finally {
+        settled = true;
+        if (this.capabilitiesEpoch === epoch) this.capabilitiesInFlight = null;
       }
       if (this.capabilitiesEpoch !== epoch) {
         return this.state.capabilities ?? list;
@@ -232,10 +238,7 @@ export class RuntimeStore {
       this.set({ capabilities: list });
       return list;
     })();
-    this.capabilitiesPromise = promise;
-    void promise.finally(() => {
-      if (this.capabilitiesPromise === promise) this.capabilitiesPromise = null;
-    });
+    if (!settled) this.capabilitiesInFlight = { promise, force };
     return promise;
   }
 
@@ -243,14 +246,17 @@ export class RuntimeStore {
    * Authoritative server dictionary identity (`GET /api/dictionary`, capability `dictionary-identity-v1`):
    * - checks `capabilities()` first; distinguishes a transient `/api/capabilities` error (`error`, retryable)
    *   from a verified HTTP 200 capability list lacking `dictionary-identity-v1` (`unsupported`);
-   * - non-forced in-flight reads are shared by joining the existing promise;
+   * - non-forced in-flight reads join any existing read, and concurrent `force = true` reads coalesce onto an
+   *   already in-flight `force = true` read;
    * - `success` is reused within `dictionaryFreshTtlMs` and refreshed once expired;
    * - `error` respects the fixed 30s `dictionaryErrorRetryCooldownMs` and retries once elapsed;
    * - `force = true` never reuses a non-forced in-flight promise, appends `?refresh=1` to bypass the BFF proxy
    *   cache, and prevents stale out-of-order responses from overwriting newer state.
    */
   loadDictionary(force = false): Promise<void> {
-    if (!force && this.dictionaryPromise) return this.dictionaryPromise;
+    if (this.dictionaryInFlight && (!force || this.dictionaryInFlight.force)) {
+      return this.dictionaryInFlight.promise;
+    }
     const current = this.state.dictionary;
     const now = this.now();
     if (!force) {
@@ -265,6 +271,7 @@ export class RuntimeStore {
       }
     }
     const epoch = ++this.dictionaryEpoch;
+    let settled = false;
     const promise = (async () => {
       try {
         const caps = await this.capabilities(force);
@@ -303,23 +310,27 @@ export class RuntimeStore {
         const lastKnown = this.lastKnownDictionary();
         this.set({ dictionary: { kind: 'error', lastKnown, failedAt: this.now() } });
       } finally {
-        if (this.dictionaryEpoch === epoch) this.dictionaryPromise = null;
+        settled = true;
+        if (this.dictionaryEpoch === epoch) this.dictionaryInFlight = null;
       }
     })();
-    this.dictionaryPromise = promise;
+    if (!settled) this.dictionaryInFlight = { promise, force };
     return promise;
   }
 
   /**
    * The dictionary provenance. Each read counts against the dictionary-info quota, so it is read only on request:
-   * - non-forced in-flight reads are shared by joining the existing promise;
+   * - non-forced in-flight reads join any existing read, and concurrent `force = true` reads coalesce onto an
+   *   already in-flight `force = true` read;
    * - `success` is reused within `metaFreshTtlMs` and refreshed once expired;
    * - `error` respects `metaErrorRetryCooldownMs` and retries automatically once the cooldown elapses;
    * - `force = true` never reuses a non-forced in-flight promise, appends `?refresh=1`, and prevents stale
    *   out-of-order responses from overwriting newer state.
    */
   loadMeta(force = false): Promise<void> {
-    if (!force && this.metaPromise) return this.metaPromise;
+    if (this.metaInFlight && (!force || this.metaInFlight.force)) {
+      return this.metaInFlight.promise;
+    }
     const current = this.state.meta;
     const now = this.now();
     if (!force) {
@@ -333,6 +344,7 @@ export class RuntimeStore {
     const epoch = ++this.metaEpoch;
     const lastKnown = this.lastKnownMeta();
     this.set({ meta: { kind: 'loading', lastKnown } });
+    let settled = false;
     const promise = (async () => {
       try {
         const response = await this.fetcher(
@@ -351,10 +363,11 @@ export class RuntimeStore {
         if (this.metaEpoch !== epoch) return;
         this.set({ meta: { kind: 'error', lastKnown, failedAt: this.now() } });
       } finally {
-        if (this.metaEpoch === epoch) this.metaPromise = null;
+        settled = true;
+        if (this.metaEpoch === epoch) this.metaInFlight = null;
       }
     })();
-    this.metaPromise = promise;
+    if (!settled) this.metaInFlight = { promise, force };
     return promise;
   }
 

@@ -756,3 +756,82 @@ test('forced loadDictionary(true) / loadMeta(true) bypass non-forced in-flight r
     fetchedAt: NOW,
   });
 });
+
+test('concurrent forced calls to capabilities(true), loadDictionary(true), and loadMeta(true) coalesce onto one HTTP request', async () => {
+  const REV_2 = 'b'.repeat(64);
+  const DICT_2 = { ...DICT, revision: REV_2, game_version: '3.8.0', request_id: 'dict-coalesce' };
+  const META_2 = { ...META, source_commit: 'commit-coalesce', game_version: '3.8.0', request_id: 'meta-coalesce' };
+
+  let releaseCap;
+  let releaseDict;
+  let releaseMeta;
+  let capCalls = 0;
+  let dictCalls = 0;
+  let metaCalls = 0;
+
+  const store = new RuntimeStore({
+    pool: false,
+    now: () => NOW,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        capCalls += 1;
+        await new Promise((resolve) => { releaseCap = resolve; });
+        return new Response(JSON.stringify({ capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-coalesce' }), { status: 200 });
+      }
+      if (path === '/api/dictionary?refresh=1') {
+        dictCalls += 1;
+        await new Promise((resolve) => { releaseDict = resolve; });
+        return new Response(JSON.stringify(DICT_2), { status: 200 });
+      }
+      if (path === '/api/meta?refresh=1') {
+        metaCalls += 1;
+        await new Promise((resolve) => { releaseMeta = resolve; });
+        return new Response(JSON.stringify(META_2), { status: 200 });
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    },
+  });
+
+  // Two overlapping capabilities(true) calls reuse the same in-flight forced promise and send 1 HTTP request.
+  const c1 = store.capabilities(true);
+  const c2 = store.capabilities(true);
+  assert.equal(c1, c2);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(capCalls, 1);
+  releaseCap();
+  const [caps1, caps2] = await Promise.all([c1, c2]);
+  assert.deepEqual(caps1, [CAPABILITY_DICTIONARY_IDENTITY]);
+  assert.deepEqual(caps2, [CAPABILITY_DICTIONARY_IDENTITY]);
+
+  // Overlapping loadDictionary(true) + loadDictionary(false) reuse the same in-flight forced promise.
+  const d1 = store.loadDictionary(true);
+  const d2 = store.loadDictionary(true);
+  const d3 = store.loadDictionary(false);
+  assert.equal(d1, d2);
+  assert.equal(d1, d3);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(dictCalls, 1);
+  releaseDict();
+  await Promise.all([d1, d2, d3]);
+  assert.deepEqual(store.getSnapshot().dictionary, {
+    kind: 'success',
+    data: DICT_2,
+    fetchedAt: NOW,
+  });
+
+  // Overlapping loadMeta(true) + loadMeta(false) reuse the same in-flight forced promise.
+  const m1 = store.loadMeta(true);
+  const m2 = store.loadMeta(true);
+  const m3 = store.loadMeta(false);
+  assert.equal(m1, m2);
+  assert.equal(m1, m3);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(metaCalls, 1);
+  releaseMeta();
+  await Promise.all([m1, m2, m3]);
+  assert.deepEqual(store.getSnapshot().meta, {
+    kind: 'success',
+    data: META_2,
+    fetchedAt: NOW,
+  });
+});
