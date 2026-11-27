@@ -140,6 +140,21 @@ export type RunState = {
   kind: RunKind | null; phase: RunPhase; items: RunItem[]; waitUntil: number | null; stopCode: string | null; stopRequestId?: string | null;
   streak?: { code: string | null; count: number };
 };
+/** Non-text incremental TM reuse receipt (ADR 0023): counts and provenance only, never segment text. */
+export type TmRunReceipt = {
+  reused: number;
+  referenced: number;
+  staleOrUnknown: number;
+  retranslated: number;
+  pendingRetranslate: number;
+  demotedByStructureCheck: number;
+  demotedSegmentIndices: number[];
+  modelCalls: number;
+  baselineRequests: number;
+  termsDbRevision: string | null;
+  gameVersion: string | null;
+  structureCheckStatus: 'skipped' | 'passed' | 'findings' | 'unavailable' | 'failed';
+};
 export type SemanticActionRecord = { placedId: string; marker: number; kind: SemanticDecisionKind };
 export type SemanticDecisionCommand =
   | { placedId: string; kind: 'accepted'; useAlternative?: boolean }

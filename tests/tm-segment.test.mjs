@@ -148,8 +148,18 @@ test('skip-segment fill establishes explicit alignments so filling segment 3 the
   const source = '第一段。\n\n第二段。\n\n第三段。';
   const srcSegs = segmentParagraphs(source);
 
-  // Start with only segment 0 translated (`Uno`), no explicit alignments.
-  const step1 = applySegmentSuggestionResult('Uno', srcSegs, 2, 'Tres', { source, alignments: null });
+  // Start from blank target: filling segment 0 (`Uno`) establishes explicit alignments `[Uno, null, null]`.
+  const step0 = applySegmentSuggestionResult('', srcSegs, 0, 'Uno', { source, alignments: null });
+  assert.equal(step0.applied, true);
+  assert.equal(step0.target, 'Uno');
+  assert.ok(step0.alignments);
+  assert.equal(step0.alignments.length, 3);
+  assert.equal(step0.alignments[0].target?.text, 'Uno');
+  assert.equal(step0.alignments[1].target, null);
+  assert.equal(step0.alignments[2].target, null);
+
+  // Skip segment 1 to fill segment 2 (`Tres`) using those explicit alignments.
+  const step1 = applySegmentSuggestionResult(step0.target, srcSegs, 2, 'Tres', { source, alignments: step0.alignments });
   assert.equal(step1.applied, true);
   assert.equal(step1.target, 'Uno\n\nTres');
   assert.ok(step1.alignments);
@@ -181,10 +191,14 @@ test('skip-segment fill establishes explicit alignments so filling segment 3 the
 });
 
 test('manual alignments with target: null respect omitted target and insert cleanly without corrupting neighbour whitespace or indentation', () => {
-  // Case 1: trailing spaces + mixed CRLF/LF + tab (`Uno \r\n \n\t`) preserved verbatim when appending segment 2.
+  // Case 1: trailing spaces + mixed CRLF/LF + tab (`Uno \r\n \n\t`) preserved verbatim when appending segment 2 with explicit alignments.
   const source2 = '一。\n\n二。';
   const src2 = segmentParagraphs(source2);
-  const appended = applySegmentSuggestionToTarget('Uno \r\n \n\t', src2, 1, 'Dos', { source: source2 });
+  const align2 = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '一。' }, target: { start: scalarOffset(0), end: scalarOffset(3), text: 'Uno' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '二。' }, target: null },
+  ];
+  const appended = applySegmentSuggestionToTarget('Uno \r\n \n\t', src2, 1, 'Dos', { source: source2, alignments: align2 });
   assert.equal(appended, 'Uno \r\n \n\tDos');
 
   // Case 2: manual alignment where segment 0 is `target: null` and segment 1 has leading indentation (`  Dos`).
@@ -254,7 +268,8 @@ test('multi-paragraph suggestion without explicit alignments is refused, and lon
 test('target_gap_occupied refuses inserting into an unaligned gap when handwritten target text already sits there', () => {
   const source = '第一段。\n\n第二段。\n\n第三段。';
   const srcSegs = segmentParagraphs(source);
-  const step1 = applySegmentSuggestionResult('Uno', srcSegs, 2, 'Tres', { source, alignments: null });
+  const step0 = applySegmentSuggestionResult('', srcSegs, 0, 'Uno', { source, alignments: null });
+  const step1 = applySegmentSuggestionResult(step0.target, srcSegs, 2, 'Tres', { source, alignments: step0.alignments });
   assert.ok(step1.alignments);
 
   // Simulate user typing handwritten `Dos draft` in the unaligned middle gap while `step1.alignments[1].target` is still null.
@@ -464,17 +479,23 @@ test('invariant A: cleared-alignment mode (alignments: []) never turns into null
   const source3 = '甲。\n\n乙。\n\n丙。';
   const segs3 = segmentParagraphs(source3);
 
-  // Replace existing paragraph keeps []
-  const replaced = applySegmentSuggestionResult('Uno', segs3, 0, 'Uno TM', { source: source3, alignments: [] });
+  // Replace existing paragraph when paragraph counts match keeps []
+  const replaced = applySegmentSuggestionResult('Uno\n\nDos\n\nTres', segs3, 0, 'Uno TM', { source: source3, alignments: [] });
   assert.equal(replaced.applied, true);
-  assert.equal(replaced.target, 'Uno TM');
+  assert.equal(replaced.target, 'Uno TM\n\nDos\n\nTres');
   assert.deepEqual(replaced.alignments, []);
 
-  // Sequential append keeps []
-  const appended = applySegmentSuggestionResult('Uno TM', segs3, 1, 'Dos TM', { source: source3, alignments: [] });
-  assert.equal(appended.applied, true);
-  assert.equal(appended.target, 'Uno TM\n\nDos TM');
-  assert.deepEqual(appended.alignments, []);
+  // Starting from blank target at index 0 keeps [] (never synthesizes alignments in cleared mode)
+  const fromBlank = applySegmentSuggestionResult('', segs3, 0, 'Uno TM', { source: source3, alignments: [] });
+  assert.equal(fromBlank.applied, true);
+  assert.equal(fromBlank.target, 'Uno TM');
+  assert.deepEqual(fromBlank.alignments, []);
+
+  // Partial target (`Uno` on 3-para source) in cleared mode refuses overwrite with target_fewer_paragraphs and keeps []
+  const partialRefused = applySegmentSuggestionResult('Uno', segs3, 0, 'Uno TM', { source: source3, alignments: [] });
+  assert.equal(partialRefused.applied, false);
+  assert.equal(partialRefused.reason, 'target_fewer_paragraphs');
+  assert.deepEqual(partialRefused.alignments, []);
 
   // Multi-paragraph refusal keeps []
   const multiRefused = applySegmentSuggestionResult('Uno', segs3, 0, 'A\n\nB', { source: source3, alignments: [] });
@@ -491,4 +512,44 @@ test('invariant A: cleared-alignment mode (alignments: []) never turns into null
   assert.equal(skipRefused.reason, 'cleared_alignments_skip');
   assert.equal(skipRefused.target, 'Uno');
   assert.deepEqual(skipRefused.alignments, []);
+});
+
+test('P1-03 regression: partial target A\'/C\' against source A/B/C without explicit alignments refuses positional mapping and silent overwrite', () => {
+  const source = '段落A。\n\n段落B。\n\n段落C。';
+  const target = "Target A'.\n\nTarget C'.";
+  const srcSegs = segmentParagraphs(source);
+
+  for (const alignments of [null, []]) {
+    for (const index of [0, 1, 2]) {
+      const active = resolveActiveSegment(source, target, { kind: 'index', index }, alignments);
+      assert.equal(active.hasAlignedTarget, false, `index ${index} must not treat partial target as aligned`);
+      assert.equal(active.targetText, '', `index ${index} must not borrow Target C' for B`);
+      assert.equal(active.targetRange, null);
+
+      const status = describeTmSegmentAlignment(source, target, active, alignments);
+      assert.equal(status.status, 'target_fewer_paragraphs');
+      assert.equal(status.sourceTotal, 3);
+      assert.equal(status.targetTotal, 2);
+
+      const outcome = applySegmentSuggestionResult(target, srcSegs, index, "Target B' (TM).", { source, alignments });
+      assert.equal(outcome.applied, false);
+      assert.equal(outcome.reason, 'target_fewer_paragraphs');
+      assert.equal(outcome.target, target, 'existing Target C\' must never be overwritten');
+      assert.deepEqual(outcome.alignments, alignments);
+    }
+  }
+
+  // Once explicit alignments `[A -> A', B -> null, C -> C']` exist, segment 1 inserts cleanly without overwriting C'.
+  const cStart = Array.from("Target A'.\n\n").length;
+  const explicitAlignments = [
+    { source: { start: srcSegs[0].coreStart, end: srcSegs[0].coreEnd, text: srcSegs[0].text }, target: { start: scalarOffset(0), end: scalarOffset(10), text: "Target A'." } },
+    { source: { start: srcSegs[1].coreStart, end: srcSegs[1].coreEnd, text: srcSegs[1].text }, target: null },
+    { source: { start: srcSegs[2].coreStart, end: srcSegs[2].coreEnd, text: srcSegs[2].text }, target: { start: scalarOffset(cStart), end: scalarOffset(cStart + 10), text: "Target C'." } },
+  ];
+  const activeB = resolveActiveSegment(source, target, { kind: 'index', index: 1 }, explicitAlignments);
+  assert.equal(describeTmSegmentAlignment(source, target, activeB, explicitAlignments).status, 'ok');
+  const appliedB = applySegmentSuggestionResult(target, srcSegs, 1, "Target B'.", { source, alignments: explicitAlignments });
+  assert.equal(appliedB.applied, true);
+  assert.equal(appliedB.target, "Target A'.\n\nTarget B'.\n\nTarget C'.");
+  assert.deepEqual(appliedB.alignments?.map(a => a.target?.text), ["Target A'.", "Target B'.", "Target C'."]);
 });

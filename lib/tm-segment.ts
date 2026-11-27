@@ -47,6 +47,7 @@ export type TmApplySegmentResult = {
     | 'replaced'
     | 'inserted'
     | 'unaligned_target'
+    | 'target_fewer_paragraphs'
     | 'multi_paragraph_suggestion'
     | 'target_gap_occupied'
     | 'whitespace_target_alignment'
@@ -57,6 +58,7 @@ export type TmSegmentAlignmentStatus = {
   status:
     | 'ok'
     | 'target_extra_paragraphs'
+    | 'target_fewer_paragraphs'
     | 'alignment_ambiguous'
     | 'target_gap_occupied'
     | 'target_cursor_unaligned'
@@ -405,8 +407,9 @@ export function resolveActiveSegment(
     };
   }
 
-  // Multi-paragraph target longer than source has ambiguous alignment; do not map arbitrarily.
-  if (targetSegments.length > total) {
+  // Multi-paragraph target whose paragraph count disagrees with source (`> total` or partial `0 < len < total`) has
+  // unverified positional alignment without explicit alignments; never treat `targetSegments[index]` as verified.
+  if (targetSegments.length > total || (targetSegments.length > 0 && targetSegments.length < total)) {
     return {
       index,
       total,
@@ -678,6 +681,7 @@ export function applySegmentSuggestionResult(
 
   // No explicit alignments yet (`total > 1`, preserving `[]` vs `null` review mode).
   const targetSegments = segmentParagraphs(target);
+  const isClearedMode = rawAlignments !== null && rawAlignments.length === 0;
   if (targetSegments.length > total) {
     return {
       target,
@@ -686,6 +690,31 @@ export function applySegmentSuggestionResult(
       invalidated: [],
       applied: false,
       reason: 'unaligned_target',
+    };
+  }
+
+  if (isClearedMode && index > targetSegments.length) {
+    return {
+      target,
+      alignments: [],
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'cleared_alignments_skip',
+    };
+  }
+
+  // P1-03: when target has fewer non-empty paragraphs than source (`0 < target < source`) without explicit alignments,
+  // positional index `targetSegments[index]` may belong to a different source paragraph (e.g. A/B/C vs A'/C').
+  // Refuse silent overwrite or fabricated prefix alignments until the user aligns paragraphs explicitly.
+  if (targetSegments.length > 0 && targetSegments.length < total) {
+    return {
+      target,
+      alignments: emptyPreservedAlignments,
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'target_fewer_paragraphs',
     };
   }
 
@@ -703,18 +732,11 @@ export function applySegmentSuggestionResult(
     };
   }
 
-  const isClearedMode = rawAlignments !== null && rawAlignments.length === 0;
-  const isSkipInsert = index > targetSegments.length;
-  if (isSkipInsert && isClearedMode) {
-    return {
-      target,
-      alignments: [],
-      splice: null,
-      invalidated: [],
-      applied: false,
-      reason: 'cleared_alignments_skip',
-    };
-  }
+  // Blank target (`targetSegments.length === 0`) on multi-segment source:
+  // - in cleared-alignment mode (`[]`), only index 0 is allowed and keeps `[]`;
+  // - when `alignments === null`, establish explicit alignments `[seg -> null | suggestion]` so later segment fills
+  //   remain unambiguously aligned instead of leaving a partial unaligned target.
+  const isSkipInsert = index > 0;
   if (isSkipInsert && (!source || total > MAX_AUTO_ALIGNMENTS)) {
     return {
       target,
@@ -726,14 +748,13 @@ export function applySegmentSuggestionResult(
     };
   }
 
-  const last = targetSegments.length > 0 ? targetSegments[targetSegments.length - 1]! : null;
   const eol = preferredEol(target, source);
   const placed = insertIntoTargetGap(
     target,
     tChars,
-    last ? last.coreEnd : 0,
+    0,
     tChars.length,
-    last !== null,
+    false,
     false,
     suggestionText,
     eol,
@@ -744,7 +765,8 @@ export function applySegmentSuggestionResult(
     newEnd: scalarOffset(placed.insertAt + placed.delta),
   };
 
-  if (!isSkipInsert) {
+  const shouldSynthesizeAlignments = !isClearedMode && !!source && total <= MAX_AUTO_ALIGNMENTS;
+  if (!shouldSynthesizeAlignments) {
     return {
       target: placed.nextTarget,
       alignments: emptyPreservedAlignments,
@@ -756,9 +778,6 @@ export function applySegmentSuggestionResult(
   }
 
   const nextAlignments: Alignment[] = sourceSegments.map((seg, i): Alignment => {
-    if (i < targetSegments.length) {
-      return { source: spanOfSegment(seg), target: spanOfSegment(targetSegments[i]!) };
-    }
     if (i === index) {
       return {
         source: spanOfSegment(seg),
@@ -846,6 +865,9 @@ export function describeTmSegmentAlignment(
   }
   if (sourceTotal > 1 && targetTotal > sourceTotal) {
     return { status: 'target_extra_paragraphs', sourceTotal, targetTotal };
+  }
+  if (sourceTotal > 1 && targetTotal > 0 && targetTotal < sourceTotal) {
+    return { status: 'target_fewer_paragraphs', sourceTotal, targetTotal };
   }
   return { status: 'ok', sourceTotal, targetTotal };
 }

@@ -16,6 +16,8 @@ import {
   recheckTmMatchFreshness,
   serializeTranslationMemory,
   tmNow,
+  type TmConfirmCandidate,
+  type TmConfirmResult,
   type TmDirection,
   type TmEntry,
   type TmFile,
@@ -32,6 +34,7 @@ export type ApplySuggestionOutcome = {
     | 'replaced'
     | 'inserted'
     | 'unaligned_target'
+    | 'target_fewer_paragraphs'
     | 'multi_paragraph_suggestion'
     | 'target_gap_occupied'
     | 'whitespace_target_alignment'
@@ -43,6 +46,26 @@ export type TmLiveBasis = {
   currentGameVersion: string | null;
 };
 
+export type TmDictionaryStatusView = {
+  kind: 'verified' | 'legacy' | 'loading' | 'unverified' | 'error';
+  revision: string | null;
+  gameVersion: string | null;
+};
+
+export type TmPersistenceAdapter = {
+  confirm: (candidate: TmConfirmCandidate) => Promise<TmConfirmResult | { status: 'error'; message?: string }>;
+  replace: (
+    file: TmFile,
+    options?: { force?: boolean },
+  ) => Promise<
+    | { ok: true; entries: TmEntry[] }
+    | { ok: false; conflict: true; entries: TmEntry[] }
+    | { ok: false; conflict?: false; error?: unknown }
+  >;
+  merge: (file: TmFile) => Promise<{ ok: true; entries: TmEntry[] } | { ok: false; error?: unknown }>;
+  remove: (entry: TmEntry) => Promise<{ ok: true; entries: TmEntry[] } | { ok: false }>;
+};
+
 type Props = {
   sourceText: string;
   targetText: string;
@@ -50,12 +73,17 @@ type Props = {
   nextSource?: string | null;
   segmentIndex?: number;
   segmentTotal?: number;
-  targetSegmentTotal?: number;
-  alignmentStatus?: TmSegmentAlignmentStatus;
+  alignmentStatus: TmSegmentAlignmentStatus;
   direction: TmDirection;
   currentTermsDbRevision?: string | null;
   currentGameVersion?: string | null;
-  getServiceBasis?: () => TmLiveBasis;
+  getDisplayBasis?: () => TmLiveBasis;
+  getConfirmBasis?: () => TmLiveBasis;
+  dictionaryStatus?: TmDictionaryStatusView;
+  storageMode?: 'public_memory' | 'selfhost_sqlite';
+  storageState?: 'idle' | 'loading' | 'ready' | 'error';
+  onRetryLoad?: () => void;
+  persistence?: TmPersistenceAdapter;
   entries: TmEntry[];
   setEntries: Dispatch<SetStateAction<TmEntry[]>>;
   onApplySuggestion: (targetText: string) => ApplySuggestionOutcome | boolean | void;
@@ -67,10 +95,12 @@ type Props = {
 const LIST_PREVIEW_CAP = 50;
 
 /**
- * Explicit in-memory Translation Memory panel (`wuwaterm-tm-v1`).
+ * Translation Memory panel (`wuwaterm-tm-v1`).
  *
- * Strictly in React page state: zero localStorage/sessionStorage/IndexedDB, zero API uploads,
- * zero embedding into `.wuwaterm` manuscripts, and only human/imported confirmed entries.
+ * Public mode: strictly in React page memory (zero localStorage/sessionStorage/IndexedDB, zero API uploads,
+ * zero embedding into `.wuwaterm` manuscripts).
+ * Self-hosted mode: persists confirmed entries to the instance's private `/api/tm` SQLite store (`tm.sqlite3`),
+ * completely separate from official `terms.db` and browser storage.
  */
 export function MyMemory({
   sourceText,
@@ -79,12 +109,17 @@ export function MyMemory({
   nextSource = null,
   segmentIndex = 0,
   segmentTotal = 1,
-  targetSegmentTotal = 0,
   alignmentStatus,
   direction,
   currentTermsDbRevision = null,
   currentGameVersion = null,
-  getServiceBasis,
+  getDisplayBasis,
+  getConfirmBasis,
+  dictionaryStatus,
+  storageMode = 'public_memory',
+  storageState = 'ready',
+  onRetryLoad,
+  persistence,
   entries,
   setEntries,
   onApplySuggestion,
@@ -105,6 +140,7 @@ export function MyMemory({
 
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [pending, setPending] = useState<TmFile | null>(null);
+  const [busy, setBusy] = useState(false);
   const fileBox = useRef<HTMLInputElement>(null);
 
   const currentQuery = useMemo(
@@ -137,29 +173,47 @@ export function MyMemory({
   const matches = matchBundle.matches;
   const directionLabel = direction === 'en' ? t.directionEn : t.directionZh;
   const isMultiSegment = segmentTotal > 1;
-  const effectiveAlignmentStatus = alignmentStatus ?? {
-    status: isMultiSegment && targetSegmentTotal > segmentTotal ? 'target_extra_paragraphs' : 'ok',
-    sourceTotal: segmentTotal,
-    targetTotal: targetSegmentTotal,
-  };
-  const targetHasMoreSegments = effectiveAlignmentStatus.status === 'target_extra_paragraphs';
-  const isTargetCursorUnaligned = effectiveAlignmentStatus.status === 'target_cursor_unaligned';
-  const alignmentBannerText = effectiveAlignmentStatus.status === 'target_cursor_unaligned'
+  // `describeTmSegmentAlignment` is the single source of truth for alignment status.
+  const targetHasMoreSegments = alignmentStatus.status === 'target_extra_paragraphs';
+  const targetHasFewerSegments = alignmentStatus.status === 'target_fewer_paragraphs';
+  const isTargetCursorUnaligned = alignmentStatus.status === 'target_cursor_unaligned';
+  const alignmentBannerText = alignmentStatus.status === 'target_cursor_unaligned'
     ? t.segmentTargetCursorUnalignedHint
-    : effectiveAlignmentStatus.status === 'whitespace_target_alignment'
+    : alignmentStatus.status === 'whitespace_target_alignment'
       ? t.segmentWhitespaceAlignmentHint
-      : effectiveAlignmentStatus.status === 'cleared_alignments_skip'
+      : alignmentStatus.status === 'cleared_alignments_skip'
         ? t.segmentClearedSkipHint
-        : effectiveAlignmentStatus.status === 'target_extra_paragraphs'
+        : alignmentStatus.status === 'target_extra_paragraphs'
           ? fill(t.segmentUnalignedHint, {
-            sourceTotal: effectiveAlignmentStatus.sourceTotal,
-            targetTotal: effectiveAlignmentStatus.targetTotal,
+            sourceTotal: alignmentStatus.sourceTotal,
+            targetTotal: alignmentStatus.targetTotal,
           })
-          : effectiveAlignmentStatus.status === 'alignment_ambiguous'
-            ? t.segmentAmbiguousHint
-            : effectiveAlignmentStatus.status === 'target_gap_occupied'
-              ? t.segmentGapOccupiedHint
-              : null;
+          : alignmentStatus.status === 'target_fewer_paragraphs'
+            ? fill(t.segmentFewerTargetHint, {
+              sourceTotal: alignmentStatus.sourceTotal,
+              targetTotal: alignmentStatus.targetTotal,
+            })
+            : alignmentStatus.status === 'alignment_ambiguous'
+              ? t.segmentAmbiguousHint
+              : alignmentStatus.status === 'target_gap_occupied'
+                ? t.segmentGapOccupiedHint
+                : null;
+
+  const dictionaryStatusText = (() => {
+    if (!dictionaryStatus) return null;
+    const revShort = dictionaryStatus.revision ? dictionaryStatus.revision.slice(0, 12) : '';
+    if (dictionaryStatus.kind === 'verified' && revShort) {
+      return dictionaryStatus.gameVersion
+        ? fill(t.dictionaryStatusVerified, { rev: revShort, game: dictionaryStatus.gameVersion })
+        : fill(t.dictionaryStatusVerifiedNoGame, { rev: revShort });
+    }
+    if (dictionaryStatus.kind === 'legacy' && revShort) {
+      return fill(t.dictionaryStatusLegacy, { rev: revShort });
+    }
+    if (dictionaryStatus.kind === 'loading') return t.dictionaryStatusLoading;
+    if (dictionaryStatus.kind === 'error') return t.dictionaryStatusError;
+    return t.dictionaryStatusUnverified;
+  })();
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
@@ -171,13 +225,70 @@ export function MyMemory({
       : `${base}${error.detail ? ` (${error.detail})` : ''} ${fallback}`;
   };
 
-  function applyReplace(file: TmFile) {
+  const storageNotReady = storageMode === 'selfhost_sqlite' && storageState !== 'ready';
+  const mutationsDisabled = busy || storageNotReady;
+
+  function storageNotReadyMessage() {
+    return storageState === 'loading' ? t.storageLoading : t.storageError;
+  }
+
+  async function applyReplace(file: TmFile, force = false) {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      setPending(null);
+      return;
+    }
+    if (persistence) {
+      setBusy(true);
+      try {
+        const res = await persistence.replace(file, { force });
+        if (!res.ok) {
+          if (res.conflict) {
+            setEntries(res.entries);
+            setPending(file);
+            failure(fill(t.storageConflict, { n: res.entries.length }));
+            return;
+          }
+          failure(res.error ? errorText(res.error) : t.storageError);
+          setPending(null);
+          return;
+        }
+        setEntries(res.entries);
+        setPending(null);
+        notice(fill(t.notices.imported, { n: res.entries.length }));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setEntries(file.entries);
     setPending(null);
     notice(fill(t.notices.imported, { n: file.entries.length }));
   }
 
-  function applyMerge(file: TmFile) {
+  async function applyMerge(file: TmFile) {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      setPending(null);
+      return;
+    }
+    if (persistence) {
+      setBusy(true);
+      try {
+        const res = await persistence.merge(file);
+        if (!res.ok) {
+          failure(res.error ? errorText(res.error) : t.storageError);
+          setPending(null);
+          return;
+        }
+        setEntries(res.entries);
+        setPending(null);
+        notice(fill(t.notices.merged, { added: file.entries.length, total: res.entries.length }));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const merged = mergeTranslationMemoryEntries(entries, file.entries);
       setEntries(merged);
@@ -191,6 +302,11 @@ export function MyMemory({
 
   async function importFile(file?: File) {
     if (!file) return;
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      setPending(null);
+      return;
+    }
     setPending(null);
     try {
       if (file.size > MAX_TM_BYTES) {
@@ -201,7 +317,7 @@ export function MyMemory({
         setPending(parsed);
         setFeedback(null);
       } else {
-        applyReplace(parsed);
+        await applyReplace(parsed);
       }
     } catch (error) {
       failure(errorText(error, t.errors.importFailed));
@@ -223,29 +339,7 @@ export function MyMemory({
     }
   }
 
-  function confirmCurrent() {
-    const liveBasis = getServiceBasis ? getServiceBasis() : { currentTermsDbRevision, currentGameVersion };
-    const outcome = confirmTranslationMemoryEntry(entries, {
-      sourceText,
-      targetText,
-      direction,
-      prevSource: prevSource ?? null,
-      nextSource: nextSource ?? null,
-      origin: TM_ORIGIN_HUMAN,
-      termsDbRevision: liveBasis.currentTermsDbRevision,
-      gameVersion: liveBasis.currentGameVersion,
-    });
-    if (outcome.status === 'added') {
-      setEntries(outcome.entries);
-      notice(t.notices.confirmedAdded);
-      return;
-    }
-    if (outcome.status === 'updated') {
-      setEntries(outcome.entries);
-      notice(fill(t.notices.confirmedUpdated, { count: outcome.entry.use_count }));
-      return;
-    }
-    if (outcome.status !== 'invalid') return;
+  function reportConfirmInvalid(outcome: Extract<TmConfirmResult, { status: 'invalid' }>) {
     const fieldName = outcome.field === 'target'
       ? t.fieldTarget
       : outcome.field === 'note'
@@ -257,6 +351,63 @@ export function MyMemory({
     else if (outcome.error === 'field_too_long') failure(fill(t.errors.fieldTooLong, { field: fieldName, max: outcome.max ?? 0 }));
     else if (outcome.error === 'field_required') failure(fill(t.errors.fieldRequired, { field: fieldName }));
     else failure(fill(t.errors.fieldInvalid, { field: fieldName }));
+  }
+
+  async function confirmCurrent() {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      return;
+    }
+    // Tier 3 (Human confirm): strictly fresh live provenance only; NEVER writes `lastKnown` on stale/error/idle (P1-02).
+    const confirmBasis = getConfirmBasis
+      ? getConfirmBasis()
+      : { currentTermsDbRevision: null, currentGameVersion: null };
+    const candidate: TmConfirmCandidate = {
+      sourceText,
+      targetText,
+      direction,
+      prevSource: prevSource ?? null,
+      nextSource: nextSource ?? null,
+      origin: TM_ORIGIN_HUMAN,
+      termsDbRevision: confirmBasis.currentTermsDbRevision,
+      gameVersion: confirmBasis.currentGameVersion,
+    };
+
+    if (persistence) {
+      setBusy(true);
+      try {
+        const outcome = await persistence.confirm(candidate);
+        if (outcome.status === 'added') {
+          setEntries(outcome.entries);
+          notice(t.notices.confirmedAdded);
+        } else if (outcome.status === 'updated') {
+          setEntries(outcome.entries);
+          notice(fill(t.notices.confirmedUpdated, { count: outcome.entry.use_count }));
+        } else if (outcome.status === 'invalid') {
+          reportConfirmInvalid(outcome);
+        } else {
+          failure(t.storageError);
+        }
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    const outcome = confirmTranslationMemoryEntry(entries, candidate);
+    if (outcome.status === 'added') {
+      setEntries(outcome.entries);
+      notice(t.notices.confirmedAdded);
+      return;
+    }
+    if (outcome.status === 'updated') {
+      setEntries(outcome.entries);
+      notice(fill(t.notices.confirmedUpdated, { count: outcome.entry.use_count }));
+      return;
+    }
+    if (outcome.status === 'invalid') {
+      reportConfirmInvalid(outcome);
+    }
   }
 
   function applySuggestion(match: TmMatch, matchQuery: typeof deferredQuery) {
@@ -273,7 +424,8 @@ export function MyMemory({
     ) {
       return;
     }
-    const liveBasis = getServiceBasis ? getServiceBasis() : { currentTermsDbRevision, currentGameVersion };
+    // Tier 2 (Manual reference apply): recheck display freshness at click time.
+    const liveBasis = getDisplayBasis ? getDisplayBasis() : { currentTermsDbRevision, currentGameVersion };
     const liveMatch = recheckTmMatchFreshness(match, liveBasis);
     const outcome = onApplySuggestion(match.entry.target_text);
     const applied = typeof outcome === 'boolean' ? outcome : outcome ? outcome.applied : true;
@@ -281,6 +433,11 @@ export function MyMemory({
       const reason = typeof outcome === 'object' && outcome ? outcome.reason : undefined;
       if (reason === 'multi_paragraph_suggestion') {
         failure(t.errors.multiParagraphSuggestion);
+      } else if (reason === 'target_fewer_paragraphs' || targetHasFewerSegments) {
+        failure(fill(t.errors.targetFewerParagraphs, {
+          sourceTotal: alignmentStatus.sourceTotal,
+          targetTotal: alignmentStatus.targetTotal,
+        }));
       } else if (reason === 'target_gap_occupied') {
         failure(t.errors.targetGapOccupied);
       } else if (reason === 'whitespace_target_alignment') {
@@ -289,8 +446,8 @@ export function MyMemory({
         failure(t.errors.clearedAlignmentsSkip);
       } else if (targetHasMoreSegments) {
         failure(fill(t.errors.segmentUnaligned, {
-          sourceTotal: effectiveAlignmentStatus.sourceTotal,
-          targetTotal: effectiveAlignmentStatus.targetTotal,
+          sourceTotal: alignmentStatus.sourceTotal,
+          targetTotal: alignmentStatus.targetTotal,
         }));
       } else {
         failure(t.errors.segmentAlignmentRequired);
@@ -307,7 +464,28 @@ export function MyMemory({
     notice(liveMatch.needsRecheck ? t.notices.appliedRecheck : t.notices.applied);
   }
 
-  function removeAt(index: number) {
+  async function removeAt(index: number) {
+    if (storageNotReady) {
+      failure(storageNotReadyMessage());
+      return;
+    }
+    const targetEntry = entries[index];
+    if (!targetEntry) return;
+    if (persistence) {
+      setBusy(true);
+      try {
+        const res = await persistence.remove(targetEntry);
+        if (!res.ok) {
+          failure(t.storageError);
+          return;
+        }
+        setEntries(res.entries);
+        notice(t.notices.removed);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setEntries(list => list.filter((_, i) => i !== index));
     notice(t.notices.removed);
   }
@@ -315,7 +493,12 @@ export function MyMemory({
   const visibleEntries = entries.slice(0, LIST_PREVIEW_CAP);
 
   return (
-    <section className="my-memory" data-open={open ? 'true' : 'false'} aria-labelledby="my-memory-title">
+    <section
+      className="my-memory"
+      data-open={open ? 'true' : 'false'}
+      data-storage-mode={storageMode}
+      aria-labelledby="my-memory-title"
+    >
       <div className="lookup-heading">
         <h2 id="my-memory-title">{t.title}</h2>
         <button
@@ -333,6 +516,36 @@ export function MyMemory({
         {entries.length > 0 ? ` · ${fill(t.hitCount, { n: matches.length })}` : ''}
       </p>
       <div id="my-memory-body" hidden={!open}>
+        <div className="my-memory-status-strip" data-testid="my-memory-status">
+          <span className="my-memory-status-pill" data-storage={storageMode}>
+            {storageMode === 'selfhost_sqlite' ? t.storageBadgeSelfhost : t.storageBadgePublic}
+          </span>
+          {dictionaryStatusText && (
+            <span
+              className="my-memory-status-pill my-memory-dict-status"
+              data-testid="my-memory-dictionary-status"
+              data-dict-state={dictionaryStatus?.kind}
+            >
+              {t.dictionaryStatusLabel}: {dictionaryStatusText}
+            </span>
+          )}
+        </div>
+        {storageMode === 'selfhost_sqlite' && storageState === 'loading' && (
+          <p className="field-hint my-terms-note" role="status">{t.storageLoading}</p>
+        )}
+        {storageMode === 'selfhost_sqlite' && storageState === 'error' && (
+          <div className="my-terms-feedback my-terms-error" role="alert">
+            <span>{t.storageError}</span>
+            {onRetryLoad && (
+              <>
+                {' '}
+                <button type="button" className="text-button" onClick={onRetryLoad}>
+                  {t.storageRetry}
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <p className="field-hint my-terms-note">{t.memoryNote}</p>
         <p className="field-hint my-terms-note">{t.referenceNote}</p>
         {isMultiSegment && (
@@ -369,15 +582,20 @@ export function MyMemory({
           </div>
         )}
         {alignmentBannerText && (
-          <p className="my-memory-recheck-hint" data-testid="my-memory-alignment-hint" role="status">
+          <p
+            className="my-memory-recheck-hint"
+            data-testid="my-memory-alignment-hint"
+            data-alignment-status={alignmentStatus.status}
+            role="status"
+          >
             {alignmentBannerText}
           </p>
         )}
         <div className="my-terms-actions">
-          <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>
+          <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => fileBox.current?.click()}>
             {t.importButton}
           </button>
-          <button type="button" className="secondary-button" onClick={exportFile}>
+          <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={exportFile}>
             {t.exportButton}
           </button>
         </div>
@@ -385,8 +603,8 @@ export function MyMemory({
           <button
             type="button"
             className="secondary-button my-memory-confirm-btn"
-            disabled={!sourceText.trim() || !targetText.trim() || isTargetCursorUnaligned}
-            onClick={confirmCurrent}
+            disabled={mutationsDisabled || !sourceText.trim() || !targetText.trim() || isTargetCursorUnaligned}
+            onClick={() => void confirmCurrent()}
           >
             {isMultiSegment ? t.confirmSegmentButton : t.confirmButton}
           </button>
@@ -396,6 +614,7 @@ export function MyMemory({
           className="visually-hidden"
           type="file"
           tabIndex={-1}
+          disabled={mutationsDisabled}
           accept=".json,application/json"
           aria-label={t.importAria}
           onChange={event => {
@@ -408,13 +627,13 @@ export function MyMemory({
           <div className="my-terms-confirm" role="group" aria-label={t.importButton}>
             <p>{fill(t.replacePrompt, { n: entries.length })}</p>
             <div className="my-terms-actions">
-              <button type="button" className="secondary-button" onClick={() => applyMerge(pending)}>
+              <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyMerge(pending)}>
                 {t.mergeConfirm}
               </button>
-              <button type="button" className="secondary-button" onClick={() => applyReplace(pending)}>
+              <button type="button" className="secondary-button" disabled={mutationsDisabled} onClick={() => void applyReplace(pending, true)}>
                 {t.replaceConfirm}
               </button>
-              <button type="button" className="secondary-button" onClick={() => setPending(null)}>
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => setPending(null)}>
                 {t.replaceKeep}
               </button>
             </div>
@@ -501,7 +720,7 @@ export function MyMemory({
                     {entry.direction === 'en' ? t.directionEn : t.directionZh} · {fill(t.hitMeta, { count: entry.use_count, origin: t.origins[entry.origin] })}
                   </p>
                   <div className="finding-actions">
-                    <button type="button" className="text-button" onClick={() => removeAt(idx)}>
+                    <button type="button" className="text-button" disabled={mutationsDisabled} onClick={() => void removeAt(idx)}>
                       {t.remove}
                       <span className="visually-hidden"> {entry.source_text}</span>
                     </button>

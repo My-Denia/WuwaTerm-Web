@@ -4,8 +4,10 @@
 // storage: the state lives in the controller snapshot only.
 import { segmentInputs, isAmbiguousMention } from './long-review.ts';
 import { isHandled, issueStatus } from './semantic-state.js';
+import { SEGMENT_LIMIT, alignmentsLeaveGaps, core, guardPairForRequest, pairSegments } from './segmentation.ts';
+import { sha256Hex } from './sha256.js';
 import { STRUCTURE_LIMITS, structureCheckBatches, structureFindingCovers } from './structure-check.js';
-import type { Decision, Draft, PairStatus, PairView, Placed, Region, Report, ScalarOffset, SemanticState, Span } from './workbench-model.ts';
+import type { Alignment, Decision, Draft, PairStatus, PairView, Placed, Region, Report, ScalarOffset, SemanticState, Span } from './workbench-model.ts';
 import { scalarOffset } from './workbench-model.ts';
 
 export type StructureRule =
@@ -32,12 +34,123 @@ export const emptyStructure = (): StructureState => ({ phase: 'idle', results: {
 const CHECKED: readonly PairStatus[] = ['ready', 'untranslated'];
 const keyOf = (sourceHash: string, targetHash: string) => `${sourceHash}:${targetHash}`;
 
+type StructureUnit = {
+  index: number;
+  key: string;
+  source: string;
+  target: string;
+  sourceStart: ScalarOffset;
+  sourceEnd: ScalarOffset;
+  targetStart: ScalarOffset;
+  targetEnd: ScalarOffset;
+  checkable: boolean;
+};
+
+function splitOversizedAlignmentUnit(
+  unit: Omit<StructureUnit, 'index'>,
+  sc: readonly string[],
+  tc: readonly string[],
+): Omit<StructureUnit, 'index'>[] {
+  const sLen = unit.sourceEnd - unit.sourceStart;
+  const tLen = unit.targetEnd - unit.targetStart;
+  if (sLen <= STRUCTURE_LIMITS.side && tLen <= STRUCTURE_LIMITS.side) return [unit];
+  if (sLen === 0 || tLen === 0) return [unit];
+  try {
+    const unitAlignment: Alignment = {
+      source: { start: scalarOffset(0), end: scalarOffset(sLen), text: unit.source },
+      target: { start: scalarOffset(0), end: scalarOffset(tLen), text: unit.target },
+    };
+    const subPairs = pairSegments(unit.source, unit.target, SEGMENT_LIMIT, [unitAlignment]).map(p => guardPairForRequest(p));
+    if (!subPairs.length) return [unit];
+    return subPairs.map(pair => {
+      const sourceStart = scalarOffset(unit.sourceStart + pair.source.core_start);
+      const sourceEnd = scalarOffset(unit.sourceStart + pair.source.core_end);
+      const targetStart = scalarOffset(unit.targetStart + pair.target.core_start);
+      const targetEnd = scalarOffset(unit.targetStart + pair.target.core_end);
+      const source = sc.slice(sourceStart, sourceEnd).join('');
+      const target = tc.slice(targetStart, targetEnd).join('');
+      return {
+        key: keyOf(sha256Hex(source), sha256Hex(target)),
+        source,
+        target,
+        sourceStart,
+        sourceEnd,
+        targetStart,
+        targetEnd,
+        checkable: CHECKED.includes(pair.status) && !!source.trim(),
+      };
+    });
+  } catch {
+    return [unit];
+  }
+}
+
+/**
+ * Layer 1 units of a draft. When complete explicit alignments exist (> 1 entry, no uncovered gaps), each alignment is
+ * projected independently: alignments within Core's per-side limit stay separate (so short TM-reused segments are never
+ * merged and keep per-segment keys/findings), while any alignment exceeding STRUCTURE_LIMITS.side is split in isolation
+ * via pairSegments so oversized paragraphs keep bounded checkable sub-units without swallowing neighboring alignments.
+ */
+function structureUnits(draft: Draft): StructureUnit[] {
+  const alignments = draft.alignments;
+  if (alignments && alignments.length > 1) {
+    let hasGaps = true;
+    try {
+      hasGaps = alignmentsLeaveGaps(draft.source, draft.target, alignments);
+    } catch {
+      hasGaps = true;
+    }
+    if (!hasGaps) {
+      const sc = Array.from(draft.source);
+      const tc = Array.from(draft.target);
+      const units: Omit<StructureUnit, 'index'>[] = [];
+      for (const entry of alignments) {
+        const [sCs, sCe] = core(sc, entry.source.start, entry.source.end);
+        const sourceText = sc.slice(sCs, sCe).join('');
+        let tCs = 0;
+        let tCe = 0;
+        let targetText = '';
+        if (entry.target !== null) {
+          const [cs, ce] = core(tc, entry.target.start, entry.target.end);
+          tCs = cs;
+          tCe = ce;
+          targetText = tc.slice(cs, ce).join('');
+        }
+        const unit: Omit<StructureUnit, 'index'> = {
+          key: keyOf(sha256Hex(sourceText), sha256Hex(targetText)),
+          source: sourceText,
+          target: targetText,
+          sourceStart: scalarOffset(sCs),
+          sourceEnd: scalarOffset(sCe),
+          targetStart: scalarOffset(tCs),
+          targetEnd: scalarOffset(tCe),
+          checkable: !!sourceText.trim(),
+        };
+        units.push(...splitOversizedAlignmentUnit(unit, sc, tc));
+      }
+      return units.map((unit, index) => ({ ...unit, index }));
+    }
+  }
+  return segmentInputs(draft).items.map((item, index) => ({
+    index,
+    key: keyOf(item.sourceHash, item.targetHash),
+    source: item.sourceCore,
+    target: item.targetCore,
+    sourceStart: item.range.source_start,
+    sourceEnd: item.range.source_end,
+    targetStart: item.range.target_start,
+    targetEnd: item.range.target_end,
+    checkable: CHECKED.includes(item.pair.status) && !!item.sourceCore.trim(),
+  }));
+}
+
 /**
  * The segments of a draft a structure check sends, with the key its result is stored under. `id` is the request `segment_id`.
+ * Projected per alignment via structureUnits so short reused alignments are never merged and oversized alignments keep bounded splits.
  */
 export function structureItems(draft: Draft): { id: string; index: number; key: string; source: string; target: string }[] {
-  return segmentInputs(draft).items.flatMap((item, index) => (CHECKED.includes(item.pair.status) && item.sourceCore.trim()
-    ? [{ id: `s${index}`, index, key: keyOf(item.sourceHash, item.targetHash), source: item.sourceCore, target: item.targetCore }]
+  return structureUnits(draft).flatMap(unit => (unit.checkable
+    ? [{ id: `s${unit.index}`, index: unit.index, key: unit.key, source: unit.source, target: unit.target }]
     : []));
 }
 
@@ -53,7 +166,9 @@ export type StructureView = {
   index: number;
   checkable: boolean;
   sourceStart: ScalarOffset;
+  sourceEnd: ScalarOffset;
   targetStart: ScalarOffset;
+  targetEnd: ScalarOffset;
   result: (Omit<StructureResult, 'findings'> & { findings: (StructureFinding & { source_span: Span | null; target_span: Span | null })[] }) | null;
 };
 
@@ -62,17 +177,22 @@ const shift = (span: StructureSpan | null, by: number): Span | null =>
 
 /** The Layer 1 view of every segment of the draft under `structure`, in segment order. */
 export function structureViews(draft: Draft, structure: StructureState): StructureView[] {
-  return segmentInputs(draft).items.map((item, index) => {
-    const stored = structure.results[keyOf(item.sourceHash, item.targetHash)];
-    const checkable = CHECKED.includes(item.pair.status) && !!item.sourceCore.trim();
+  return structureUnits(draft).map(unit => {
+    const stored = structure.results[unit.key];
     return {
-      index,
-      checkable,
-      sourceStart: item.range.source_start,
-      targetStart: item.range.target_start,
-      result: stored && checkable ? {
+      index: unit.index,
+      checkable: unit.checkable,
+      sourceStart: unit.sourceStart,
+      sourceEnd: unit.sourceEnd,
+      targetStart: unit.targetStart,
+      targetEnd: unit.targetEnd,
+      result: stored && unit.checkable ? {
         ...stored,
-        findings: stored.findings.map(f => ({ ...f, source_span: shift(f.source_span, item.range.source_start), target_span: shift(f.target_span, item.range.target_start) })),
+        findings: stored.findings.map(f => ({
+          ...f,
+          source_span: shift(f.source_span, unit.sourceStart),
+          target_span: shift(f.target_span, unit.targetStart),
+        })),
       } : null,
     };
   });
@@ -146,13 +266,36 @@ export function layerTwoRows(semantic: SemanticState, views: readonly PairView[]
     const result = resultOf(p);
     return result ? views.find(v => overlaps(result.region.source, { start: v.pair.source.core_start, end: v.pair.source.core_end })) ?? null : null;
   };
+  const boundariesAligned = layer1.length === views.length
+    && layer1.every((l1, i) => {
+      const pair = views[i]!.pair;
+      return l1.sourceStart === pair.source.core_start
+        && l1.sourceEnd === pair.source.core_end
+        && l1.targetStart === pair.target.core_start
+        && l1.targetEnd === pair.target.core_end;
+    });
   return semantic.placed.map(p => {
     const info = issueStatus(semantic, p) as { status: string; decision: Decision | null; reference: Decision | null };
     const view = segmentOf(p);
     const segment = view ? view.pair.index : null;
     const position = p.live.source_span?.start ?? p.live.target_span?.start ?? resultOf(p)?.region.source.start ?? 0;
+    const issueCheck = { category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span };
+    const matchingLayer1 = boundariesAligned
+      ? (segment !== null && layer1[segment] ? [layer1[segment]!] : [])
+      : layer1.filter(v => {
+          if (p.live.source_span) {
+            return overlaps(p.live.source_span, { start: v.sourceStart, end: v.sourceEnd });
+          }
+          if (p.live.target_span) {
+            return v.targetEnd > v.targetStart && overlaps(p.live.target_span, { start: v.targetStart, end: v.targetEnd });
+          }
+          return view !== null && overlaps(
+            { start: view.pair.source.core_start, end: view.pair.source.core_end },
+            { start: v.sourceStart, end: v.sourceEnd },
+          );
+        });
     const covered = !isHandled(info.status) && segment !== null
-      && coveredByStructure({ category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span }, layer1[segment]);
+      && matchingLayer1.some(v => coveredByStructure(issueCheck, v));
     return { placed: p, ...info, segment, position, imported: !!resultOf(p)?.imported, covered };
   }).sort((a, b) => a.position - b.position || a.placed.id.localeCompare(b.placed.id));
 }

@@ -407,10 +407,21 @@ test('skip-segment fill never overwrites later segment, multi-paragraph suggesti
     }),
   ]));
 
-  // Start with only segment 1 translated (`Uno`), skip segment 2 to fill segment 3 (`Tres`),
+  // Start from blank target: apply segment 1 (`Uno`), skip segment 2 to fill segment 3 (`Tres`),
   // then return to segment 2 and fill `Dos` -> must produce `Uno\n\nDos\n\nTres` without overwriting `Tres`!
   await page.locator('#review-source').fill(src3);
-  await page.locator('#review-target').fill('Uno');
+  await page.locator('#review-target').fill('');
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: '首段原文。',
+      target_text: 'Uno',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+  ]));
+  await panel(page).getByRole('button', { name: tmMsg.mergeConfirm, exact: true }).click();
+  await hits(page).filter({ hasText: 'Uno' }).getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Uno');
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
@@ -442,14 +453,17 @@ test('skip-segment fill never overwrites later segment, multi-paragraph suggesti
   await page.clock.fastForward(10 * 60 * 1000 + 50);
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
 
-  // Confirming segment 1 after TTL expiry must write `terms_db_revision: null` (never stamp expired revision).
+  // Confirming segment 1 after TTL expiry must write BOTH terms_db_revision: null AND game_version: null (P1-02!).
   await panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true }).click();
   const exportedAfterTtl = await downloaded(page, () =>
     panel(page).getByRole('button', { name: tmMsg.exportButton, exact: true }).click(),
   );
   const parsedAfterTtl = parseTranslationMemoryText(exportedAfterTtl);
-  const confirmedSeg1 = parsedAfterTtl.entries.find(e => e.source_text === '首段原文。' && e.target_text === 'Uno');
+  const confirmedSeg1 = parsedAfterTtl.entries.find(
+    e => e.source_text === '首段原文。' && e.target_text === 'Uno' && e.origin === 'human_confirmed',
+  );
   expect(confirmedSeg1?.terms_db_revision).toBeNull();
+  expect(confirmedSeg1?.game_version).toBeNull();
 
   // Multi-paragraph TM suggestion rejected when alignments are cleared (no explicit alignments).
   await page.locator('.alignment-panel summary').click();
@@ -570,22 +584,25 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
 
   const src3 = '首段原文。\n\n中段原文。\n\n末段原文。';
   await page.locator('#review-source').fill(src3);
-  await page.locator('#review-target').fill('Uno');
+  await page.locator('#review-target').fill('');
+  // Apply segment 1 (`Uno (TM)`) from blank target to establish explicit [Uno (TM), null, null] alignments,
+  // then skip to segment 3 and apply `Tres (TM)` -> [Uno (TM), null, Tres (TM)].
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)');
   await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
   await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
   await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
 
-  // Skip to segment 3 and apply `Tres (TM)` -> creates explicit [Uno, null, Tres (TM)] alignments.
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
-  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nTres (TM)');
+  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)\n\nTres (TM)');
 
   // Manually type handwritten text into the unaligned middle gap in target, keeping segment 2 aligned as null.
-  await page.locator('#review-target').fill('Uno\n\nDos manual draft\n\nTres (TM)');
-  // Clicking directly inside handwritten `Dos manual draft` must NOT fall back to segment 1 (`Uno`);
+  await page.locator('#review-target').fill('Uno (TM)\n\nDos manual draft\n\nTres (TM)');
+  // Clicking directly inside handwritten `Dos manual draft` must NOT fall back to segment 1 (`Uno (TM)`);
   // segment label reports unmapped caret (NOT `当前第 1 / 3 段`), displays unaligned hint, and disables Apply & Confirm!
-  const unalignedTargetCaret = 'Uno\n\nDos '.length;
+  const unalignedTargetCaret = 'Uno (TM)\n\nDos '.length;
   await page.locator('#review-target').evaluate((el, pos) => {
     el.focus();
     el.setSelectionRange(pos, pos);
@@ -598,7 +615,7 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentTargetCursorUnalignedHint);
   await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeDisabled();
   await expect(hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true })).toBeDisabled();
-  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos manual draft\n\nTres (TM)');
+  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)\n\nDos manual draft\n\nTres (TM)');
 
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
   await expect(panel(page).getByTestId('my-memory-segment-scope')).toHaveAttribute('data-target-unaligned', 'false');
@@ -609,7 +626,7 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   await expect(hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true })).toBeEnabled();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.targetGapOccupied);
-  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos manual draft\n\nTres (TM)');
+  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)\n\nDos manual draft\n\nTres (TM)');
 
   // Even when a segment's aligned target spans multiple paragraphs (targetSegmentTotal > sourceSegmentTotal),
   // clear explicit alignment suppresses the false segmentUnalignedHint banner!
@@ -759,3 +776,114 @@ for (const viewport of [
     });
   });
 }
+
+test('direct /api/dictionary identity, P1-03 partial-target guard, and batch incremental reuse with Layer 1 check + non-text receipt', async ({ page }) => {
+  const dictRev = 'd9f5e4ae' + '1'.repeat(56);
+  const traffic = { dictionary: 0, translations: [], structureChecks: 0 };
+  await page.route('**/api/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/capabilities') {
+      return route.fulfill({
+        json: { capabilities: ['dictionary-identity-v1', 'structure-check-v1', 'translation-context-v1'], request_id: 'cap-live' },
+      });
+    }
+    if (path === '/api/pool') return route.fulfill({ json: POOL });
+    if (path === '/api/dictionary') {
+      traffic.dictionary += 1;
+      return route.fulfill({
+        json: {
+          revision: dictRev,
+          schema_version: '2',
+          source_commit: '9ddee819',
+          game_version: '3.7.0',
+          term_count: 12097,
+          request_id: 'dict-live',
+        },
+      });
+    }
+    if (path === '/api/structure-checks') {
+      traffic.structureChecks += 1;
+      const body = route.request().postDataJSON();
+      return route.fulfill({
+        json: {
+          request_id: 'sc-live',
+          check_version: 'structure-check-v1',
+          checks: ['empty_target', 'numbers', 'placeholders', 'paragraphs'],
+          segments: body.segments.map((seg, index) => ({
+            index,
+            segment_id: seg.segment_id,
+            findings: [],
+            omitted_findings: 0,
+            layout: { source_paragraphs: 1, target_paragraphs: 1, source_lines: 1, target_lines: 1 },
+          })),
+        },
+      });
+    }
+    if (path === '/api/translations') {
+      const body = route.request().postDataJSON();
+      traffic.translations.push(body);
+      return route.fulfill({
+        json: { kind: 'llm', text: 'Edited Para 3 translated.', direction: 'en', dictionary_miss: false, request_id: 'tr-live' },
+      });
+    }
+    throw new Error(`Unexpected API request: ${path}`);
+  });
+
+  await page.goto(BASE + '/');
+  await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
+  await expand(page);
+  await expect.poll(() => traffic.dictionary).toBe(1);
+  await expect(panel(page).getByTestId('my-memory-dictionary-status')).toHaveAttribute('data-dict-state', 'verified');
+  await expect(panel(page).getByTestId('my-memory-dictionary-status')).toContainText('d9f5e4ae1111');
+
+  // Confirm 3 segments against live /api/dictionary (NO /api/reviews needed!).
+  const s1 = '首段：今汐共鸣效率提高 10%。';
+  const s2 = '中段：暴击率提高 20%。';
+  const s3 = '末段：攻击力提高 30%。';
+  await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+  await page.locator('#review-source').fill(`${s1}\n\n${s2}\n\n${s3}`);
+  await page.locator('#review-target').fill('First: Jinhsi Energy Regen +10%.\n\nMiddle: CRIT Rate +20%.\n\nLast: ATK +30%.');
+  // Move caret to segment 1 so we confirm segments 1, 2, 3 in order.
+  await page.locator('#review-source').evaluate(el => {
+    el.focus();
+    el.setSelectionRange(0, 0);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toContainText(
+    tmMsg.segmentScope.replace('{i}', '1').replace('{n}', '3'),
+  );
+
+  for (let i = 0; i < 3; i += 1) {
+    await panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true }).click();
+    if (i < 2) await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  }
+  await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '3'));
+
+  // Verify P1-03 guard on partial target A'/C' vs A/B/C: refuses overwrite and disables Confirm!
+  await page.locator('#review-target').fill("First: Jinhsi Energy Regen +10%.\n\nLast: ATK +30%.");
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveAttribute('data-alignment-status', 'target_fewer_paragraphs');
+  await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeDisabled();
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toContainText('少于原文');
+  await expect(page.locator('#review-target')).toHaveValue("First: Jinhsi Energy Regen +10%.\n\nLast: ATK +30%.");
+
+  // Now clear target and run incremental translation on identical 3-paragraph source:
+  // all 3 segments reuse from verified TM with 0 /api/translations calls, 1 Layer 1 structure check, and non-text receipt!
+  await page.locator('#review-target').fill('');
+  await page.getByRole('button', { name: m.review.translateIdle, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue(
+    'First: Jinhsi Energy Regen +10%.\n\nMiddle: CRIT Rate +20%.\n\nLast: ATK +30%.',
+  );
+  expect(traffic.translations).toHaveLength(0);
+  expect(traffic.structureChecks).toBe(1);
+  const receipt = page.getByTestId('tm-run-receipt');
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toHaveAttribute('data-reused', '3');
+  await expect(receipt).toHaveAttribute('data-model-calls', '0');
+  await expect(receipt).toHaveAttribute('data-structure-status', 'passed');
+  const receiptText = await receipt.innerText();
+  expect(receiptText).not.toContain('今汐');
+  expect(receiptText).not.toContain('Jinhsi');
+  expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
+});

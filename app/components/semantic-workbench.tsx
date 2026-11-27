@@ -105,7 +105,7 @@ function Snippet({ text, span, missing }: { text: string; span: Span | null; mis
 
 export function SemanticWorkbench(props: Props) {
   const { doc, snapshot, lang, pool, locate, termbaseEntries, onPromoteToTermbase } = props;
-  const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction, structure } = snapshot;
+  const { draft, semantic, capabilities, basis, resetSignal, run, now, pairTranslating, usePrecedents, lastSemanticAction, structure, tmReceipt } = snapshot;
   const { source, target, direction } = draft;
   const s = semanticMsg(lang);
   const m = msg(lang);
@@ -314,8 +314,8 @@ export function SemanticWorkbench(props: Props) {
   };
   const translateBlankLong = !!source.trim() && !target.trim() && sourceChars.length > 2000;
   const translateResumable = useMemo(
-    () => !translateBlankLong && doc.hasResumableTranslate(draft, semantic, basis),
-    [translateBlankLong, doc, draft, semantic, basis],
+    () => !translateBlankLong && (long || (draft.alignments !== null && draft.alignments.length > 0)) && doc.hasResumableTranslate(draft, semantic, basis),
+    [translateBlankLong, long, doc, draft, semantic, basis],
   );
   const showSegments = pairs.length > 1 || long || semantic.results.length > 0 || pairs.some(p => p.status !== 'ready') || run.kind !== null;
   const translationClosed = !!poolData && (!poolData.translation_enabled || poolData.translations.remaining === 0 || poolData.characters.remaining === 0);
@@ -582,26 +582,82 @@ export function SemanticWorkbench(props: Props) {
   </div> : null;
 
   return <>
-    {long && <div className="long-tools" role="group" aria-label={s.segmentsTitle}>
+    {tmReceipt && (
+      <section
+        className="tm-run-receipt"
+        data-testid="tm-run-receipt"
+        data-reused={tmReceipt.reused}
+        data-model-calls={tmReceipt.modelCalls}
+        data-retranslated={tmReceipt.retranslated}
+        data-pending-retranslate={tmReceipt.pendingRetranslate}
+        data-demoted={tmReceipt.demotedByStructureCheck}
+        data-structure-status={tmReceipt.structureCheckStatus}
+        role="status"
+        aria-live="polite"
+      >
+        <h4>{s.tmReceipt.title}</h4>
+        <p className="tm-receipt-summary">
+          {fill(s.tmReceipt.summary, {
+            reused: tmReceipt.reused,
+            baseline: tmReceipt.baselineRequests,
+            modelCalls: tmReceipt.modelCalls,
+            retranslated: tmReceipt.retranslated,
+          })}
+          {tmReceipt.pendingRetranslate > 0
+            ? fill(s.tmReceipt.pendingSuffix, { pending: tmReceipt.pendingRetranslate })
+            : ''}
+        </p>
+        <p className="track-note">
+          {fill(s.tmReceipt.detail, {
+            referenced: tmReceipt.referenced,
+            stale: tmReceipt.staleOrUnknown,
+          })}
+        </p>
+        {tmReceipt.reused > 0 && (
+          <p className={tmReceipt.demotedByStructureCheck > 0 ? 'my-memory-recheck-hint' : 'track-note'}>
+            {tmReceipt.structureCheckStatus === 'passed'
+              ? s.tmReceipt.structurePassed
+              : tmReceipt.structureCheckStatus === 'unavailable'
+                ? s.tmReceipt.structureUnavailable
+                : tmReceipt.structureCheckStatus === 'failed'
+                  ? s.tmReceipt.structureFailed
+                  : fill(s.tmReceipt.structureDemoted, {
+                    n: tmReceipt.demotedByStructureCheck,
+                    segments: numberList(tmReceipt.demotedSegmentIndices.map(i => i + 1)),
+                  })}
+          </p>
+        )}
+        <p className="track-note">
+          {tmReceipt.termsDbRevision
+            ? tmReceipt.gameVersion
+              ? fill(s.tmReceipt.provenance, { rev: tmReceipt.termsDbRevision.slice(0, 12), game: tmReceipt.gameVersion })
+              : fill(s.tmReceipt.provenanceNoGame, { rev: tmReceipt.termsDbRevision.slice(0, 12) })
+            : s.tmReceipt.provenanceUnknown}
+          {' · '}
+          {s.tmReceipt.noTextNote}
+        </p>
+      </section>
+    )}
+    {(long || translateResumable) && <div className="long-tools" role="group" aria-label={s.segmentsTitle}>
       {translateBlankLong && <div className="long-translate">
         <p>{s.translateLongHint}</p>
         <div className="actions">
-          <button type="button" className="primary-button" disabled={runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateLong}</button>
+          <button type="button" className="primary-button" disabled={runActive || snapshot.tmPreparing || translationClosed} onClick={() => void doc.startTranslateRun()}>{s.translateLong}</button>
         </div>
       </div>}
       {translateResumable && <div className="long-translate">
         <p>{s.translateResumeHint}</p>
         <div className="actions">
-          <button type="button" className="primary-button" disabled={pairTranslating !== null || runActive || translationClosed} onClick={() => doc.startTranslateRun()}>{s.translateResume}</button>
+          <button type="button" className="primary-button" disabled={pairTranslating !== null || runActive || snapshot.tmPreparing || translationClosed} onClick={() => void doc.startTranslateRun()}>{s.translateResume}</button>
         </div>
       </div>}
-      {!translateBlankLong && <div className="long-terms">
+      {long && !translateBlankLong && <div className="long-terms">
         <p>{s.runTermHint}</p>
         <div className="actions">
           <button type="button" className={`${translateResumable ? 'secondary-button' : 'primary-button'}${needsRecheck > 0 && termRows.length > 0 && !runActive ? ' recheck-prominent' : ''}`} data-recheck={needsRecheck > 0 && termRows.length > 0 ? 'true' : undefined} disabled={runActive || reviewsClosed || !plan?.cost} onClick={() => doc.startTermRun()}>{runTermLabel}</button>
         </div>
       </div>}
-      {draft.alignments !== null && <div className="actions">
+      {long && draft.alignments !== null && <div className="actions">
         <button type="button" className="secondary-button" disabled={runActive} onClick={() => doc.resetAlignments()}>{s.useAutoAlignment}</button>
       </div>}
     </div>}
