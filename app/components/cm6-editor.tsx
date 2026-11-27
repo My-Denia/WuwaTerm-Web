@@ -27,6 +27,7 @@ import {
 import { defaultKeymap } from '@codemirror/commands';
 import {
   applyDomChangesToRaw,
+  createCompositionTracker,
   domUtf16ToScalar,
   normalizeLineBreaks,
   rawSpanFromDomRange,
@@ -200,8 +201,7 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
   const onStateSnapshotRef = useRef(props.onStateSnapshot);
   onStateSnapshotRef.current = props.onStateSnapshot;
 
-  const composingRef = useRef(false);
-  const pendingCompositionEndRef = useRef(false);
+  const composingActiveRef = useRef(false);
   const suppressScroll = useRef(false);
   const suppressRaf = useRef<number | null>(null);
 
@@ -265,20 +265,43 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
       ...defaultKeymap,
     ]);
 
-    const finalizeComposition = (view: EditorView) => {
-      composingRef.current = false;
-      pendingCompositionEndRef.current = false;
-      const docStr = view.state.doc.toString();
-      if (normalizeLineBreaks(latestRaw.current) !== docStr) {
-        latestRaw.current = docStr;
-      }
-      onEditRef.current(latestRaw.current, { composing: false });
-      const cb = onCursorChangeRef.current;
-      if (cb) {
-        const scalar = domUtf16ToScalar(latestRaw.current, view.state.selection.main.from);
-        if (scalar !== null) cb(scalar);
-      }
-    };
+    const composition = createCompositionTracker({
+      scheduleFallback(onFire) {
+        let timerId: ReturnType<typeof setTimeout> | null = null;
+        let rafId: number | null = requestAnimationFrame(() => {
+          rafId = null;
+          timerId = setTimeout(() => {
+            timerId = null;
+            onFire();
+          }, 50);
+        });
+        return () => {
+          if (rafId !== null) {
+            cancelAnimationFrame(rafId);
+            rafId = null;
+          }
+          if (timerId !== null) {
+            clearTimeout(timerId);
+            timerId = null;
+          }
+        };
+      },
+      onFinalize() {
+        composingActiveRef.current = false;
+        const activeView = viewRef.current;
+        if (!activeView) return;
+        const docStr = activeView.state.doc.toString();
+        if (normalizeLineBreaks(latestRaw.current) !== docStr) {
+          latestRaw.current = docStr;
+        }
+        onEditRef.current(latestRaw.current, { composing: false });
+        const cb = onCursorChangeRef.current;
+        if (cb) {
+          const scalar = domUtf16ToScalar(latestRaw.current, activeView.state.selection.main.from);
+          if (scalar !== null) cb(scalar);
+        }
+      },
+    });
 
     const state = EditorState.create({
       doc: initialDoc,
@@ -296,7 +319,6 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
         EditorView.updateListener.of(update => {
           const isExternal = update.transactions.some(tr => tr.annotation(externalSync));
           const isComposeEvent = update.transactions.some(tr => tr.isUserEvent('input.type.compose'));
-          if (isComposeEvent) composingRef.current = true;
 
           if (update.docChanged && !isExternal) {
             const edits: DomChange[] = [];
@@ -306,14 +328,9 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
             const nextRaw = applyDomChangesToRaw(latestRaw.current, edits) ?? update.state.doc.toString();
             latestRaw.current = nextRaw;
 
-            if (pendingCompositionEndRef.current && !update.view.composing) {
-              composingRef.current = false;
-              pendingCompositionEndRef.current = false;
-              onEditRef.current(nextRaw, { composing: false });
-            } else {
-              const isComposing = composingRef.current || update.view.composing || isComposeEvent;
-              onEditRef.current(nextRaw, { composing: isComposing });
-            }
+            const isComposing = composition.onLocalDocChange(update.view.composing, isComposeEvent);
+            composingActiveRef.current = isComposing;
+            onEditRef.current(nextRaw, { composing: isComposing });
           }
 
           if (!isExternal && (update.selectionSet || update.docChanged)) {
@@ -338,35 +355,44 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     // inside a single controller composition transaction (one undo step).
     const onBeforeInputCapture = (event: InputEvent) => {
       if (event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'deleteCompositionText') {
-        composingRef.current = true;
-        pendingCompositionEndRef.current = false;
+        composition.begin();
+        composingActiveRef.current = true;
+      } else {
+        composition.onNonComposeEvent();
+        composingActiveRef.current = composition.isComposing();
+      }
+    };
+    const onKeyDownCapture = (event: KeyboardEvent) => {
+      if (!event.isComposing && event.key !== 'Process') {
+        composition.onNonComposeEvent();
+        composingActiveRef.current = composition.isComposing();
       }
     };
     const onCompositionStartCapture = () => {
-      composingRef.current = true;
-      pendingCompositionEndRef.current = false;
+      composition.begin();
+      composingActiveRef.current = true;
     };
     // Bubble-phase listener registered AFTER `new EditorView`: CM6 sets
     // `view.inputState.composing = -1` synchronously in its own `compositionend`
-    // handler and schedules `Promise.resolve().then(() => view.observer.flush())`
-    // for the final committed DOM mutation (e.g. `ni -> 你`). Keep the composition
-    // transaction open until that deferred `updateListener` commit lands, or close
-    // cleanly after the microtask flush if no trailing DOM change occurred.
+    // handler and defers DOMObserver flushing to a microtask (desktop) or next
+    // animation frame (Android Chrome `flushSoon()`). Keep the composition open
+    // until that final `docChanged`, a subsequent non-composition event, or the
+    // cross-frame fallback timer fires.
     const onCompositionEndBubble = () => {
-      if (!composingRef.current) return;
-      pendingCompositionEndRef.current = true;
-      Promise.resolve().then(() => Promise.resolve()).then(() => {
-        if (pendingCompositionEndRef.current && viewRef.current === view) {
-          finalizeComposition(view);
-        }
-      });
+      composition.onCompositionEnd();
     };
-    const onFocusOrBlur = () => {
+    const onFocus = () => {
+      const snap = captureViewSnapshot(view);
+      if (snap) onStateSnapshotRef.current?.(snap);
+    };
+    const onBlur = () => {
+      composition.onNonComposeEvent();
+      composingActiveRef.current = composition.isComposing();
       const snap = captureViewSnapshot(view);
       if (snap) onStateSnapshotRef.current?.(snap);
     };
     const onScroll = () => {
-      if (suppressScroll.current || composingRef.current || view.composing) return;
+      if (suppressScroll.current || composingActiveRef.current || view.composing) return;
       const ratio = readScrollRatio(view.scrollDOM);
       if (ratio !== null) {
         const snap = captureViewSnapshot(view);
@@ -376,10 +402,11 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     };
 
     view.contentDOM.addEventListener('beforeinput', onBeforeInputCapture, true);
+    view.contentDOM.addEventListener('keydown', onKeyDownCapture, true);
     view.contentDOM.addEventListener('compositionstart', onCompositionStartCapture, true);
     view.contentDOM.addEventListener('compositionend', onCompositionEndBubble, false);
-    view.contentDOM.addEventListener('focus', onFocusOrBlur);
-    view.contentDOM.addEventListener('blur', onFocusOrBlur);
+    view.contentDOM.addEventListener('focus', onFocus);
+    view.contentDOM.addEventListener('blur', onBlur);
     view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
 
     const initialDecos = buildDecorations(latestRaw.current, view.state.doc.length, latestHighlights.current);
@@ -421,15 +448,16 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     }
 
     return () => {
-      pendingCompositionEndRef.current = false;
-      composingRef.current = false;
+      composition.dispose();
+      composingActiveRef.current = false;
       const exitSnap = captureViewSnapshot(view);
       if (exitSnap) onStateSnapshotRef.current?.(exitSnap);
       view.contentDOM.removeEventListener('beforeinput', onBeforeInputCapture, true);
+      view.contentDOM.removeEventListener('keydown', onKeyDownCapture, true);
       view.contentDOM.removeEventListener('compositionstart', onCompositionStartCapture, true);
       view.contentDOM.removeEventListener('compositionend', onCompositionEndBubble, false);
-      view.contentDOM.removeEventListener('focus', onFocusOrBlur);
-      view.contentDOM.removeEventListener('blur', onFocusOrBlur);
+      view.contentDOM.removeEventListener('focus', onFocus);
+      view.contentDOM.removeEventListener('blur', onBlur);
       view.scrollDOM.removeEventListener('scroll', onScroll);
       delete (view.contentDOM as unknown as { __cm6View?: unknown }).__cm6View;
       if (suppressRaf.current !== null) {
@@ -524,7 +552,7 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     },
     setScrollRatio(ratio: number) {
       const view = viewRef.current;
-      if (!view || composingRef.current || view.composing) return;
+      if (!view || composingActiveRef.current || view.composing) return;
       const scroller = view.scrollDOM;
       const max = scroller.scrollHeight - scroller.clientHeight;
       if (max <= 0) return;

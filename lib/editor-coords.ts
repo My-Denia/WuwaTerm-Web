@@ -99,6 +99,101 @@ export function applyDomChangesToRaw(rawText: string, changes: readonly DomChang
   return out;
 }
 
+export type CompositionTrackerCallbacks = {
+  /** Schedule a cross-frame fallback (e.g. requestAnimationFrame -> setTimeout 50ms) and return a cancel function. */
+  scheduleFallback(onFire: () => void): () => void;
+  /** Flush a closing `{ composing: false }` edit when composition ends without a trailing docChanged. */
+  onFinalize(): void;
+};
+
+export type CompositionTracker = {
+  isComposing(): boolean;
+  isPendingEnd(): boolean;
+  /** Called on capture-phase compositionstart or compose-type beforeinput. */
+  begin(): void;
+  /** Called on capture-phase non-composition beforeinput / keydown / blur. */
+  onNonComposeEvent(): void;
+  /** Called on bubble-phase compositionend (after CM6's own listener). */
+  onCompositionEnd(): void;
+  /**
+   * Called inside CM6 updateListener for every local docChanged.
+   * Returns the `composing` flag to pass to `onEdit(nextRaw, { composing })`.
+   */
+  onLocalDocChange(viewComposing: boolean, isComposeEvent: boolean): boolean;
+  /** Cancel timers and reset state on unmount. */
+  dispose(): void;
+};
+
+/**
+ * Coordinates CodeMirror 6 IME composition boundaries across desktop microtask
+ * flushes and Android Chrome's next-frame `DOMObserver.flushSoon()`.
+ * Keeps the composition transaction open until the final deferred `docChanged`
+ * lands, another non-composition user event arrives, or the cross-frame fallback
+ * fires for a cancelled/unchanged composition.
+ */
+export function createCompositionTracker(callbacks: CompositionTrackerCallbacks): CompositionTracker {
+  let composing = false;
+  let pendingEnd = false;
+  let cancelFallback: (() => void) | null = null;
+
+  const clearFallback = () => {
+    if (cancelFallback) {
+      cancelFallback();
+      cancelFallback = null;
+    }
+  };
+
+  const finalize = () => {
+    clearFallback();
+    if (!composing && !pendingEnd) return;
+    composing = false;
+    pendingEnd = false;
+    callbacks.onFinalize();
+  };
+
+  return {
+    isComposing: () => composing,
+    isPendingEnd: () => pendingEnd,
+    begin() {
+      if (pendingEnd) finalize();
+      clearFallback();
+      composing = true;
+      pendingEnd = false;
+    },
+    onNonComposeEvent() {
+      if (pendingEnd) finalize();
+    },
+    onCompositionEnd() {
+      if (!composing) return;
+      clearFallback();
+      pendingEnd = true;
+      cancelFallback = callbacks.scheduleFallback(() => {
+        cancelFallback = null;
+        if (pendingEnd) finalize();
+      });
+    },
+    onLocalDocChange(viewComposing: boolean, isComposeEvent: boolean): boolean {
+      if (pendingEnd && !viewComposing) {
+        clearFallback();
+        composing = false;
+        pendingEnd = false;
+        return false;
+      }
+      if (isComposeEvent || viewComposing) {
+        clearFallback();
+        composing = true;
+        pendingEnd = false;
+      }
+      return composing || viewComposing || isComposeEvent;
+    },
+    dispose() {
+      clearFallback();
+      composing = false;
+      pendingEnd = false;
+    },
+  };
+}
+
 /** Build a raw-text Span (preserving CRLF bytes) from an LF-normalized UTF-16 range. */
 export function rawSpanFromDomRange(rawText: string, domFrom: number, domTo: number): Span | null {
   if (domFrom === domTo) return null;

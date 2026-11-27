@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   applyDomChangesToRaw,
+  createCompositionTracker,
   diffDomChange,
   domOffset,
   domUtf16ToScalar,
@@ -145,28 +146,95 @@ test('applyDomChangesToRaw holds normalizeLineBreaks(result) === expectedDom acr
   }
 });
 
-test('deferred compositionend commit (ni -> 你 and cross-line replacement) is a single undo step', () => {
+test('Android next-frame compositionend commit (ni -> 你), cancelled composition, and non-compose interruption each close cleanly in one undo step', async () => {
   const doc = createWorkbenchController({ onPoolRefresh: () => {} });
-
-  // 1) Deferred ni -> 你 commit at compositionend.
   doc.editText('source', 'Alpha');
-  doc.editText('source', 'Alphan', { composing: true });
-  doc.editText('source', 'Alphani', { composing: true });
-  // Final commit arrives after compositionend via deferred updateListener with composing: false.
-  doc.editText('source', 'Alpha你', { composing: false });
+
+  let currentText = 'Alpha';
+  let scheduledFallback = null;
+  let cancelledCount = 0;
+  const tracker = createCompositionTracker({
+    scheduleFallback(onFire) {
+      scheduledFallback = onFire;
+      return () => {
+        if (scheduledFallback === onFire) scheduledFallback = null;
+        cancelledCount += 1;
+      };
+    },
+    onFinalize() {
+      doc.editText('source', currentText, { composing: false });
+    },
+  });
+
+  const emitDocChange = (nextText, viewComposing, isComposeEvent = false) => {
+    currentText = nextText;
+    const composing = tracker.onLocalDocChange(viewComposing, isComposeEvent);
+    doc.editText('source', nextText, { composing });
+  };
+
+  // 1) Android Chrome flow: compositionstart -> n -> ni -> compositionend -> microtasks drain ->
+  //    next-frame flushSoon() commits ni -> 你. Must stay open across microtasks and fold into ONE undo step.
+  tracker.begin();
+  emitDocChange('Alphan', true, true);
+  emitDocChange('Alphani', true, true);
+  tracker.onCompositionEnd();
+  assert.equal(tracker.isPendingEnd(), true);
+
+  // Drain multiple microtasks (simulating the window before Android's next rAF flushSoon).
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(tracker.isPendingEnd(), true);
+  assert.equal(tracker.isComposing(), true);
+
+  // Next frame: CM6 flushSoon() runs with view.composing === false and commits 'Alpha你'.
+  emitDocChange('Alpha你', false, false);
+  assert.equal(tracker.isPendingEnd(), false);
+  assert.equal(tracker.isComposing(), false);
+  assert.equal(scheduledFallback, null);
+  assert.equal(cancelledCount, 1);
   assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+
+  // Single undo must restore 'Alpha' directly (never stop at 'Alphani').
   doc.undo();
   assert.equal(doc.getSnapshot().draft.source, 'Alpha');
 
-  // 2) Cross-line selection deletion starts inside composition, followed by n -> ni -> 你.
+  // 2) Cross-line selection deletion -> composition -> Android next-frame commit -> single undo.
   doc.editText('source', 'Line1\nLine2');
-  doc.editText('source', '', { composing: true });
-  doc.editText('source', 'n', { composing: true });
-  doc.editText('source', 'ni', { composing: true });
-  doc.editText('source', '你', { composing: false });
+  currentText = 'Line1\nLine2';
+  tracker.begin();
+  emitDocChange('', false, false); // CM6 multi-line selection delete before view.composing flips
+  emitDocChange('n', true, true);
+  emitDocChange('ni', true, true);
+  tracker.onCompositionEnd();
+  await Promise.resolve();
+  emitDocChange('你', false, false);
   assert.equal(doc.getSnapshot().draft.source, '你');
   doc.undo();
   assert.equal(doc.getSnapshot().draft.source, 'Line1\nLine2');
+
+  // 3) Composition cancelled/unchanged with no trailing docChanged: cross-frame fallback closes cleanly.
+  tracker.begin();
+  emitDocChange('Line1\nLine2a', true, true);
+  emitDocChange('Line1\nLine2', true, true);
+  tracker.onCompositionEnd();
+  assert.equal(tracker.isPendingEnd(), true);
+  assert.notEqual(scheduledFallback, null);
+  scheduledFallback();
+  assert.equal(tracker.isPendingEnd(), false);
+  assert.equal(tracker.isComposing(), false);
+
+  // 4) Next non-compose event (keydown / blur) immediately closes a pending end before subsequent edits.
+  tracker.begin();
+  emitDocChange('Line1\nLine2b', true, true);
+  tracker.onCompositionEnd();
+  assert.equal(tracker.isPendingEnd(), true);
+  tracker.onNonComposeEvent();
+  assert.equal(tracker.isPendingEnd(), false);
+  assert.equal(tracker.isComposing(), false);
+  assert.equal(scheduledFallback, null);
+
+  tracker.dispose();
   doc.dispose();
 });
 
