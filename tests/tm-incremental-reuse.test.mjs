@@ -5,7 +5,7 @@ import { createWorkbenchController } from '../lib/workbench-controller.ts';
 import { confirmTranslationMemoryEntry } from '../lib/translation-memory.ts';
 import { CAPABILITY_STRUCTURE_CHECK, STRUCTURE_CHECKS } from '../lib/structure-check.js';
 import { CAPABILITY_TRANSLATION_CONTEXT } from '../lib/semantic-review.js';
-import { layerTwoRows, structureSummary, structureViews } from '../lib/structure-layer.ts';
+import { layerTwoRows, structurePlan, structureSummary, structureViews } from '../lib/structure-layer.ts';
 import { scalarOffset } from '../lib/workbench-model.ts';
 
 const REV = 'd'.repeat(64);
@@ -1087,4 +1087,207 @@ test('Item #5: dictionary-only responses do not increment modelCalls, zero-reuse
   assert.equal(zSnap.tmReceipt?.retranslated, 3);
   assert.equal(zSnap.tmReceipt?.pendingRetranslate, 0);
   assert.equal(zSnap.tmReceipt?.modelCalls, 1);
+});
+
+test('PRRT_kwDOVe07hM68z371: oversized (3001-scalar & 2100-scalar) explicit alignment + 2 short TM-reused paragraphs preserve bounded splits AND per-alignment short checks', async () => {
+  const s2 = '中段：暴击率提高 20%。';
+  const s3 = '末段：共鸣效率提高 30%。';
+  const t2Wrong = 'Para 2: CRIT Rate +99%.'; // missing 20
+  const t3Ok = 'Para 3: Energy Regen +30%.';
+
+  // Case A: 3,001-scalar 2-sentence aligned paragraph (1,500 + 1,501) + 2 short aligned paragraphs.
+  // Full-doc segmentation would merge sentence 2 (1,501) with s2 + s3 into a single pair; per-alignment projection
+  // must split the 3,001-scalar paragraph into two checkable sub-units (<= 2,000 each) AND keep s2/s3 separate!
+  const sent1Src = `首句777：${'文'.repeat(1493)}。`; // 1500 scalars
+  const sent2Src = `次句888：${'字'.repeat(1494)}。`; // 1501 scalars
+  const long3001Src = `${sent1Src}${sent2Src}`; // 3001 scalars
+  assert.equal(Array.from(long3001Src).length, 3001);
+  const sent1Tgt = `First 777: ${'a'.repeat(1488)}.`; // 1500 scalars
+  const sent2Tgt = `Second err: ${'b'.repeat(1488)}.`; // 1501 scalars (missing 888)
+  const long3001Tgt = `${sent1Tgt}${sent2Tgt}`; // 3001 scalars
+  assert.equal(Array.from(long3001Tgt).length, 3001);
+
+  const s0End3 = 3001;
+  const s1Start3 = s0End3 + 2;
+  const s1End3 = s1Start3 + Array.from(s2).length;
+  const s2Start3 = s1End3 + 2;
+  const s2End3 = s2Start3 + Array.from(s3).length;
+  const t0End3 = 3001;
+  const t1Start3 = t0End3 + 2;
+  const t1End3 = t1Start3 + Array.from(t2Wrong).length;
+  const t2Start3 = t1End3 + 2;
+  const t2End3 = t2Start3 + Array.from(t3Ok).length;
+
+  const doc3001 = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    post: async (path, body) => {
+      assert.equal(path, '/api/structure-checks');
+      return {
+        response: new Response(null, { status: 200 }),
+        value: okStructureResponse(body, {
+          s1: [{ rule_id: 'number_missing', source_span: { start: 2, end: 5, text: '888' }, target_span: null }],
+          s2: [{ rule_id: 'number_missing', source_span: { start: 9, end: 11, text: '20' }, target_span: null }],
+        }),
+      };
+    },
+  });
+  doc3001.edit({
+    source: `${long3001Src}\n\n${s2}\n\n${s3}`,
+    target: `${long3001Tgt}\n\n${t2Wrong}\n\n${t3Ok}`,
+    direction: 'en',
+    alignments: [
+      { source: { start: scalarOffset(0), end: scalarOffset(s0End3), text: long3001Src }, target: { start: scalarOffset(0), end: scalarOffset(t0End3), text: long3001Tgt } },
+      { source: { start: scalarOffset(s1Start3), end: scalarOffset(s1End3), text: s2 }, target: { start: scalarOffset(t1Start3), end: scalarOffset(t1End3), text: t2Wrong } },
+      { source: { start: scalarOffset(s2Start3), end: scalarOffset(s2End3), text: s3 }, target: { start: scalarOffset(t2Start3), end: scalarOffset(t2End3), text: t3Ok } },
+    ],
+  });
+
+  const plan3001 = structurePlan(doc3001.getSnapshot().draft);
+  assert.equal(plan3001.skipped.length, 0, '3001-scalar aligned paragraph must be split into checkable sub-units, not skipped');
+  assert.equal(plan3001.items.length, 4, 'must emit 2 split sub-units for long para + 2 independent short paragraphs');
+  for (const item of plan3001.items) {
+    assert.ok(Array.from(item.source).length <= 2000 && Array.from(item.target).length <= 2000);
+  }
+  assert.equal(plan3001.items[2].source, s2);
+  assert.equal(plan3001.items[3].source, s3);
+
+  await doc3001.runStructureChecks();
+  const snap3001 = doc3001.getSnapshot();
+  const views3001 = structureViews(snap3001.draft, snap3001.structure);
+  assert.equal(views3001.length, 4);
+  assert.deepEqual(structureSummary(views3001), { checked: 4, withFindings: 2, findings: 2, omitted: 0, unchecked: 0 });
+  assert.equal(views3001[1].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(views3001[1].result?.findings[0].source_span?.text, '888');
+  assert.equal(views3001[1].result?.findings[0].source_span?.start, 1502);
+  assert.equal(views3001[2].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(views3001[2].result?.findings[0].source_span?.text, '20');
+  assert.equal(views3001[2].result?.findings[0].source_span?.start, s1Start3 + 9);
+
+  // Verify layerTwoRows does not leak findings across sentence 2, s2, and s3 when full-doc segmentation merges them.
+  const l1EmptyAtS2 = views3001.map((v, idx) => (idx === 2 ? {
+    ...v,
+    result: {
+      findings: [{ rule_id: 'empty_target', source_span: null, target_span: null }],
+      omitted: 0,
+      layout: { source_paragraphs: 1, target_paragraphs: 0, source_lines: 1, target_lines: 0 },
+    },
+  } : v));
+  const mergedSemanticViews = [
+    {
+      pair: {
+        index: 0,
+        status: 'ready',
+        hard_cut: false,
+        source: { start: scalarOffset(0), end: scalarOffset(1500), core_start: scalarOffset(0), core_end: scalarOffset(1500) },
+        target: { start: scalarOffset(0), end: scalarOffset(1500), core_start: scalarOffset(0), core_end: scalarOffset(1500) },
+      },
+    },
+    {
+      pair: {
+        index: 1,
+        status: 'ready',
+        hard_cut: false,
+        source: { start: scalarOffset(1500), end: scalarOffset(s2End3), core_start: scalarOffset(1500), core_end: scalarOffset(s2End3) },
+        target: { start: scalarOffset(1500), end: scalarOffset(t2End3), core_start: scalarOffset(1500), core_end: scalarOffset(t2End3) },
+      },
+    },
+  ];
+  const l2Semantic = {
+    results: [{
+      id: 'res-merged',
+      imported: false,
+      region: { source: { start: scalarOffset(1500), end: scalarOffset(s2End3) }, target: { start: scalarOffset(1500), end: scalarOffset(t2End3) } },
+    }],
+    placed: [
+      {
+        id: 'pl-sent2-num',
+        resultId: 'res-merged',
+        stale: false,
+        issue: { category: 'omission', confidence: 'high' },
+        live: { source_span: { start: scalarOffset(1502), end: scalarOffset(1505), text: '888' }, target_span: null },
+      },
+      {
+        id: 'pl-sent2-other',
+        resultId: 'res-merged',
+        stale: false,
+        issue: { category: 'omission', confidence: 'high' },
+        live: { source_span: { start: scalarOffset(1510), end: scalarOffset(1515), text: '字字字字字' }, target_span: null },
+      },
+      {
+        id: 'pl-s3',
+        resultId: 'res-merged',
+        stale: false,
+        issue: { category: 'omission', confidence: 'high' },
+        live: { source_span: { start: scalarOffset(s2Start3), end: scalarOffset(s2End3), text: s3 }, target_span: null },
+      },
+    ],
+    decisions: [],
+    outcomes: [],
+    long: { records: [], history: [], progress: { current: null, completed: [] } },
+  };
+  const l2Rows3001 = layerTwoRows(l2Semantic, mergedSemanticViews, l1EmptyAtS2);
+  assert.equal(l2Rows3001.length, 3);
+  assert.equal(l2Rows3001[0].covered, true, 'sentence 2 own number_missing covers matching omission at 888');
+  assert.equal(l2Rows3001[1].covered, false, 'empty_target on s2 must not cover unrelated omission in sentence 2 of long paragraph');
+  assert.equal(l2Rows3001[2].covered, false, 'empty_target on s2 must not cover omission in s3');
+
+  // Case B: 2,100-scalar single-sentence aligned paragraph (fallback hard-cut) + 2 short aligned paragraphs.
+  const long2100Src = `首段555，${'文，'.repeat(1047)}`; // 6 + 2094 = 2100 scalars (comma natural cut points, 1 sentence)
+  const long2100Tgt = `First err, ${'a, '.repeat(696)}a`; // 11 + 2088 + 1 = 2100 scalars (missing 555)
+  assert.equal(Array.from(long2100Src).length, 2100);
+  assert.equal(Array.from(long2100Tgt).length, 2100);
+
+  const s1Start2 = 2102;
+  const s1End2 = s1Start2 + Array.from(s2).length;
+  const s2Start2 = s1End2 + 2;
+  const s2End2 = s2Start2 + Array.from(s3).length;
+  const t1Start2 = 2102;
+  const t1End2 = t1Start2 + Array.from(t2Wrong).length;
+  const t2Start2 = t1End2 + 2;
+  const t2End2 = t2Start2 + Array.from(t3Ok).length;
+
+  const doc2100 = createWorkbenchController({
+    initialMode: 'manuscript',
+    initialCapabilities: [CAPABILITY_STRUCTURE_CHECK],
+    post: async (path, body) => {
+      assert.equal(path, '/api/structure-checks');
+      return {
+        response: new Response(null, { status: 200 }),
+        value: okStructureResponse(body, {
+          s0: [{ rule_id: 'number_missing', source_span: { start: 2, end: 5, text: '555' }, target_span: null }],
+          s2: [{ rule_id: 'number_missing', source_span: { start: 9, end: 11, text: '20' }, target_span: null }],
+        }),
+      };
+    },
+  });
+  doc2100.edit({
+    source: `${long2100Src}\n\n${s2}\n\n${s3}`,
+    target: `${long2100Tgt}\n\n${t2Wrong}\n\n${t3Ok}`,
+    direction: 'en',
+    alignments: [
+      { source: { start: scalarOffset(0), end: scalarOffset(2100), text: long2100Src }, target: { start: scalarOffset(0), end: scalarOffset(2100), text: long2100Tgt } },
+      { source: { start: scalarOffset(s1Start2), end: scalarOffset(s1End2), text: s2 }, target: { start: scalarOffset(t1Start2), end: scalarOffset(t1End2), text: t2Wrong } },
+      { source: { start: scalarOffset(s2Start2), end: scalarOffset(s2End2), text: s3 }, target: { start: scalarOffset(t2Start2), end: scalarOffset(t2End2), text: t3Ok } },
+    ],
+  });
+
+  const plan2100 = structurePlan(doc2100.getSnapshot().draft);
+  assert.equal(plan2100.skipped.length, 0, '2100-scalar aligned paragraph must be split into checkable sub-units, not skipped');
+  assert.equal(plan2100.items.length, 4);
+  for (const item of plan2100.items) {
+    assert.ok(Array.from(item.source).length <= 2000 && Array.from(item.target).length <= 2000);
+  }
+  assert.equal(plan2100.items[2].source, s2);
+  assert.equal(plan2100.items[3].source, s3);
+
+  await doc2100.runStructureChecks();
+  const afterFull = doc2100.getSnapshot();
+  const viewsFull = structureViews(afterFull.draft, afterFull.structure);
+  assert.equal(viewsFull.length, 4);
+  assert.deepEqual(structureSummary(viewsFull), { checked: 4, withFindings: 2, findings: 2, omitted: 0, unchecked: 0 });
+  assert.equal(viewsFull[0].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(viewsFull[0].result?.findings[0].source_span?.text, '555');
+  assert.equal(viewsFull[2].result?.findings[0].rule_id, 'number_missing');
+  assert.equal(viewsFull[2].result?.findings[0].source_span?.text, '20');
 });
