@@ -217,14 +217,14 @@ build:
 ```sh
 sha=$(git rev-parse origin/main)
 gh workflow run selfhost-release-build.yml --ref main \
-  -f source_sha="$sha" -f tag=v0.6.0 -f base_path=
+  -f source_sha="$sha" -f tag=v0.7.0 -f base_path=
 gh workflow run selfhost-release-build.yml --ref main \
-  -f source_sha="$sha" -f tag=v0.6.0 -f base_path=/private
+  -f source_sha="$sha" -f tag=v0.7.0 -f base_path=/private
 ```
 
 Dispatch both while `main` is still at that commit: the provenance job requires
 `source_sha` to equal the run's own `main` SHA and a successful main-push Web CI run for
-it. `tag` must be `v` plus the `version` in `package.json` (`v0.6.0` for this release).
+it. `tag` must be `v` plus the `version` in `package.json` (`v0.7.0` for this release).
 When both runs finish, note each run id, run attempt and artifact id:
 
 ```sh
@@ -238,7 +238,7 @@ creates nothing; it also reports whether the tag already points at the source:
 
 ```sh
 gh workflow run selfhost-release-publish.yml --ref main \
-  -f mode=validate -f source_sha="$sha" -f tag=v0.6.0 \
+  -f mode=validate -f source_sha="$sha" -f tag=v0.7.0 \
   -f root_run_id=<root run id> -f root_attempt=<root attempt> \
   -f root_artifact_id=<root artifact id> \
   -f prefix_run_id=<prefix run id> -f prefix_attempt=<prefix attempt> \
@@ -248,8 +248,8 @@ gh workflow run selfhost-release-publish.yml --ref main \
 Create the tag at that exact commit, as for earlier releases:
 
 ```sh
-git tag v0.6.0 "$sha"
-git push origin v0.6.0
+git tag v0.7.0 "$sha"
+git push origin v0.7.0
 ```
 
 Run the same dispatch again with `mode=publish` and identical values. Publication creates
@@ -374,7 +374,11 @@ may retain technical data under their own policies.
 
 This is a new local admission database; public D1 quota and the legacy private
 renderer are not migrated into it. Existing manuscript files remain usable in
-the workbench. For a consistent quota backup, stop the Web process before
-copying its SQLite database, and restore it only while the process is stopped;
-retain its owner-only permissions. Keep the Core API's dictionary, device store
+the workbench. In self-host mode, the runtime also stores confirmed translation
+memory entries in `tm.sqlite3` in the same directory as `WUWATERM_LOCAL_DB_PATH`
+(alongside the admission database), following the same `data/` persistence,
+mode-0600 permissions, and stop-before-copy backup/restore rules; the public
+Sites mode keeps zero browser storage. For a consistent quota backup, stop the Web process before
+copying its SQLite databases, and restore them only while the process is stopped;
+retain their owner-only permissions. Keep the Core API's dictionary, device store
 and credentials under their own backup procedures.
