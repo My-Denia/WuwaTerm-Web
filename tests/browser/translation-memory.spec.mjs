@@ -7,7 +7,7 @@ import {
   parseTranslationMemoryText,
   serializeTranslationMemory,
 } from '../../lib/translation-memory.ts';
-import { fixture, freshApiReport } from '../fixtures/manuscript.mjs';
+import { fixture, freshApiReport, dictionary as fixtureDictionary } from '../fixtures/manuscript.mjs';
 
 const BASE = process.env.WUWATERM_BROWSER_URL ?? '';
 const SCREENSHOT_DIR = '/tmp/wuwaterm-web-tm-verify';
@@ -138,12 +138,14 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.notices.imported.replace('{n}', '2'));
   await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '2'));
 
-  // Numeric variant match shows numeric_variant badge + numeric_changed warning and NEVER silently overwrites target!
+  // Numeric variant match shows numeric_variant badge + numeric_changed + provenance_unknown warning and NEVER silently overwrites target!
   await page.locator('#review-target').fill('Original user target text');
   await page.locator('#review-source').fill('专属记忆句甲乙 25%，持续 12 秒');
   await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'known_stale');
   await expect(hits(page).first().locator('.my-memory-kind-badge')).toHaveText(tmMsg.matchKinds.numeric_variant);
-  await expect(hits(page).first().locator('.my-memory-stale-badge')).toContainText(tmMsg.staleReasons.numeric_changed);
+  await expect(hits(page).first().locator('[data-stale="numeric_changed"]')).toHaveText(tmMsg.staleReasons.numeric_changed);
+  await expect(hits(page).first().locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
   await expect(page.locator('#review-target')).toHaveValue('Original user target text');
 
   // Apply suggestion -> target updates, then Undo restores exact prior target, Redo restores suggestion.
@@ -170,7 +172,11 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.notices.confirmedAdded);
   await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '3'));
   await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+  await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'true');
   await expect(hits(page).first().locator('.my-memory-kind-badge')).toHaveText(tmMsg.matchKinds.exact);
+  await expect(hits(page).first().locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
+  await expect(hits(page).first().locator('.my-memory-recheck-hint')).toContainText(tmMsg.staleReasons.provenance_unknown);
 
   // Export JSON -> valid wuwaterm-tm-v1 with human_confirmed entry.
   const exportedText = await downloaded(page, () =>
@@ -211,6 +217,67 @@ test('import wuwaterm-tm-v1, match badges + numeric warning, undoable apply, exp
   await expect(page.locator('.pool-strip')).toContainText('100', { timeout: 30_000 });
   await expect(panel(page).getByTestId('my-memory-counts')).toHaveText(tmMsg.entryCount.replace('{n}', '0'));
   expect(await storage(page)).toEqual({ local: 0, session: 0, idb: 0 });
+});
+
+test('three-state freshness badges after term check and merge 8 MiB overflow protection', async ({ page }) => {
+  await open(page);
+  await expand(page);
+
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: '今汐。',
+      target_text: 'Jinhsi (verified).',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: null,
+    }),
+    makeEntry({
+      source_text: '声骸。',
+      target_text: 'Echo (stale).',
+      terms_db_revision: 'old-rev',
+      game_version: null,
+    }),
+  ]));
+
+  // Before term check, currentTermsDbRevision is null -> provenance_unknown.
+  await page.locator('#review-source').fill('今汐。');
+  await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+  await expect(hits(page).first().locator('[data-stale="provenance_unknown"]')).toHaveText(tmMsg.staleReasons.provenance_unknown);
+
+  // Run term check so currentTermsDbRevision becomes fixtureDictionary.revision.
+  await page.locator('#review-target').fill('Jinhsi.');
+  await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+  await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+
+  // Matching revision -> verified_fresh with zero stale badges.
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
+  await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'false');
+  await expect(hits(page).first().locator('.my-memory-stale-badge')).toHaveCount(0);
+
+  // Mismatched revision -> known_stale with terms_revision_changed badge.
+  await page.locator('#review-source').fill('声骸。');
+  await expect(hits(page)).toHaveCount(1);
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'known_stale');
+  await expect(hits(page).first()).toHaveAttribute('data-needs-recheck', 'true');
+  await expect(hits(page).first().locator('[data-stale="terms_revision_changed"]')).toHaveText(tmMsg.staleReasons.terms_revision_changed);
+
+  // Merge > 8 MiB guard keeps existing entries intact and shows tm_too_large error.
+  const mkChunk = (prefix, count) => tmFileBuffer(
+    Array.from({ length: count }, (_, i) => makeEntry({
+      source_text: `${prefix}-${i}-` + 'x'.repeat(1800),
+      target_text: `${prefix}-${i}-` + 'y'.repeat(1800),
+      note: '',
+    })),
+  );
+  await importTmFile(page, mkChunk('part-a', 1200), 'part-a.json');
+  await panel(page).getByRole('button', { name: tmMsg.replaceConfirm, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '1200'));
+
+  await importTmFile(page, mkChunk('part-b', 1200), 'part-b.json');
+  await panel(page).getByRole('button', { name: tmMsg.mergeConfirm, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toContainText(tmMsg.errors.tm_too_large);
+  await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '1200'));
 });
 
 for (const viewport of [

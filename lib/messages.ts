@@ -221,6 +221,7 @@ const zh = {
       terms_revision_changed: '词库版本变化',
       game_version_changed: '游戏版本变化',
       numeric_changed: '数值已变更，需复核',
+      provenance_unknown: '版本未知，需复核',
     } as Record<string, string>,
     origins: {
       human_confirmed: '人工确认',
@@ -257,6 +258,7 @@ const zh = {
       tm_unconfirmed_origin: '文件里有未经确认的来源；翻译记忆只收 human_confirmed 或 imported_confirmed。',
       tm_duplicate_entry: '已存在相同原文、上下文与译文的记录。',
       importFailed: '未导入，当前翻译记忆保持原样。',
+      exportFailed: '未能导出，当前翻译记忆未写入文件。',
       fieldRequired: '请先填写「{field}」后再确认存入记忆。',
       fieldTooLong: '「{field}」最多 {max} 个字符。',
       fieldInvalid: '「{field}」含有不能保存的字符。',
@@ -1003,6 +1005,7 @@ const en: typeof zh = {
       terms_revision_changed: 'Terms revision changed',
       game_version_changed: 'Game version changed',
       numeric_changed: 'Numbers changed — recheck',
+      provenance_unknown: 'Version unverified — recheck',
     } as Record<string, string>,
     origins: {
       human_confirmed: 'Human confirmed',
@@ -1039,6 +1042,7 @@ const en: typeof zh = {
       tm_unconfirmed_origin: 'The file contains an unconfirmed origin; only human_confirmed and imported_confirmed are accepted.',
       tm_duplicate_entry: 'An identical candidate with the same context and target already exists.',
       importFailed: 'Nothing was imported; the current translation memory is unchanged.',
+      exportFailed: 'Could not export; no translation memory file was written.',
       fieldRequired: 'Fill in “{field}” before confirming to memory.',
       fieldTooLong: '“{field}” can have at most {max} characters.',
       fieldInvalid: '“{field}” contains a character that cannot be saved.',

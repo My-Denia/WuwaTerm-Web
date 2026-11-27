@@ -8,9 +8,13 @@ import {
   MAX_TM_ENTRIES,
   TM_ERROR_CODES,
   TM_FORMAT,
+  TM_FRESHNESS_STALE,
+  TM_FRESHNESS_UNKNOWN,
+  TM_FRESHNESS_VERIFIED,
   TM_ORIGIN_HUMAN,
   TM_ORIGIN_IMPORTED,
   TM_SCHEMA_VERSION,
+  TM_STALE_PROVENANCE_UNKNOWN,
   TranslationMemoryError,
   confirmTranslationMemoryEntry,
   contextHash,
@@ -24,6 +28,7 @@ import {
   sourceHash,
   tmNow,
 } from '../lib/translation-memory.ts';
+import { msg } from '../lib/messages.ts';
 
 const STAMP = '2026-11-27T00:00:00Z';
 const LATER = '2026-11-27T01:00:00Z';
@@ -255,10 +260,10 @@ test('4-tier matching ranks context_exact > exact > numeric_variant > normalized
   ];
   const numericAndNormalized = matchTranslationMemory(mixedEntries, '攻击力提高 25%，持续 12 秒', 'en');
   assert.deepEqual(
-    numericAndNormalized.map(m => [m.matchKind, m.numericChanged, m.needsRecheck, m.staleReasons]),
+    numericAndNormalized.map(m => [m.matchKind, m.freshness, m.numericChanged, m.needsRecheck, m.staleReasons]),
     [
-      ['numeric_variant', true, true, ['numeric_changed']],
-      ['normalized_exact', false, false, []],
+      ['numeric_variant', TM_FRESHNESS_STALE, true, true, ['numeric_changed', TM_STALE_PROVENANCE_UNKNOWN]],
+      ['normalized_exact', TM_FRESHNESS_UNKNOWN, false, true, [TM_STALE_PROVENANCE_UNKNOWN]],
     ],
   );
   assert.equal(numericMask('攻击力提高 25%，持续 12 秒'), numericMask('攻击力提高 20%，持续 10 秒'));
@@ -266,24 +271,122 @@ test('4-tier matching ranks context_exact > exact > numeric_variant > normalized
   assert.deepEqual(matchTranslationMemory(mixedEntries, '攻击力提高 ２５％，持续 １２ 秒', 'en'), []);
 });
 
-test('staleness flags terms_revision_changed, game_version_changed, and numeric_changed only when current values are known', () => {
+test('context_exact requires request context and exact two-sided neighbour match; single-sided change downgrades to exact', () => {
+  const prev = '前置段落';
+  const next = '后置段落';
+  const entries = [
+    makeEntry({
+      source_text: '中间句子',
+      target_text: 'Middle (both sides)',
+      prev_source_hash: sourceHash(prev),
+      next_source_hash: sourceHash(next),
+      terms_db_revision: 'r14',
+    }),
+    makeEntry({
+      source_text: '首段句子',
+      target_text: 'Leading (next only)',
+      prev_source_hash: null,
+      next_source_hash: sourceHash(next),
+      terms_db_revision: 'r14',
+    }),
+    makeEntry({
+      source_text: '孤立句子',
+      target_text: 'No context',
+      prev_source_hash: null,
+      next_source_hash: null,
+      terms_db_revision: 'r14',
+    }),
+  ];
+
+  // Both neighbours match -> context_exact
+  const bothMatch = matchTranslationMemory(entries, '中间句子', 'en', {
+    prevSource: prev,
+    nextSource: next,
+    currentTermsDbRevision: 'r14',
+  });
+  assert.equal(bothMatch[0].matchKind, 'context_exact');
+  assert.equal(bothMatch[0].freshness, TM_FRESHNESS_VERIFIED);
+
+  // Deleting or changing either side downgrades to exact
+  for (const opts of [
+    { prevSource: prev, nextSource: null },
+    { prevSource: null, nextSource: next },
+    { prevSource: prev, nextSource: '已修改的后置段落' },
+    { prevSource: '已修改的前置段落', nextSource: next },
+    { prevSource: null, nextSource: null },
+  ]) {
+    const hits = matchTranslationMemory(entries, '中间句子', 'en', {
+      ...opts,
+      currentTermsDbRevision: 'r14',
+    });
+    assert.equal(hits[0].matchKind, 'exact', JSON.stringify(opts));
+  }
+
+  // Document-edge entry (prev=null, next=H): matches context_exact only when request is also leading with matching next.
+  assert.equal(
+    matchTranslationMemory(entries, '首段句子', 'en', {
+      prevSource: null,
+      nextSource: next,
+      currentTermsDbRevision: 'r14',
+    })[0].matchKind,
+    'context_exact',
+  );
+  assert.equal(
+    matchTranslationMemory(entries, '首段句子', 'en', {
+      prevSource: '新插入的前一段',
+      nextSource: next,
+      currentTermsDbRevision: 'r14',
+    })[0].matchKind,
+    'exact',
+  );
+  assert.equal(
+    matchTranslationMemory(entries, '首段句子', 'en', {
+      prevSource: null,
+      nextSource: null,
+      currentTermsDbRevision: 'r14',
+    })[0].matchKind,
+    'exact',
+  );
+
+  // Context-free entry stays exact when request has no context.
+  assert.equal(
+    matchTranslationMemory(entries, '孤立句子', 'en', {
+      currentTermsDbRevision: 'r14',
+    })[0].matchKind,
+    'exact',
+  );
+});
+
+test('three-state freshness classifies verified_fresh, known_stale, and provenance_unknown consistently with Windows', () => {
   const entries = [
     makeEntry({ source_text: '挑战成功', target_text: 'Challenge complete', terms_db_revision: 'r14', game_version: '3.0' }),
+    makeEntry({ source_text: '仅有词库', target_text: 'Terms only', terms_db_revision: 'r14', game_version: null }),
     makeEntry({ source_text: '没有记录', target_text: 'No record', terms_db_revision: null, game_version: null }),
   ];
 
-  const fresh = matchTranslationMemory(entries, '挑战成功', 'en', {
+  // verified_fresh: terms match and game versions equal (or both null)
+  const freshBoth = matchTranslationMemory(entries, '挑战成功', 'en', {
     currentTermsDbRevision: 'r14',
     currentGameVersion: '3.0',
   });
-  assert.equal(fresh.length, 1);
-  assert.deepEqual(fresh[0].staleReasons, []);
-  assert.equal(fresh[0].needsRecheck, false);
+  assert.equal(freshBoth[0].freshness, TM_FRESHNESS_VERIFIED);
+  assert.deepEqual(freshBoth[0].staleReasons, []);
+  assert.equal(freshBoth[0].needsRecheck, false);
 
+  const freshBothNullGame = matchTranslationMemory(entries, '仅有词库', 'en', {
+    currentTermsDbRevision: 'r14',
+    currentGameVersion: null,
+  });
+  assert.equal(freshBothNullGame[0].freshness, TM_FRESHNESS_VERIFIED);
+  assert.deepEqual(freshBothNullGame[0].staleReasons, []);
+  assert.equal(freshBothNullGame[0].needsRecheck, false);
+
+  // known_stale: terms_revision_changed / game_version_changed / numeric_changed
   const termsChanged = matchTranslationMemory(entries, '挑战成功', 'en', {
     currentTermsDbRevision: 'r15',
     currentGameVersion: '3.0',
   });
+  assert.equal(termsChanged[0].freshness, TM_FRESHNESS_STALE);
   assert.deepEqual(termsChanged[0].staleReasons, ['terms_revision_changed']);
   assert.equal(termsChanged[0].needsRecheck, true);
 
@@ -291,17 +394,45 @@ test('staleness flags terms_revision_changed, game_version_changed, and numeric_
     currentTermsDbRevision: 'r15',
     currentGameVersion: '3.1',
   });
+  assert.equal(bothChanged[0].freshness, TM_FRESHNESS_STALE);
   assert.deepEqual(bothChanged[0].staleReasons, ['terms_revision_changed', 'game_version_changed']);
+  assert.equal(bothChanged[0].needsRecheck, true);
 
-  // Unknown current revisions do not falsely mark entries stale.
+  const termsChangedOneNullGame = matchTranslationMemory(entries, '挑战成功', 'en', {
+    currentTermsDbRevision: 'r15',
+    currentGameVersion: null,
+  });
+  assert.equal(termsChangedOneNullGame[0].freshness, TM_FRESHNESS_STALE);
+  assert.deepEqual(termsChangedOneNullGame[0].staleReasons, ['terms_revision_changed']);
+
+  // provenance_unknown: current revision unknown, entry revision null, or one-sided game_version null
   const unknownCurrent = matchTranslationMemory(entries, '挑战成功', 'en');
-  assert.deepEqual(unknownCurrent[0].staleReasons, []);
+  assert.equal(unknownCurrent[0].freshness, TM_FRESHNESS_UNKNOWN);
+  assert.deepEqual(unknownCurrent[0].staleReasons, [TM_STALE_PROVENANCE_UNKNOWN]);
+  assert.equal(unknownCurrent[0].needsRecheck, true);
 
-  // Missing revision on stored entry IS stale when current revision is known.
   const missingRecord = matchTranslationMemory(entries, '没有记录', 'en', {
     currentTermsDbRevision: 'r14',
   });
-  assert.deepEqual(missingRecord[0].staleReasons, ['terms_revision_changed']);
+  assert.equal(missingRecord[0].freshness, TM_FRESHNESS_UNKNOWN);
+  assert.deepEqual(missingRecord[0].staleReasons, [TM_STALE_PROVENANCE_UNKNOWN]);
+  assert.equal(missingRecord[0].needsRecheck, true);
+
+  const gameNullOnCurrent = matchTranslationMemory(entries, '挑战成功', 'en', {
+    currentTermsDbRevision: 'r14',
+    currentGameVersion: null,
+  });
+  assert.equal(gameNullOnCurrent[0].freshness, TM_FRESHNESS_UNKNOWN);
+  assert.deepEqual(gameNullOnCurrent[0].staleReasons, [TM_STALE_PROVENANCE_UNKNOWN]);
+  assert.equal(gameNullOnCurrent[0].needsRecheck, true);
+
+  const gameNullOnEntry = matchTranslationMemory(entries, '仅有词库', 'en', {
+    currentTermsDbRevision: 'r14',
+    currentGameVersion: '3.0',
+  });
+  assert.equal(gameNullOnEntry[0].freshness, TM_FRESHNESS_UNKNOWN);
+  assert.deepEqual(gameNullOnEntry[0].staleReasons, [TM_STALE_PROVENANCE_UNKNOWN]);
+  assert.equal(gameNullOnEntry[0].needsRecheck, true);
 
   // Ordering compares parsed instants (.5Z > Z), not lexicographical strings.
   const ordered = matchTranslationMemory([
@@ -350,4 +481,24 @@ test('confirmTranslationMemoryEntry and mergeTranslationMemoryEntries enforce hu
   assert.equal(merged[0].use_count, 4);
   assert.equal(merged[0].note, '人工');
   assert.equal(isTmTimestamp(tmNow()), true);
+
+  // Merge exceeding MAX_TM_BYTES is rejected by serializeTranslationMemory.
+  const mkLarge = (prefix, count) => Array.from({ length: count }, (_, i) => makeEntry({
+    source_text: `${prefix}-${i}-` + 'x'.repeat(1800),
+    target_text: `${prefix}-${i}-` + 'y'.repeat(1800),
+  }));
+  const halfA = mkLarge('a', 1200);
+  const halfB = mkLarge('b', 1200);
+  assert.ok(Buffer.byteLength(serializeTranslationMemory(makeFile(halfA)), 'utf8') < MAX_TM_BYTES);
+  assert.ok(Buffer.byteLength(serializeTranslationMemory(makeFile(halfB)), 'utf8') < MAX_TM_BYTES);
+  const combined = mergeTranslationMemoryEntries(halfA, halfB);
+  assert.equal(codeOf(() => serializeTranslationMemory(makeFile(combined))), 'tm_too_large');
+
+  // Export failure copy is distinct from import failure copy in both languages.
+  for (const lang of ['zh', 'en']) {
+    const errors = msg(lang).memory.errors;
+    assert.ok(errors.exportFailed.length > 0);
+    assert.notEqual(errors.exportFailed, errors.importFailed);
+    assert.ok(msg(lang).memory.staleReasons.provenance_unknown.length > 0);
+  }
 });

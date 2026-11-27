@@ -22,13 +22,24 @@ export const TM_MATCH_KINDS = [
   TM_MATCH_NORMALIZED_EXACT,
 ] as const;
 
+export const TM_FRESHNESS_VERIFIED = 'verified_fresh' as const;
+export const TM_FRESHNESS_STALE = 'known_stale' as const;
+export const TM_FRESHNESS_UNKNOWN = 'provenance_unknown' as const;
+export const TM_FRESHNESS_VALUES = [
+  TM_FRESHNESS_VERIFIED,
+  TM_FRESHNESS_STALE,
+  TM_FRESHNESS_UNKNOWN,
+] as const;
+
 export const TM_STALE_TERMS_REVISION = 'terms_revision_changed' as const;
 export const TM_STALE_GAME_VERSION = 'game_version_changed' as const;
 export const TM_STALE_NUMERIC = 'numeric_changed' as const;
+export const TM_STALE_PROVENANCE_UNKNOWN = 'provenance_unknown' as const;
 export const TM_STALE_REASONS = [
   TM_STALE_TERMS_REVISION,
   TM_STALE_GAME_VERSION,
   TM_STALE_NUMERIC,
+  TM_STALE_PROVENANCE_UNKNOWN,
 ] as const;
 
 export const MAX_TM_ENTRIES = 10_000;
@@ -61,6 +72,7 @@ export type TmErrorCode = (typeof TM_ERROR_CODES)[number];
 export type TmDirection = (typeof TM_DIRECTION_VALUES)[number];
 export type TmOrigin = (typeof TM_ORIGIN_VALUES)[number];
 export type TmMatchKind = (typeof TM_MATCH_KINDS)[number];
+export type TmFreshness = (typeof TM_FRESHNESS_VALUES)[number];
 export type TmStaleReason = (typeof TM_STALE_REASONS)[number];
 
 export type TmEntry = {
@@ -88,6 +100,7 @@ export type TmFile = {
 export type TmMatch = {
   entry: TmEntry;
   matchKind: TmMatchKind;
+  freshness: TmFreshness;
   staleReasons: TmStaleReason[];
   numericChanged: boolean;
   needsRecheck: boolean;
@@ -642,10 +655,11 @@ const RANK: Record<TmMatchKind, number> = {
 };
 
 function exactKind(entry: TmEntry, prevHash: string | null, nextHash: string | null): TmMatchKind {
-  const checks: boolean[] = [];
-  if (prevHash !== null) checks.push(entry.prev_source_hash === prevHash);
-  if (nextHash !== null) checks.push(entry.next_source_hash === nextHash);
-  return checks.length > 0 && checks.every(Boolean) ? TM_MATCH_CONTEXT_EXACT : TM_MATCH_EXACT;
+  return (prevHash !== null || nextHash !== null) &&
+    entry.prev_source_hash === prevHash &&
+    entry.next_source_hash === nextHash
+    ? TM_MATCH_CONTEXT_EXACT
+    : TM_MATCH_EXACT;
 }
 
 function buildMatch(
@@ -655,22 +669,47 @@ function buildMatch(
   currentGameVersion: string | null,
 ): TmMatch {
   const staleReasons: TmStaleReason[] = [];
-  if (currentTermsDbRevision !== null && entry.terms_db_revision !== currentTermsDbRevision) {
+  const termsChanged =
+    currentTermsDbRevision !== null &&
+    entry.terms_db_revision !== null &&
+    entry.terms_db_revision !== currentTermsDbRevision;
+  const gameChanged =
+    currentGameVersion !== null &&
+    entry.game_version !== null &&
+    entry.game_version !== currentGameVersion;
+  if (termsChanged) {
     staleReasons.push(TM_STALE_TERMS_REVISION);
   }
-  if (currentGameVersion !== null && entry.game_version !== currentGameVersion) {
+  if (gameChanged) {
     staleReasons.push(TM_STALE_GAME_VERSION);
   }
   const numericChanged = matchKind === TM_MATCH_NUMERIC_VARIANT;
   if (numericChanged) {
     staleReasons.push(TM_STALE_NUMERIC);
   }
+  const provenanceUnknown =
+    !termsChanged &&
+    !gameChanged &&
+    (currentTermsDbRevision === null ||
+      entry.terms_db_revision === null ||
+      (currentGameVersion === null) !== (entry.game_version === null));
+  if (provenanceUnknown) {
+    staleReasons.push(TM_STALE_PROVENANCE_UNKNOWN);
+  }
+  const freshness: TmFreshness =
+    termsChanged || gameChanged || numericChanged
+      ? TM_FRESHNESS_STALE
+      : provenanceUnknown
+        ? TM_FRESHNESS_UNKNOWN
+        : TM_FRESHNESS_VERIFIED;
+  const needsRecheck = freshness !== TM_FRESHNESS_VERIFIED || numericChanged;
   return {
     entry,
     matchKind,
+    freshness,
     staleReasons,
     numericChanged,
-    needsRecheck: staleReasons.length > 0,
+    needsRecheck,
   };
 }
 
