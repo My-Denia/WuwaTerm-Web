@@ -2,8 +2,7 @@ import { proxyDictionaryRequest, runtimeEnvironment } from '../../../lib/wuwater
 
 export const dynamic = 'force-dynamic';
 
-function wantsFreshRevalidation(request?: Request): boolean {
-  if (!request) return false;
+function wantsFreshRevalidation(request: Request): boolean {
   try {
     return new URL(request.url).searchParams.get('refresh') === '1';
   } catch {
@@ -11,7 +10,7 @@ function wantsFreshRevalidation(request?: Request): boolean {
   }
 }
 
-export async function GET(request?: Request): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   return proxyDictionaryRequest({
     environment: await runtimeEnvironment(),
     forceRefresh: wantsFreshRevalidation(request),
