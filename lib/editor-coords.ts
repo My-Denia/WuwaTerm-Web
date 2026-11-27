@@ -102,10 +102,20 @@ export function applyDomChangesToRaw(rawText: string, changes: readonly DomChang
 export type CompositionTrackerCallbacks = {
   /** Schedule a cross-frame fallback (e.g. requestAnimationFrame -> setTimeout 50ms) and return a cancel function. */
   scheduleFallback(onFire: () => void): () => void;
-  /** Flush any queued CM6 DOMObserver mutations synchronously before closing a pending composition on interrupt. */
-  flushPendingObserver?(): void;
-  /** Flush a closing `{ composing: false }` edit when composition ends without a trailing docChanged. */
-  onFinalize(): void;
+  /**
+   * Flush any queued CM6 DOMObserver mutations synchronously before closing a pending
+   * composition on interrupt. Return `true` if CM6 still has a deferred flush queued
+   * (e.g. Android `delayedFlush >= 0`), signaling that composition must stay open for
+   * the upcoming next-frame flush instead of closing prematurely.
+   */
+  flushPendingObserver?(): boolean | void;
+  /**
+   * Flush a closing `{ composing: false }` edit.
+   * `syncFromView` is `false` when closing right before applying a new `docChanged`
+   * in `updateListener` (so the caller closes with the pre-change raw text instead
+   * of reading the already-mutated `view.state.doc`).
+   */
+  onFinalize(syncFromView: boolean): void;
 };
 
 export type CompositionTracker = {
@@ -119,6 +129,8 @@ export type CompositionTracker = {
   onCompositionEnd(): void;
   /** Close immediately (e.g. EditContext compositionend where textupdate already committed synchronously). */
   finalizeNow(): void;
+  /** Close an unclosed prior composition using pre-change text right before applying a new non-IME docChanged. */
+  closeBeforeNewEdit(): void;
   /**
    * Called inside CM6 updateListener for every local docChanged.
    * Returns the `composing` flag to pass to `onEdit(nextRaw, { composing })`.
@@ -133,8 +145,8 @@ export type CompositionTracker = {
  * flushes, Android Chrome's next-frame `DOMObserver.flushSoon()`, and EditContext.
  * Keeps the composition transaction open until the final deferred `docChanged`
  * lands, flushes queued observer mutations on interrupting non-compose events
- * (blur/keydown/beforeinput), or closes via the cross-frame fallback for a
- * cancelled/unchanged composition.
+ * (deferring close if CM6 still holds a queued `delayedFlush`), or closes via the
+ * cross-frame fallback for a cancelled/unchanged composition.
  */
 export function createCompositionTracker(callbacks: CompositionTrackerCallbacks): CompositionTracker {
   let composing = false;
@@ -148,18 +160,18 @@ export function createCompositionTracker(callbacks: CompositionTrackerCallbacks)
     }
   };
 
-  const finalize = () => {
+  const finalize = (syncFromView: boolean) => {
     clearFallback();
     if (!composing && !pendingEnd) return;
     composing = false;
     pendingEnd = false;
-    callbacks.onFinalize();
+    callbacks.onFinalize(syncFromView);
   };
 
   const flushAndFinalizeIfPending = () => {
     if (!pendingEnd) return;
-    callbacks.flushPendingObserver?.();
-    if (pendingEnd) finalize();
+    const stillDeferred = callbacks.flushPendingObserver?.() === true;
+    if (!stillDeferred && pendingEnd) finalize(true);
   };
 
   return {
@@ -180,12 +192,16 @@ export function createCompositionTracker(callbacks: CompositionTrackerCallbacks)
       pendingEnd = true;
       cancelFallback = callbacks.scheduleFallback(() => {
         cancelFallback = null;
-        if (pendingEnd) finalize();
+        if (pendingEnd) finalize(true);
       });
     },
     finalizeNow() {
       if (!composing && !pendingEnd) return;
-      finalize();
+      finalize(true);
+    },
+    closeBeforeNewEdit() {
+      if (!composing && !pendingEnd) return;
+      finalize(false);
     },
     onLocalDocChange(viewComposing: boolean, isComposeEvent: boolean): boolean {
       if (pendingEnd && !viewComposing) {

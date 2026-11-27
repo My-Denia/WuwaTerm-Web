@@ -288,22 +288,35 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
         };
       },
       flushPendingObserver() {
-        const activeView = viewRef.current as (EditorView & { observer?: { flush?: () => void } }) | null;
-        activeView?.observer?.flush?.();
+        const obs = (viewRef.current as (EditorView & {
+          observer?: { flush?: () => boolean; delayedFlush?: number; delayedAndroidKey?: unknown };
+        }) | null)?.observer;
+        if (!obs) return false;
+        // CM6's DOMObserver.flush() returns false without applying mutations whenever
+        // `delayedFlush >= 0 || delayedAndroidKey` (Android next-frame flush). Keep
+        // the composition transaction open for that upcoming flush instead of closing early.
+        const hasDeferredFlush = () => (typeof obs.delayedFlush === 'number' && obs.delayedFlush >= 0) || Boolean(obs.delayedAndroidKey);
+        if (hasDeferredFlush()) return true;
+        const flushed = obs.flush?.();
+        return flushed === false && hasDeferredFlush();
       },
-      onFinalize() {
+      onFinalize(syncFromView) {
         composingActiveRef.current = false;
         const activeView = viewRef.current;
         if (!activeView) return;
-        const docStr = activeView.state.doc.toString();
-        if (normalizeLineBreaks(latestRaw.current) !== docStr) {
-          latestRaw.current = docStr;
+        if (syncFromView) {
+          const docStr = activeView.state.doc.toString();
+          if (normalizeLineBreaks(latestRaw.current) !== docStr) {
+            latestRaw.current = docStr;
+          }
         }
         onEditRef.current(latestRaw.current, { composing: false });
-        const cb = onCursorChangeRef.current;
-        if (cb) {
-          const scalar = domUtf16ToScalar(latestRaw.current, activeView.state.selection.main.from);
-          if (scalar !== null) cb(scalar);
+        if (syncFromView) {
+          const cb = onCursorChangeRef.current;
+          if (cb) {
+            const scalar = domUtf16ToScalar(latestRaw.current, activeView.state.selection.main.from);
+            if (scalar !== null) cb(scalar);
+          }
         }
       },
     });
@@ -328,10 +341,11 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
           if (update.docChanged && !isExternal) {
             // In Chromium EditContext mode, CM6 can close a missed compositionend
             // internally (`view.composing === false`) before a normal non-compose
-            // `textupdate` (e.g. typing `!`). Close the prior IME step first so `!`
-            // becomes its own separate undo entry.
+            // `textupdate` (e.g. typing `!`). Close the prior IME step using the
+            // PRE-CHANGE raw text (`latestRaw.current`, never `update.state.doc`)
+            // so `!` is applied once as its own separate undo entry.
             if (editContext && composition.isComposing() && !composition.isPendingEnd() && !update.view.composing && !isComposeEvent) {
-              composition.finalizeNow();
+              composition.closeBeforeNewEdit();
             }
             const edits: DomChange[] = [];
             update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {

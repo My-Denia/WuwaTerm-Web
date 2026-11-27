@@ -224,12 +224,20 @@ test('Android next-frame compositionend commit (ni -> 你), cancelled compositio
   assert.equal(tracker.isPendingEnd(), false);
   assert.equal(tracker.isComposing(), false);
 
-  // 4) Interleaved `compositionend -> blur` BEFORE Android's next frame:
-  //    blur flushes CM6's queued DOMObserver mutation (`Alpha你`) into the open
-  //    composition transaction before closing, so one undo restores `Alpha`.
+  // 4) Interleaved Android `compositionend -> blur -> next-frame flush`:
+  //    In CM6, observer.flush() returns false while `delayedFlush >= 0`. Blur must NOT
+  //    prematurely close the composition; when the next frame actually commits `Alpha你`,
+  //    it folds into the same composition step so one undo directly restores `Alpha`.
   doc.editText('source', 'Alpha');
   currentText = 'Alpha';
-  let queuedObserverCommit = null;
+  let delayedFlush = -1;
+  let queuedNextFrameCommit = null;
+  const mockObserver = {
+    flush() {
+      if (delayedFlush >= 0) return false;
+      return false;
+    },
+  };
   const blurTracker = createCompositionTracker({
     scheduleFallback(onFire) {
       scheduledFallback = onFire;
@@ -238,11 +246,8 @@ test('Android next-frame compositionend commit (ni -> 你), cancelled compositio
       };
     },
     flushPendingObserver() {
-      if (queuedObserverCommit) {
-        const commit = queuedObserverCommit;
-        queuedObserverCommit = null;
-        commit();
-      }
+      if (delayedFlush >= 0) return true;
+      return mockObserver.flush() === false && delayedFlush >= 0;
     },
     onFinalize() {
       doc.editText('source', currentText, { composing: false });
@@ -257,11 +262,19 @@ test('Android next-frame compositionend commit (ni -> 你), cancelled compositio
   emitBlurDocChange('Alphan', true, true);
   emitBlurDocChange('Alphani', true, true);
   blurTracker.onCompositionEnd();
-  // Queued Android next-frame commit waiting in CM6's DOMObserver.
-  queuedObserverCommit = () => emitBlurDocChange('Alpha你', false, false);
-  // Blur fires before the next animation frame -> must flush observer first, merging 'Alpha你'.
+  // Android flushSoon() scheduled a rAF (`delayedFlush >= 0`), so flush() returns false.
+  delayedFlush = 42;
+  queuedNextFrameCommit = () => {
+    delayedFlush = -1;
+    emitBlurDocChange('Alpha你', false, false);
+  };
+  // Blur fires before next frame -> must keep transaction open instead of closing early.
+  assert.equal(mockObserver.flush(), false);
   blurTracker.onNonComposeEvent();
-  assert.equal(queuedObserverCommit, null);
+  assert.equal(blurTracker.isPendingEnd(), true);
+  assert.equal(blurTracker.isComposing(), true);
+  // Next animation frame lands `Alpha你` -> closes inside the exact same IME step.
+  queuedNextFrameCommit();
   assert.equal(blurTracker.isPendingEnd(), false);
   assert.equal(blurTracker.isComposing(), false);
   assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
@@ -269,25 +282,66 @@ test('Android next-frame compositionend commit (ni -> 你), cancelled compositio
   assert.equal(doc.getSnapshot().draft.source, 'Alpha');
   blurTracker.dispose();
 
-  // 5) Chromium EditContext: `compositionend` on editContext commits `Alpha你`, then
-  //    typing `!` must be its own undo step (1st undo -> `Alpha你`, 2nd undo -> `Alpha`).
+  // 5) Chromium EditContext: (a) explicit `compositionend` then `!`, AND (b) missed
+  //    `compositionend` where CM6 already mutated `view.state.doc` to `Alpha你!` before
+  //    entering updateListener — closing via `closeBeforeNewEdit()` must use pre-change
+  //    raw text (`Alpha你`), never double-applying `!` into `Alpha你!!`.
   doc.editText('source', 'Alpha');
-  currentText = 'Alpha';
-  tracker.begin();
-  emitDocChange('Alphan', true, true);
-  emitDocChange('Alphani', true, true);
-  emitDocChange('Alpha你', true, true);
-  // EditContext fires `compositionend` after synchronous `textupdate` -> finalizeNow().
-  tracker.finalizeNow();
-  assert.equal(tracker.isComposing(), false);
-  assert.equal(tracker.isPendingEnd(), false);
-  // Subsequent plain input `!` arrives via EditContext `textupdate` (view.composing=false).
-  emitDocChange('Alpha你!', false, false);
+  let latestRaw = 'Alpha';
+  let liveViewDoc = 'Alpha';
+  const ecTracker = createCompositionTracker({
+    scheduleFallback(onFire) {
+      scheduledFallback = onFire;
+      return () => {
+        if (scheduledFallback === onFire) scheduledFallback = null;
+      };
+    },
+    onFinalize(syncFromView) {
+      if (syncFromView && normalizeLineBreaks(latestRaw) !== liveViewDoc) {
+        latestRaw = liveViewDoc;
+      }
+      doc.editText('source', latestRaw, { composing: false });
+    },
+  });
+  const simulateEcUpdate = (domChange, nextViewDoc, viewComposing, isComposeEvent) => {
+    liveViewDoc = nextViewDoc;
+    if (ecTracker.isComposing() && !ecTracker.isPendingEnd() && !viewComposing && !isComposeEvent) {
+      ecTracker.closeBeforeNewEdit();
+    }
+    const nextRaw = applyDomChangesToRaw(latestRaw, [domChange]);
+    latestRaw = nextRaw;
+    const composing = ecTracker.onLocalDocChange(viewComposing, isComposeEvent);
+    doc.editText('source', nextRaw, { composing });
+  };
+  // (a) Explicit EditContext compositionend then `!`.
+  ecTracker.begin();
+  simulateEcUpdate({ fromA: 5, toA: 5, inserted: 'n' }, 'Alphan', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 6, inserted: 'ni' }, 'Alphani', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 7, inserted: '你' }, 'Alpha你', true, true);
+  ecTracker.finalizeNow();
+  simulateEcUpdate({ fromA: 6, toA: 6, inserted: '!' }, 'Alpha你!', false, false);
   assert.equal(doc.getSnapshot().draft.source, 'Alpha你!');
   doc.undo();
   assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
   doc.undo();
   assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+
+  // (b) Missed EditContext compositionend: `!` arrives while liveViewDoc is ALREADY 'Alpha你!'.
+  latestRaw = 'Alpha';
+  liveViewDoc = 'Alpha';
+  ecTracker.begin();
+  simulateEcUpdate({ fromA: 5, toA: 5, inserted: 'n' }, 'Alphan', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 6, inserted: 'ni' }, 'Alphani', true, true);
+  simulateEcUpdate({ fromA: 5, toA: 7, inserted: '你' }, 'Alpha你', true, true);
+  // No compositionend event fired; CM6 internally cleared view.composing and dispatched '!'.
+  simulateEcUpdate({ fromA: 6, toA: 6, inserted: '!' }, 'Alpha你!', false, false);
+  assert.equal(latestRaw, 'Alpha你!');
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你!');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+  ecTracker.dispose();
 
   tracker.dispose();
   doc.dispose();
