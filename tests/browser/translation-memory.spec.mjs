@@ -543,6 +543,114 @@ test('three-state freshness badges after term check and merge 8 MiB overflow pro
   await expect(panel(page).getByTestId('my-memory-counts')).toContainText(tmMsg.entryCount.replace('{n}', '1200'));
 });
 
+test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs suppress false warning, and Apply rechecks live TTL at click time', async ({ page }) => {
+  await open(page, { mockClock: true, startNow: 1_700_000_000_000 });
+  await expand(page);
+
+  await importTmFile(page, tmFileBuffer([
+    makeEntry({
+      source_text: '首段原文。',
+      target_text: 'Uno (TM)',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+    makeEntry({
+      source_text: '中段原文。',
+      target_text: 'Dos (TM)',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+    makeEntry({
+      source_text: '末段原文。',
+      target_text: 'Tres (TM)',
+      terms_db_revision: fixtureDictionary.revision,
+      game_version: META.game_version,
+    }),
+  ]));
+
+  const src3 = '首段原文。\n\n中段原文。\n\n末段原文。';
+  await page.locator('#review-source').fill(src3);
+  await page.locator('#review-target').fill('Uno');
+  await page.getByRole('button', { name: m.workspace.openManuscript, exact: true }).click();
+  await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+
+  // Skip to segment 3 and apply `Tres (TM)` -> creates explicit [Uno, null, Tres (TM)] alignments.
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nTres (TM)');
+
+  // Manually type handwritten text into the unaligned middle gap in target, keeping segment 2 aligned as null.
+  await page.locator('#review-target').fill('Uno\n\nDos manual draft\n\nTres (TM)');
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentGapOccupiedHint);
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.targetGapOccupied);
+  await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos manual draft\n\nTres (TM)');
+
+  // Even when a segment's aligned target spans multiple paragraphs (targetSegmentTotal > sourceSegmentTotal),
+  // clear explicit alignment suppresses the false segmentUnalignedHint banner!
+  await page.locator('#review-source').fill('首段原文。\n\n末段原文。');
+  await page.locator('#review-target').fill('One A.\n\nOne B.\n\nTres (TM)');
+  await page.locator('.alignment-panel summary').click();
+  await page.getByRole('button', { name: m.review.alignmentReset, exact: true }).click();
+  // After clearing alignments on unaligned 3-para target vs 2-para source, warning banner shows;
+  await expect(panel(page).getByTestId('my-memory-alignment-hint')).toBeVisible();
+  // Pair paragraph 1 (`首段原文。`) to multi-paragraph `One A.\n\nOne B.` and paragraph 2 to `Tres (TM)`:
+  const selectSourceSpan = (text, needle) => {
+    const start = text.indexOf(needle);
+    return { start, end: start + needle.length };
+  };
+  await page.locator('#review-source').evaluate((el, r) => {
+    el.focus();
+    el.setSelectionRange(r.start, r.end);
+    el.dispatchEvent(new Event('select', { bubbles: true }));
+  }, selectSourceSpan('首段原文。\n\n末段原文。', '首段原文。'));
+  await page.locator('#review-target').evaluate((el, r) => {
+    el.focus();
+    el.setSelectionRange(r.start, r.end);
+    el.dispatchEvent(new Event('select', { bubbles: true }));
+  }, selectSourceSpan('One A.\n\nOne B.\n\nTres (TM)', 'One A.\n\nOne B.'));
+  await page.getByRole('button', { name: m.review.alignmentConfirm, exact: true }).click();
+  await page.locator('#review-source').evaluate((el, r) => {
+    el.focus();
+    el.setSelectionRange(r.start, r.end);
+    el.dispatchEvent(new Event('select', { bubbles: true }));
+  }, selectSourceSpan('首段原文。\n\n末段原文。', '末段原文。'));
+  await page.locator('#review-target').evaluate((el, r) => {
+    el.focus();
+    el.setSelectionRange(r.start, r.end);
+    el.dispatchEvent(new Event('select', { bubbles: true }));
+  }, selectSourceSpan('One A.\n\nOne B.\n\nTres (TM)', 'Tres (TM)'));
+  await page.getByRole('button', { name: m.review.alignmentConfirm, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveCount(0);
+
+  // Move to segment 1, advance Date.now() past 10m TTL without firing setTimeout, then click Apply immediately:
+  // Apply must recompute live basis at click time, show the recheck notice, and degrade the hit badge!
+  await page.getByRole('button', { name: m.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toHaveText(m.review.summaryCurrent);
+  await panel(page).getByRole('button', { name: tmMsg.segmentPrev, exact: true }).click();
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'verified_fresh');
+  await page.evaluate(() => window.__advanceMockNow(10 * 60 * 1000 + 50));
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toHaveText(
+    tmMsg.notices.appliedSegmentRecheck.replace('{i}', '1').replace('{n}', '2'),
+  );
+  await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
+
+  // Removing every alignment row leaves `draft.alignments` as empty `[]` (instead of null);
+  // both single-segment and multi-segment flows must treat `[]` identically to `null`.
+  while ((await page.locator('.alignment-row').count()) > 0) {
+    await page.locator('.alignment-row').first().getByRole('button', { name: m.review.alignmentRemove, exact: true }).click();
+  }
+  await page.locator('#review-source').fill('首段原文。');
+  await page.locator('#review-target').fill('Draft with empty alignments');
+  await expect(panel(page).getByRole('button', { name: tmMsg.confirmButton, exact: true })).toBeEnabled();
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(page.locator('#review-target')).toHaveValue('Uno (TM)');
+});
+
 for (const viewport of [
   { width: 1440, height: 900, label: '1440px', screenshot: 'desktop_1440x900_tm_freshness.png' },
   { width: 390, height: 844, label: '390px', screenshot: 'mobile_390x844_tm_freshness.png' },

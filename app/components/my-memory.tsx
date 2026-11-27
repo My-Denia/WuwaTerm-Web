@@ -13,6 +13,7 @@ import {
   matchTranslationMemory,
   mergeTranslationMemoryEntries,
   parseTranslationMemoryBytes,
+  recheckTmMatchFreshness,
   serializeTranslationMemory,
   tmNow,
   type TmDirection,
@@ -20,13 +21,14 @@ import {
   type TmFile,
   type TmMatch,
 } from '../../lib/translation-memory';
+import type { TmSegmentAlignmentStatus } from '../../lib/tm-segment';
 import { useUiLanguage } from './ui-language-context';
 
 type Feedback = { kind: 'notice' | 'error'; text: string } | null;
 
 export type ApplySuggestionOutcome = {
   applied: boolean;
-  reason?: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion';
+  reason?: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion' | 'target_gap_occupied';
 };
 
 export type TmLiveBasis = {
@@ -42,6 +44,7 @@ type Props = {
   segmentIndex?: number;
   segmentTotal?: number;
   targetSegmentTotal?: number;
+  alignmentStatus?: TmSegmentAlignmentStatus;
   direction: TmDirection;
   currentTermsDbRevision?: string | null;
   currentGameVersion?: string | null;
@@ -70,6 +73,7 @@ export function MyMemory({
   segmentIndex = 0,
   segmentTotal = 1,
   targetSegmentTotal = 0,
+  alignmentStatus,
   direction,
   currentTermsDbRevision = null,
   currentGameVersion = null,
@@ -126,7 +130,22 @@ export function MyMemory({
   const matches = matchBundle.matches;
   const directionLabel = direction === 'en' ? t.directionEn : t.directionZh;
   const isMultiSegment = segmentTotal > 1;
-  const targetHasMoreSegments = isMultiSegment && targetSegmentTotal > segmentTotal;
+  const effectiveAlignmentStatus = alignmentStatus ?? {
+    status: isMultiSegment && targetSegmentTotal > segmentTotal ? 'target_extra_paragraphs' : 'ok',
+    sourceTotal: segmentTotal,
+    targetTotal: targetSegmentTotal,
+  };
+  const targetHasMoreSegments = effectiveAlignmentStatus.status === 'target_extra_paragraphs';
+  const alignmentBannerText = effectiveAlignmentStatus.status === 'target_extra_paragraphs'
+    ? fill(t.segmentUnalignedHint, {
+      sourceTotal: effectiveAlignmentStatus.sourceTotal,
+      targetTotal: effectiveAlignmentStatus.targetTotal,
+    })
+    : effectiveAlignmentStatus.status === 'alignment_ambiguous'
+      ? t.segmentAmbiguousHint
+      : effectiveAlignmentStatus.status === 'target_gap_occupied'
+        ? t.segmentGapOccupiedHint
+        : null;
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
@@ -236,27 +255,34 @@ export function MyMemory({
     ) {
       return;
     }
+    const liveBasis = getServiceBasis ? getServiceBasis() : { currentTermsDbRevision, currentGameVersion };
+    const liveMatch = recheckTmMatchFreshness(match, liveBasis);
     const outcome = onApplySuggestion(match.entry.target_text);
     const applied = typeof outcome === 'boolean' ? outcome : outcome ? outcome.applied : true;
     if (!applied) {
       const reason = typeof outcome === 'object' && outcome ? outcome.reason : undefined;
       if (reason === 'multi_paragraph_suggestion') {
         failure(t.errors.multiParagraphSuggestion);
+      } else if (reason === 'target_gap_occupied') {
+        failure(t.errors.targetGapOccupied);
       } else if (targetHasMoreSegments) {
-        failure(fill(t.errors.segmentUnaligned, { sourceTotal: segmentTotal, targetTotal: targetSegmentTotal }));
+        failure(fill(t.errors.segmentUnaligned, {
+          sourceTotal: effectiveAlignmentStatus.sourceTotal,
+          targetTotal: effectiveAlignmentStatus.targetTotal,
+        }));
       } else {
         failure(t.errors.segmentAlignmentRequired);
       }
       return;
     }
     if (isMultiSegment) {
-      notice(fill(match.needsRecheck ? t.notices.appliedSegmentRecheck : t.notices.appliedSegment, {
+      notice(fill(liveMatch.needsRecheck ? t.notices.appliedSegmentRecheck : t.notices.appliedSegment, {
         i: segmentIndex + 1,
         n: segmentTotal,
       }));
       return;
     }
-    notice(match.needsRecheck ? t.notices.appliedRecheck : t.notices.applied);
+    notice(liveMatch.needsRecheck ? t.notices.appliedRecheck : t.notices.applied);
   }
 
   function removeAt(index: number) {
@@ -312,9 +338,9 @@ export function MyMemory({
             )}
           </div>
         )}
-        {targetHasMoreSegments && (
-          <p className="my-memory-recheck-hint" role="status">
-            {fill(t.segmentUnalignedHint, { sourceTotal: segmentTotal, targetTotal: targetSegmentTotal })}
+        {alignmentBannerText && (
+          <p className="my-memory-recheck-hint" data-testid="my-memory-alignment-hint" role="status">
+            {alignmentBannerText}
           </p>
         )}
         <div className="my-terms-actions">

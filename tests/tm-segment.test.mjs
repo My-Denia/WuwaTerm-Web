@@ -11,6 +11,7 @@ import {
 import {
   applySegmentSuggestionResult,
   applySegmentSuggestionToTarget,
+  describeTmSegmentAlignment,
   resolveActiveSegment,
   segmentParagraphs,
 } from '../lib/tm-segment.ts';
@@ -247,4 +248,107 @@ test('multi-paragraph suggestion without explicit alignments is refused, and lon
   assert.equal(outcome.applied, false);
   assert.equal(outcome.reason, 'unaligned_target');
   assert.equal(outcome.target, longerTgt);
+});
+
+test('target_gap_occupied refuses inserting into an unaligned gap when handwritten target text already sits there', () => {
+  const source = '第一段。\n\n第二段。\n\n第三段。';
+  const srcSegs = segmentParagraphs(source);
+  const step1 = applySegmentSuggestionResult('Uno', srcSegs, 2, 'Tres', { source, alignments: null });
+  assert.ok(step1.alignments);
+
+  // Simulate user typing handwritten `Dos draft` in the unaligned middle gap while `step1.alignments[1].target` is still null.
+  const draftedTarget = 'Uno\n\nDos draft\n\nTres';
+  const tresOffset = Array.from('Uno\n\nDos draft\n\n').length;
+  const shiftedAlignments = [
+    step1.alignments[0],
+    step1.alignments[1],
+    {
+      source: step1.alignments[2].source,
+      target: { start: scalarOffset(tresOffset), end: scalarOffset(tresOffset + 4), text: 'Tres' },
+    },
+  ];
+  assert.equal(describeTmSegmentAlignment(source, draftedTarget, resolveActiveSegment(source, draftedTarget, { kind: 'index', index: 1 }, shiftedAlignments), shiftedAlignments).status, 'target_gap_occupied');
+
+  const refused = applySegmentSuggestionResult(draftedTarget, srcSegs, 1, 'Dos TM', {
+    source,
+    alignments: shiftedAlignments,
+  });
+  assert.equal(refused.applied, false);
+  assert.equal(refused.reason, 'target_gap_occupied');
+  assert.equal(refused.target, draftedTarget);
+
+  // Even when every alignment has target: null, non-empty manual target text in the gap refuses blind overwrite.
+  const allNull = srcSegs.map(seg => ({
+    source: { start: seg.coreStart, end: seg.coreEnd, text: seg.text },
+    target: null,
+  }));
+  const refusedAllNull = applySegmentSuggestionResult('Manual draft', srcSegs, 1, 'Dos TM', {
+    source,
+    alignments: allNull,
+  });
+  assert.equal(refusedAllNull.applied, false);
+  assert.equal(refusedAllNull.reason, 'target_gap_occupied');
+});
+
+test('sourceSegmentIndexForTargetOffset uses half-open [start, end) hit testing for adjacent spans with trailing fallback', () => {
+  const source = '甲。\n\n乙。';
+  const alignments = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(1), text: 'X' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: { start: scalarOffset(1), end: scalarOffset(2), text: 'Y' } },
+  ];
+
+  const at0 = resolveActiveSegment(source, 'XY', { kind: 'offset', side: 'target', offset: 0 }, alignments);
+  assert.equal(at0.index, 0);
+  assert.equal(at0.targetText, 'X');
+
+  const at1 = resolveActiveSegment(source, 'XY', { kind: 'offset', side: 'target', offset: 1 }, alignments);
+  assert.equal(at1.index, 1);
+  assert.equal(at1.targetText, 'Y');
+
+  const atEnd = resolveActiveSegment(source, 'XY', { kind: 'offset', side: 'target', offset: 2 }, alignments);
+  assert.equal(atEnd.index, 1);
+  assert.equal(atEnd.targetText, 'Y');
+});
+
+test('replacing aligned target preserves leading/trailing whitespace & newlines inside entry.target, matches source by trimmed core, and treats [] as null', () => {
+  const source = '甲。\n\n  乙。';
+  const srcSegs = segmentParagraphs(source);
+  const target = 'Uno \r\n\n  Dos';
+  // Explicit alignment includes trailing ` \r\n\n` in target[0] and leading `\n  ` in source[1].
+  const alignments = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(7), text: 'Uno \r\n\n' } },
+    { source: { start: scalarOffset(3), end: scalarOffset(8), text: '\n  乙。' }, target: { start: scalarOffset(9), end: scalarOffset(12), text: 'Dos' } },
+  ];
+
+  const active0 = resolveActiveSegment(source, target, { kind: 'index', index: 0 }, alignments);
+  assert.equal(active0.targetText, 'Uno');
+  assert.deepEqual(active0.targetRange, { start: 0, end: 3 });
+
+  const replaced0 = applySegmentSuggestionResult(target, srcSegs, 0, 'First', { source, alignments });
+  assert.equal(replaced0.applied, true);
+  assert.equal(replaced0.target, 'First \r\n\n  Dos');
+
+  const active1 = resolveActiveSegment(source, replaced0.target, { kind: 'index', index: 1 }, replaced0.alignments);
+  assert.equal(active1.targetText, 'Dos');
+  const replaced1 = applySegmentSuggestionResult(replaced0.target, srcSegs, 1, 'Second', {
+    source,
+    alignments: replaced0.alignments,
+  });
+  assert.equal(replaced1.applied, true);
+  assert.equal(replaced1.target, 'First \r\n\n  Second');
+
+  // Empty alignments `[]` behaves identically to `null` in single- and multi-segment flows.
+  const emptySingle = resolveActiveSegment('甲。', 'Old', { kind: 'index', index: 0 }, []);
+  assert.equal(emptySingle.targetText, 'Old');
+  assert.equal(emptySingle.hasAlignedTarget, true);
+  const emptyApplied = applySegmentSuggestionResult('Old', segmentParagraphs('甲。'), 0, 'New', { source: '甲。', alignments: [] });
+  assert.equal(emptyApplied.applied, true);
+  assert.equal(emptyApplied.target, 'New');
+
+  // Explicit alignment with extra target paragraph does NOT report target_extra_paragraphs warning when resolved cleanly.
+  const extraStatus = describeTmSegmentAlignment('甲。\n\n乙。', 'One A.\n\nOne B.\n\nTwo.', active0, [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(14), text: 'One A.\n\nOne B.' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: { start: scalarOffset(16), end: scalarOffset(20), text: 'Two.' } },
+  ]);
+  assert.equal(extraStatus.status, 'ok');
 });

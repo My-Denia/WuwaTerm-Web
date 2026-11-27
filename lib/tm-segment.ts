@@ -42,7 +42,13 @@ export type TmApplySegmentResult = {
   splice: Splice | null;
   invalidated: InvalidatedAlignment[];
   applied: boolean;
-  reason: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion';
+  reason: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion' | 'target_gap_occupied';
+};
+
+export type TmSegmentAlignmentStatus = {
+  status: 'ok' | 'target_extra_paragraphs' | 'alignment_ambiguous' | 'target_gap_occupied';
+  sourceTotal: number;
+  targetTotal: number;
 };
 
 const MAX_AUTO_ALIGNMENTS = 64;
@@ -130,45 +136,82 @@ function locateAlignmentForSourceSegment(
   seg: TmSegment,
   alignments: readonly Alignment[],
 ): AlignedLookup {
-  const overlapping: { entry: Alignment; alignmentIndex: number }[] = [];
+  const overlapping: { entry: Alignment; alignmentIndex: number; coreStart: number; coreEnd: number }[] = [];
   for (let i = 0; i < alignments.length; i += 1) {
     const entry = alignments[i]!;
-    if (entry.source.start < seg.coreEnd && entry.source.end > seg.coreStart) {
-      overlapping.push({ entry, alignmentIndex: i });
+    const [eCoreStart, eCoreEnd] = core(sourceChars, entry.source.start, entry.source.end);
+    if (eCoreStart < seg.coreEnd && eCoreEnd > seg.coreStart) {
+      overlapping.push({ entry, alignmentIndex: i, coreStart: eCoreStart, coreEnd: eCoreEnd });
     }
   }
   if (overlapping.length !== 1) return { kind: 'ambiguous' };
-  const { entry, alignmentIndex } = overlapping[0]!;
-  if (entry.source.start < seg.start || entry.source.end > seg.end) {
-    return { kind: 'ambiguous' };
-  }
-  const [eCoreStart, eCoreEnd] = core(sourceChars, entry.source.start, entry.source.end);
-  if (eCoreStart !== seg.coreStart || eCoreEnd !== seg.coreEnd) {
+  const { entry, alignmentIndex, coreStart, coreEnd } = overlapping[0]!;
+  if (coreStart !== seg.coreStart || coreEnd !== seg.coreEnd) {
     return { kind: 'ambiguous' };
   }
   return { kind: 'aligned', entry, alignmentIndex };
 }
 
 function sourceSegmentIndexForTargetOffset(
+  sourceChars: readonly string[],
   sourceSegments: readonly TmSegment[],
   alignments: readonly Alignment[],
   offset: number,
 ): number | null {
-  const targetEntries = alignments.filter((a): a is Alignment & { target: Span } => a.target !== null);
+  const targetEntries = alignments
+    .filter((a): a is Alignment & { target: Span } => a.target !== null)
+    .sort((a, b) => a.target.start - b.target.start);
   if (targetEntries.length === 0) return null;
   let matched: (Alignment & { target: Span }) | null = null;
+  // Half-open [start, end) hit test first so adjacent spans [0,1) and [1,2) resolve offset=1 to the second span.
   for (const entry of targetEntries) {
-    if (offset >= entry.target.start && offset <= entry.target.end) {
+    if (offset >= entry.target.start && offset < entry.target.end) {
       matched = entry;
       break;
     }
-    if (offset > entry.target.end) {
-      matched = entry;
+  }
+  // Fall back to a trailing end boundary or nearest preceding span only when no half-open interval contains offset.
+  if (!matched) {
+    for (const entry of targetEntries) {
+      if (offset === entry.target.end || offset > entry.target.end) {
+        matched = entry;
+      }
     }
   }
   if (!matched) matched = targetEntries[0]!;
-  const sIdx = sourceSegments.findIndex(seg => matched!.source.start < seg.coreEnd && matched!.source.end > seg.coreStart);
+  const [mCoreStart, mCoreEnd] = core(sourceChars, matched.source.start, matched.source.end);
+  const sIdx = sourceSegments.findIndex(seg => {
+    const lookup = locateAlignmentForSourceSegment(sourceChars, seg, alignments);
+    if (lookup.kind === 'aligned') return lookup.entry === matched;
+    return mCoreStart < seg.coreEnd && mCoreEnd > seg.coreStart;
+  });
   return sIdx >= 0 ? sIdx : null;
+}
+
+function findAlignmentGapBounds(
+  alignments: readonly Alignment[],
+  alignmentIndex: number,
+  targetLen: number,
+): { prevAligned: (Alignment & { target: Span }) | null; nextAligned: (Alignment & { target: Span }) | null; prevEnd: number; nextStart: number } {
+  let prevAligned: (Alignment & { target: Span }) | null = null;
+  for (let i = alignmentIndex - 1; i >= 0; i -= 1) {
+    const item = alignments[i]!;
+    if (item.target !== null) {
+      prevAligned = item as Alignment & { target: Span };
+      break;
+    }
+  }
+  let nextAligned: (Alignment & { target: Span }) | null = null;
+  for (let i = alignmentIndex + 1; i < alignments.length; i += 1) {
+    const item = alignments[i]!;
+    if (item.target !== null) {
+      nextAligned = item as Alignment & { target: Span };
+      break;
+    }
+  }
+  const prevEnd = prevAligned ? prevAligned.target.end : 0;
+  const nextStart = nextAligned ? nextAligned.target.start : targetLen;
+  return { prevAligned, nextAligned, prevEnd, nextStart };
 }
 
 /**
@@ -196,6 +239,7 @@ export function resolveActiveSegment(
     };
   }
 
+  const effectiveAlignments = alignments && alignments.length > 0 ? alignments : null;
   const targetSegments = segmentParagraphs(target);
   const sourceChars = Array.from(source);
   const targetChars = Array.from(target);
@@ -206,8 +250,8 @@ export function resolveActiveSegment(
   } else if (cursor?.kind === 'offset') {
     if (cursor.side === 'source') {
       index = clampIndex(segmentIndexAtOffset(source, sourceSegments, cursor.offset), total);
-    } else if (alignments !== null && alignments.length > 0) {
-      const mapped = sourceSegmentIndexForTargetOffset(sourceSegments, alignments, cursor.offset);
+    } else if (effectiveAlignments !== null) {
+      const mapped = sourceSegmentIndexForTargetOffset(sourceChars, sourceSegments, effectiveAlignments, cursor.offset);
       index = mapped !== null ? clampIndex(mapped, total) : 0;
     } else if (targetSegments.length > 0) {
       index = clampIndex(
@@ -223,29 +267,21 @@ export function resolveActiveSegment(
   const prevSource = index > 0 ? sourceSegments[index - 1]!.text : null;
   const nextSource = index + 1 < total ? sourceSegments[index + 1]!.text : null;
 
-  if (alignments !== null) {
-    if (alignments.length === 0) {
-      return {
-        index,
-        total,
-        sourceText: activeSource.text,
-        targetText: '',
-        prevSource,
-        nextSource,
-        targetRange: null,
-        hasAlignedTarget: false,
-      };
-    }
-    const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, alignments);
+  if (effectiveAlignments !== null) {
+    const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, effectiveAlignments);
     if (lookup.kind === 'aligned' && lookup.entry.target !== null) {
+      const [tCoreStart, tCoreEnd] = core(targetChars, lookup.entry.target.start, lookup.entry.target.end);
+      const hasCore = tCoreStart < tCoreEnd;
+      const rStart = hasCore ? tCoreStart : lookup.entry.target.start;
+      const rEnd = hasCore ? tCoreEnd : lookup.entry.target.end;
       return {
         index,
         total,
         sourceText: activeSource.text,
-        targetText: lookup.entry.target.text,
+        targetText: targetChars.slice(rStart, rEnd).join(''),
         prevSource,
         nextSource,
-        targetRange: { start: scalarOffset(lookup.entry.target.start), end: scalarOffset(lookup.entry.target.end) },
+        targetRange: { start: scalarOffset(rStart), end: scalarOffset(rEnd) },
         hasAlignedTarget: true,
       };
     }
@@ -408,7 +444,8 @@ export function applySegmentSuggestionResult(
   options: TmApplySegmentOptions = {},
 ): TmApplySegmentResult {
   const total = sourceSegments.length;
-  const alignments = options.alignments ?? null;
+  const rawAlignments = options.alignments ?? null;
+  const alignments = rawAlignments && rawAlignments.length > 0 ? rawAlignments : null;
   const source = options.source ?? '';
   const tChars = Array.from(target);
 
@@ -443,7 +480,7 @@ export function applySegmentSuggestionResult(
   }
 
   if (alignments !== null) {
-    if (alignments.length === 0 || !source) {
+    if (!source) {
       return {
         target,
         alignments: [...alignments],
@@ -467,40 +504,37 @@ export function applySegmentSuggestionResult(
     }
     const { entry, alignmentIndex } = lookup;
     if (entry.target !== null) {
-      const start = entry.target.start;
-      const end = entry.target.end;
+      const [tCoreStart, tCoreEnd] = core(tChars, entry.target.start, entry.target.end);
+      const replaceStart = tCoreStart < tCoreEnd ? tCoreStart : entry.target.start;
+      const replaceEnd = tCoreStart < tCoreEnd ? tCoreEnd : entry.target.end;
       const repLen = Array.from(suggestionText).length;
-      const nextTarget = `${tChars.slice(0, start).join('')}${suggestionText}${tChars.slice(end).join('')}`;
-      const remap = remapForSplice([...alignments], 'target', source, nextTarget, start, end, repLen);
+      const nextTarget = `${tChars.slice(0, replaceStart).join('')}${suggestionText}${tChars.slice(replaceEnd).join('')}`;
+      const remap = remapForSplice([...alignments], 'target', source, nextTarget, replaceStart, replaceEnd, repLen);
       return {
         target: nextTarget,
         alignments: remap.alignments,
-        splice: { start: scalarOffset(start), oldEnd: scalarOffset(end), newEnd: scalarOffset(start + repLen) },
+        splice: {
+          start: scalarOffset(replaceStart),
+          oldEnd: scalarOffset(replaceEnd),
+          newEnd: scalarOffset(replaceStart + repLen),
+        },
         invalidated: remap.invalidated,
         applied: true,
         reason: 'replaced',
       };
     }
 
-    let prevAligned: (Alignment & { target: Span }) | null = null;
-    for (let i = alignmentIndex - 1; i >= 0; i -= 1) {
-      const item = alignments[i]!;
-      if (item.target !== null) {
-        prevAligned = item as Alignment & { target: Span };
-        break;
-      }
+    const { prevAligned, nextAligned, prevEnd, nextStart } = findAlignmentGapBounds(alignments, alignmentIndex, tChars.length);
+    if (prevEnd > nextStart || tChars.slice(prevEnd, nextStart).join('').trim().length > 0) {
+      return {
+        target,
+        alignments: [...alignments],
+        splice: null,
+        invalidated: [],
+        applied: false,
+        reason: 'target_gap_occupied',
+      };
     }
-    let nextAligned: (Alignment & { target: Span }) | null = null;
-    for (let i = alignmentIndex + 1; i < alignments.length; i += 1) {
-      const item = alignments[i]!;
-      if (item.target !== null) {
-        nextAligned = item as Alignment & { target: Span };
-        break;
-      }
-    }
-
-    const prevEnd = prevAligned ? prevAligned.target.end : 0;
-    const nextStart = nextAligned ? nextAligned.target.start : tChars.length;
     const eol = preferredEol(target, source);
     const placed = insertIntoTargetGap(
       target,
@@ -647,4 +681,44 @@ export function applySegmentSuggestionToTarget(
   options: TmApplySegmentOptions = {},
 ): string {
   return applySegmentSuggestionResult(target, sourceSegments, activeIndex, suggestionText, options).target;
+}
+
+/**
+ * Summarizes whether `activeSegment` is cleanly aligned for TM apply/confirm without naive paragraph-count false alarms
+ * when explicit `alignments` already isolate each source segment.
+ */
+export function describeTmSegmentAlignment(
+  source: string,
+  target: string,
+  activeSegment: TmActiveSegment,
+  alignments: readonly Alignment[] | null = null,
+): TmSegmentAlignmentStatus {
+  const sourceSegments = segmentParagraphs(source);
+  const targetSegments = segmentParagraphs(target);
+  const sourceTotal = sourceSegments.length;
+  const targetTotal = targetSegments.length;
+  const effectiveAlignments = alignments && alignments.length > 0 ? alignments : null;
+
+  if (effectiveAlignments !== null) {
+    const activeSource = sourceSegments[activeSegment.index];
+    if (!activeSource) return { status: 'ok', sourceTotal, targetTotal };
+    const sourceChars = Array.from(source);
+    const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, effectiveAlignments);
+    if (lookup.kind !== 'aligned') {
+      return { status: 'alignment_ambiguous', sourceTotal, targetTotal };
+    }
+    if (lookup.entry.target === null) {
+      const tChars = Array.from(target);
+      const { prevEnd, nextStart } = findAlignmentGapBounds(effectiveAlignments, lookup.alignmentIndex, tChars.length);
+      if (prevEnd > nextStart || tChars.slice(prevEnd, nextStart).join('').trim().length > 0) {
+        return { status: 'target_gap_occupied', sourceTotal, targetTotal };
+      }
+    }
+    return { status: 'ok', sourceTotal, targetTotal };
+  }
+
+  if (sourceTotal > 1 && targetTotal > sourceTotal) {
+    return { status: 'target_extra_paragraphs', sourceTotal, targetTotal };
+  }
+  return { status: 'ok', sourceTotal, targetTotal };
 }

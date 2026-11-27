@@ -20,7 +20,7 @@ import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
 import { META_FRESH_TTL_MS } from '../../lib/runtime-store';
 import { numberLocale } from '../../lib/ui-language';
 import { isMetaFresh, tmServiceBasis } from '../../lib/tm-live-provenance';
-import { resolveActiveSegment, segmentParagraphs, type TmSegmentCursor } from '../../lib/tm-segment';
+import { describeTmSegmentAlignment, resolveActiveSegment, segmentParagraphs, type TmSegmentCursor } from '../../lib/tm-segment';
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
@@ -154,9 +154,12 @@ export function DocumentWorkspace() {
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
-  const sourceSegments = useMemo(() => segmentParagraphs(source), [source]);
   const targetSegments = useMemo(() => segmentParagraphs(target), [target]);
   const activeTmSegment = useMemo(() => resolveActiveSegment(source, target, tmCursor, alignments), [source, target, tmCursor, alignments]);
+  const tmAlignmentStatus = useMemo(
+    () => describeTmSegmentAlignment(source, target, activeTmSegment, alignments),
+    [source, target, activeTmSegment, alignments],
+  );
   const [, setTmTtlVersion] = useState(0);
   useEffect(() => {
     if (tmOpen) void runtime.loadMeta();
@@ -930,6 +933,7 @@ export function DocumentWorkspace() {
           segmentIndex={activeTmSegment.index}
           segmentTotal={activeTmSegment.total}
           targetSegmentTotal={targetSegments.length}
+          alignmentStatus={tmAlignmentStatus}
           direction={effectiveTermbaseDirection}
           currentTermsDbRevision={tmBasis.currentTermsDbRevision}
           currentGameVersion={tmBasis.currentGameVersion}
