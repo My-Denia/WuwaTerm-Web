@@ -28,7 +28,13 @@ type Feedback = { kind: 'notice' | 'error'; text: string } | null;
 
 export type ApplySuggestionOutcome = {
   applied: boolean;
-  reason?: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion' | 'target_gap_occupied';
+  reason?:
+    | 'replaced'
+    | 'inserted'
+    | 'unaligned_target'
+    | 'multi_paragraph_suggestion'
+    | 'target_gap_occupied'
+    | 'whitespace_target_alignment';
 };
 
 export type TmLiveBasis = {
@@ -136,16 +142,21 @@ export function MyMemory({
     targetTotal: targetSegmentTotal,
   };
   const targetHasMoreSegments = effectiveAlignmentStatus.status === 'target_extra_paragraphs';
-  const alignmentBannerText = effectiveAlignmentStatus.status === 'target_extra_paragraphs'
-    ? fill(t.segmentUnalignedHint, {
-      sourceTotal: effectiveAlignmentStatus.sourceTotal,
-      targetTotal: effectiveAlignmentStatus.targetTotal,
-    })
-    : effectiveAlignmentStatus.status === 'alignment_ambiguous'
-      ? t.segmentAmbiguousHint
-      : effectiveAlignmentStatus.status === 'target_gap_occupied'
-        ? t.segmentGapOccupiedHint
-        : null;
+  const isTargetCursorUnaligned = effectiveAlignmentStatus.status === 'target_cursor_unaligned';
+  const alignmentBannerText = effectiveAlignmentStatus.status === 'target_cursor_unaligned'
+    ? t.segmentTargetCursorUnalignedHint
+    : effectiveAlignmentStatus.status === 'whitespace_target_alignment'
+      ? t.segmentWhitespaceAlignmentHint
+      : effectiveAlignmentStatus.status === 'target_extra_paragraphs'
+        ? fill(t.segmentUnalignedHint, {
+          sourceTotal: effectiveAlignmentStatus.sourceTotal,
+          targetTotal: effectiveAlignmentStatus.targetTotal,
+        })
+        : effectiveAlignmentStatus.status === 'alignment_ambiguous'
+          ? t.segmentAmbiguousHint
+          : effectiveAlignmentStatus.status === 'target_gap_occupied'
+            ? t.segmentGapOccupiedHint
+            : null;
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
@@ -246,6 +257,10 @@ export function MyMemory({
   }
 
   function applySuggestion(match: TmMatch, matchQuery: typeof deferredQuery) {
+    if (isTargetCursorUnaligned) {
+      failure(t.segmentTargetCursorUnalignedHint);
+      return;
+    }
     if (
       !matchesCurrentSegment
       || matchQuery.segmentIndex !== currentQuery.segmentIndex
@@ -265,6 +280,8 @@ export function MyMemory({
         failure(t.errors.multiParagraphSuggestion);
       } else if (reason === 'target_gap_occupied') {
         failure(t.errors.targetGapOccupied);
+      } else if (reason === 'whitespace_target_alignment') {
+        failure(t.errors.whitespaceTargetAlignment);
       } else if (targetHasMoreSegments) {
         failure(fill(t.errors.segmentUnaligned, {
           sourceTotal: effectiveAlignmentStatus.sourceTotal,
@@ -355,7 +372,7 @@ export function MyMemory({
           <button
             type="button"
             className="secondary-button my-memory-confirm-btn"
-            disabled={!sourceText.trim() || !targetText.trim()}
+            disabled={!sourceText.trim() || !targetText.trim() || isTargetCursorUnaligned}
             onClick={confirmCurrent}
           >
             {isMultiSegment ? t.confirmSegmentButton : t.confirmButton}
@@ -441,7 +458,12 @@ export function MyMemory({
                 )}
                 {match.entry.note && <p className="my-terms-meta">{match.entry.note}</p>}
                 <div className="finding-actions">
-                  <button type="button" className="secondary-button" disabled={!matchesCurrentSegment} onClick={() => applySuggestion(match, matchBundle.query)}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={!matchesCurrentSegment || isTargetCursorUnaligned}
+                    onClick={() => applySuggestion(match, matchBundle.query)}
+                  >
                     {t.applyButton}
                   </button>
                 </div>

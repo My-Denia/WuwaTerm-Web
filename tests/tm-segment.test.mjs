@@ -14,6 +14,7 @@ import {
   describeTmSegmentAlignment,
   resolveActiveSegment,
   segmentParagraphs,
+  sourceSegmentIndexForTargetOffset,
 } from '../lib/tm-segment.ts';
 import { scalarOffset } from '../lib/workbench-model.ts';
 
@@ -337,13 +338,23 @@ test('replacing aligned target preserves leading/trailing whitespace & newlines 
   assert.equal(replaced1.applied, true);
   assert.equal(replaced1.target, 'First \r\n\n  Second');
 
-  // Empty alignments `[]` behaves identically to `null` in single- and multi-segment flows.
+  // Empty alignments `[]` behaves identically to `null` in matching/slicing AND preserves `[]` (never converts to `null`)
+  // so cleared-alignment mode keeps sending `alignments: []` to backend review-v2.
   const emptySingle = resolveActiveSegment('甲。', 'Old', { kind: 'index', index: 0 }, []);
   assert.equal(emptySingle.targetText, 'Old');
   assert.equal(emptySingle.hasAlignedTarget, true);
   const emptyApplied = applySegmentSuggestionResult('Old', segmentParagraphs('甲。'), 0, 'New', { source: '甲。', alignments: [] });
   assert.equal(emptyApplied.applied, true);
   assert.equal(emptyApplied.target, 'New');
+  assert.deepEqual(emptyApplied.alignments, []);
+
+  const emptyMulti = applySegmentSuggestionResult('Uno.\n\nOldDos.', segmentParagraphs('甲。\n\n乙。'), 1, 'NewDos.', {
+    source: '甲。\n\n乙。',
+    alignments: [],
+  });
+  assert.equal(emptyMulti.applied, true);
+  assert.equal(emptyMulti.target, 'Uno.\n\nNewDos.');
+  assert.deepEqual(emptyMulti.alignments, []);
 
   // Explicit alignment with extra target paragraph does NOT report target_extra_paragraphs warning when resolved cleanly.
   const extraStatus = describeTmSegmentAlignment('甲。\n\n乙。', 'One A.\n\nOne B.\n\nTwo.', active0, [
@@ -351,4 +362,65 @@ test('replacing aligned target preserves leading/trailing whitespace & newlines 
     { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: { start: scalarOffset(16), end: scalarOffset(20), text: 'Two.' } },
   ]);
   assert.equal(extraStatus.status, 'ok');
+});
+
+test('whitespace-only explicit target alignment refuses direct replacement so adjacent segments never merge', () => {
+  const source = '甲。\n\n乙。\n\n丙。';
+  const srcSegs = segmentParagraphs(source);
+  const target = 'Uno\r\n\nTres';
+  // Segment 1 aligned strictly to `\r\n\n` (empty once whitespace-trimmed).
+  const alignments = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(3), text: 'Uno' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: { start: scalarOffset(3), end: scalarOffset(6), text: '\r\n\n' } },
+    { source: { start: scalarOffset(8), end: scalarOffset(10), text: '丙。' }, target: { start: scalarOffset(6), end: scalarOffset(10), text: 'Tres' } },
+  ];
+
+  const active = resolveActiveSegment(source, target, { kind: 'index', index: 1 }, alignments);
+  assert.equal(active.hasAlignedTarget, false);
+  assert.equal(active.targetText, '');
+  assert.equal(active.targetRange, null);
+  assert.equal(describeTmSegmentAlignment(source, target, active, alignments).status, 'whitespace_target_alignment');
+
+  const refused = applySegmentSuggestionResult(target, srcSegs, 1, 'Dos', { source, alignments });
+  assert.equal(refused.applied, false);
+  assert.equal(refused.reason, 'whitespace_target_alignment');
+  assert.equal(refused.target, 'Uno\r\n\nTres');
+});
+
+test('target caret inside non-whitespace unaligned prose returns null instead of falling back to segment 1', () => {
+  const source = '甲。\n\n乙。\n\n丙。';
+  const srcSegs = segmentParagraphs(source);
+  const target = 'Uno\n\nDos draft\n\nTres';
+  const tresStart = Array.from('Uno\n\nDos draft\n\n').length;
+  const alignments = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(3), text: 'Uno' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: null },
+    { source: { start: scalarOffset(8), end: scalarOffset(10), text: '丙。' }, target: { start: scalarOffset(tresStart), end: scalarOffset(tresStart + 4), text: 'Tres' } },
+  ];
+
+  // Cursor inside `Dos draft` (middle unaligned prose): must return null, never segment 0 (`Uno`)!
+  const midCaret = Array.from('Uno\n\nDos ').length;
+  assert.equal(
+    sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(target), srcSegs, alignments, midCaret),
+    null,
+  );
+  const activeMid = resolveActiveSegment(source, target, { kind: 'offset', side: 'target', offset: midCaret }, alignments);
+  assert.equal(activeMid.targetOffsetUnaligned, true);
+  assert.equal(activeMid.hasAlignedTarget, false);
+  assert.equal(activeMid.targetText, '');
+  assert.equal(describeTmSegmentAlignment(source, target, activeMid, alignments).status, 'target_cursor_unaligned');
+
+  // Cursor in leading unaligned prose before first aligned span: also returns null, never segment 0/first!
+  const leadingTarget = 'Intro draft\n\nUno';
+  const leadingAlign = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: null },
+    {
+      source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' },
+      target: { start: scalarOffset(13), end: scalarOffset(16), text: 'Uno' },
+    },
+  ];
+  assert.equal(
+    sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(leadingTarget), srcSegs, leadingAlign, 3),
+    null,
+  );
 });

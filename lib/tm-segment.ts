@@ -25,6 +25,7 @@ export type TmActiveSegment = {
   nextSource: string | null;
   targetRange: { start: number; end: number } | null;
   hasAlignedTarget: boolean;
+  targetOffsetUnaligned?: boolean;
 };
 
 export type TmSegmentCursor =
@@ -42,11 +43,23 @@ export type TmApplySegmentResult = {
   splice: Splice | null;
   invalidated: InvalidatedAlignment[];
   applied: boolean;
-  reason: 'replaced' | 'inserted' | 'unaligned_target' | 'multi_paragraph_suggestion' | 'target_gap_occupied';
+  reason:
+    | 'replaced'
+    | 'inserted'
+    | 'unaligned_target'
+    | 'multi_paragraph_suggestion'
+    | 'target_gap_occupied'
+    | 'whitespace_target_alignment';
 };
 
 export type TmSegmentAlignmentStatus = {
-  status: 'ok' | 'target_extra_paragraphs' | 'alignment_ambiguous' | 'target_gap_occupied';
+  status:
+    | 'ok'
+    | 'target_extra_paragraphs'
+    | 'alignment_ambiguous'
+    | 'target_gap_occupied'
+    | 'target_cursor_unaligned'
+    | 'whitespace_target_alignment';
   sourceTotal: number;
   targetTotal: number;
 };
@@ -152,8 +165,13 @@ function locateAlignmentForSourceSegment(
   return { kind: 'aligned', entry, alignmentIndex };
 }
 
-function sourceSegmentIndexForTargetOffset(
+/**
+ * Maps a target scalar `offset` onto its explicitly aligned source segment index.
+ * Returns `null` when `offset` sits inside an unaligned non-whitespace gap instead of falling back to an earlier span.
+ */
+export function sourceSegmentIndexForTargetOffset(
   sourceChars: readonly string[],
+  targetChars: readonly string[],
   sourceSegments: readonly TmSegment[],
   alignments: readonly Alignment[],
   offset: number,
@@ -170,15 +188,28 @@ function sourceSegmentIndexForTargetOffset(
       break;
     }
   }
-  // Fall back to a trailing end boundary or nearest preceding span only when no half-open interval contains offset.
+  // Exact trailing boundary (offset === entry.target.end) matches that span when no half-open interval contains offset.
   if (!matched) {
     for (const entry of targetEntries) {
-      if (offset === entry.target.end || offset > entry.target.end) {
+      if (offset === entry.target.end) {
         matched = entry;
       }
     }
   }
-  if (!matched) matched = targetEntries[0]!;
+  if (!matched) {
+    let prev: (Alignment & { target: Span }) | null = null;
+    let next: (Alignment & { target: Span }) | null = null;
+    for (const entry of targetEntries) {
+      if (entry.target.end < offset) prev = entry;
+      else if (entry.target.start > offset && !next) next = entry;
+    }
+    const gapStart = prev ? prev.target.end : 0;
+    const gapEnd = next ? next.target.start : targetChars.length;
+    if (gapStart <= gapEnd && targetChars.slice(gapStart, gapEnd).join('').trim().length > 0) {
+      return null;
+    }
+    matched = prev ?? targetEntries[0]!;
+  }
   const [mCoreStart, mCoreEnd] = core(sourceChars, matched.source.start, matched.source.end);
   const sIdx = sourceSegments.findIndex(seg => {
     const lookup = locateAlignmentForSourceSegment(sourceChars, seg, alignments);
@@ -245,14 +276,19 @@ export function resolveActiveSegment(
   const targetChars = Array.from(target);
 
   let index = 0;
+  let targetOffsetUnaligned = false;
   if (cursor?.kind === 'index') {
     index = clampIndex(cursor.index, total);
   } else if (cursor?.kind === 'offset') {
     if (cursor.side === 'source') {
       index = clampIndex(segmentIndexAtOffset(source, sourceSegments, cursor.offset), total);
     } else if (effectiveAlignments !== null) {
-      const mapped = sourceSegmentIndexForTargetOffset(sourceChars, sourceSegments, effectiveAlignments, cursor.offset);
-      index = mapped !== null ? clampIndex(mapped, total) : 0;
+      const mapped = sourceSegmentIndexForTargetOffset(sourceChars, targetChars, sourceSegments, effectiveAlignments, cursor.offset);
+      if (mapped !== null) {
+        index = clampIndex(mapped, total);
+      } else {
+        targetOffsetUnaligned = effectiveAlignments.some(a => a.target !== null) || target.trim().length > 0;
+      }
     } else if (targetSegments.length > 0) {
       index = clampIndex(
         segmentIndexAtOffset(target, targetSegments, cursor.offset, {
@@ -268,20 +304,42 @@ export function resolveActiveSegment(
   const nextSource = index + 1 < total ? sourceSegments[index + 1]!.text : null;
 
   if (effectiveAlignments !== null) {
-    const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, effectiveAlignments);
-    if (lookup.kind === 'aligned' && lookup.entry.target !== null) {
-      const [tCoreStart, tCoreEnd] = core(targetChars, lookup.entry.target.start, lookup.entry.target.end);
-      const hasCore = tCoreStart < tCoreEnd;
-      const rStart = hasCore ? tCoreStart : lookup.entry.target.start;
-      const rEnd = hasCore ? tCoreEnd : lookup.entry.target.end;
+    if (targetOffsetUnaligned) {
       return {
         index,
         total,
         sourceText: activeSource.text,
-        targetText: targetChars.slice(rStart, rEnd).join(''),
+        targetText: '',
         prevSource,
         nextSource,
-        targetRange: { start: scalarOffset(rStart), end: scalarOffset(rEnd) },
+        targetRange: null,
+        hasAlignedTarget: false,
+        targetOffsetUnaligned: true,
+      };
+    }
+    const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, effectiveAlignments);
+    if (lookup.kind === 'aligned' && lookup.entry.target !== null) {
+      const [tCoreStart, tCoreEnd] = core(targetChars, lookup.entry.target.start, lookup.entry.target.end);
+      if (tCoreStart >= tCoreEnd) {
+        return {
+          index,
+          total,
+          sourceText: activeSource.text,
+          targetText: '',
+          prevSource,
+          nextSource,
+          targetRange: null,
+          hasAlignedTarget: false,
+        };
+      }
+      return {
+        index,
+        total,
+        sourceText: activeSource.text,
+        targetText: targetChars.slice(tCoreStart, tCoreEnd).join(''),
+        prevSource,
+        nextSource,
+        targetRange: { start: scalarOffset(tCoreStart), end: scalarOffset(tCoreEnd) },
         hasAlignedTarget: true,
       };
     }
@@ -445,6 +503,8 @@ export function applySegmentSuggestionResult(
 ): TmApplySegmentResult {
   const total = sourceSegments.length;
   const rawAlignments = options.alignments ?? null;
+  const emptyPreservedAlignments: Alignment[] | null =
+    rawAlignments !== null && rawAlignments.length === 0 ? [] : null;
   const alignments = rawAlignments && rawAlignments.length > 0 ? rawAlignments : null;
   const source = options.source ?? '';
   const tChars = Array.from(target);
@@ -453,7 +513,7 @@ export function applySegmentSuggestionResult(
     const repLen = Array.from(suggestionText).length;
     return {
       target: suggestionText,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice: { start: scalarOffset(0), oldEnd: scalarOffset(tChars.length), newEnd: scalarOffset(repLen) },
       invalidated: [],
       applied: true,
@@ -462,7 +522,7 @@ export function applySegmentSuggestionResult(
   }
 
   if (total === 0) {
-    return { target, alignments: alignments ? [...alignments] : null, splice: null, invalidated: [], applied: false, reason: 'unaligned_target' };
+    return { target, alignments: alignments ? [...alignments] : emptyPreservedAlignments, splice: null, invalidated: [], applied: false, reason: 'unaligned_target' };
   }
 
   const index = clampIndex(activeIndex, total);
@@ -471,7 +531,7 @@ export function applySegmentSuggestionResult(
   if (total > 1 && alignments === null && suggestionSegments.length > 1) {
     return {
       target,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice: null,
       invalidated: [],
       applied: false,
@@ -505,18 +565,26 @@ export function applySegmentSuggestionResult(
     const { entry, alignmentIndex } = lookup;
     if (entry.target !== null) {
       const [tCoreStart, tCoreEnd] = core(tChars, entry.target.start, entry.target.end);
-      const replaceStart = tCoreStart < tCoreEnd ? tCoreStart : entry.target.start;
-      const replaceEnd = tCoreStart < tCoreEnd ? tCoreEnd : entry.target.end;
+      if (tCoreStart >= tCoreEnd) {
+        return {
+          target,
+          alignments: [...alignments],
+          splice: null,
+          invalidated: [],
+          applied: false,
+          reason: 'whitespace_target_alignment',
+        };
+      }
       const repLen = Array.from(suggestionText).length;
-      const nextTarget = `${tChars.slice(0, replaceStart).join('')}${suggestionText}${tChars.slice(replaceEnd).join('')}`;
-      const remap = remapForSplice([...alignments], 'target', source, nextTarget, replaceStart, replaceEnd, repLen);
+      const nextTarget = `${tChars.slice(0, tCoreStart).join('')}${suggestionText}${tChars.slice(tCoreEnd).join('')}`;
+      const remap = remapForSplice([...alignments], 'target', source, nextTarget, tCoreStart, tCoreEnd, repLen);
       return {
         target: nextTarget,
         alignments: remap.alignments,
         splice: {
-          start: scalarOffset(replaceStart),
-          oldEnd: scalarOffset(replaceEnd),
-          newEnd: scalarOffset(replaceStart + repLen),
+          start: scalarOffset(tCoreStart),
+          oldEnd: scalarOffset(tCoreEnd),
+          newEnd: scalarOffset(tCoreStart + repLen),
         },
         invalidated: remap.invalidated,
         applied: true,
@@ -571,12 +639,12 @@ export function applySegmentSuggestionResult(
     };
   }
 
-  // No explicit alignments yet (`total > 1`).
+  // No explicit alignments yet (`total > 1`, preserving `[]` vs `null` review mode).
   const targetSegments = segmentParagraphs(target);
   if (targetSegments.length > total) {
     return {
       target,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice: null,
       invalidated: [],
       applied: false,
@@ -590,7 +658,7 @@ export function applySegmentSuggestionResult(
     const nextTarget = `${tChars.slice(0, seg.coreStart).join('')}${suggestionText}${tChars.slice(seg.coreEnd).join('')}`;
     return {
       target: nextTarget,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice: { start: seg.coreStart, oldEnd: seg.coreEnd, newEnd: scalarOffset(seg.coreStart + repLen) },
       invalidated: [],
       applied: true,
@@ -602,7 +670,7 @@ export function applySegmentSuggestionResult(
   if (isSkipInsert && (!source || total > MAX_AUTO_ALIGNMENTS)) {
     return {
       target,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice: null,
       invalidated: [],
       applied: false,
@@ -631,7 +699,7 @@ export function applySegmentSuggestionResult(
   if (!isSkipInsert) {
     return {
       target: placed.nextTarget,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice,
       invalidated: [],
       applied: true,
@@ -655,7 +723,7 @@ export function applySegmentSuggestionResult(
   if (!validAlignments(nextAlignments, source, placed.nextTarget)) {
     return {
       target,
-      alignments: null,
+      alignments: emptyPreservedAlignments,
       splice: null,
       invalidated: [],
       applied: false,
@@ -697,22 +765,30 @@ export function describeTmSegmentAlignment(
   const targetSegments = segmentParagraphs(target);
   const sourceTotal = sourceSegments.length;
   const targetTotal = targetSegments.length;
+  if (activeSegment.targetOffsetUnaligned) {
+    return { status: 'target_cursor_unaligned', sourceTotal, targetTotal };
+  }
   const effectiveAlignments = alignments && alignments.length > 0 ? alignments : null;
 
   if (effectiveAlignments !== null) {
     const activeSource = sourceSegments[activeSegment.index];
     if (!activeSource) return { status: 'ok', sourceTotal, targetTotal };
     const sourceChars = Array.from(source);
+    const tChars = Array.from(target);
     const lookup = locateAlignmentForSourceSegment(sourceChars, activeSource, effectiveAlignments);
     if (lookup.kind !== 'aligned') {
       return { status: 'alignment_ambiguous', sourceTotal, targetTotal };
     }
-    if (lookup.entry.target === null) {
-      const tChars = Array.from(target);
-      const { prevEnd, nextStart } = findAlignmentGapBounds(effectiveAlignments, lookup.alignmentIndex, tChars.length);
-      if (prevEnd > nextStart || tChars.slice(prevEnd, nextStart).join('').trim().length > 0) {
-        return { status: 'target_gap_occupied', sourceTotal, targetTotal };
+    if (lookup.entry.target !== null) {
+      const [tCoreStart, tCoreEnd] = core(tChars, lookup.entry.target.start, lookup.entry.target.end);
+      if (tCoreStart >= tCoreEnd) {
+        return { status: 'whitespace_target_alignment', sourceTotal, targetTotal };
       }
+      return { status: 'ok', sourceTotal, targetTotal };
+    }
+    const { prevEnd, nextStart } = findAlignmentGapBounds(effectiveAlignments, lookup.alignmentIndex, tChars.length);
+    if (prevEnd > nextStart || tChars.slice(prevEnd, nextStart).join('').trim().length > 0) {
+      return { status: 'target_gap_occupied', sourceTotal, targetTotal };
     }
     return { status: 'ok', sourceTotal, targetTotal };
   }
