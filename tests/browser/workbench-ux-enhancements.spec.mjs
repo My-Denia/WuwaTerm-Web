@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { msg } from '../../lib/messages.ts';
 import { S, fillPair, openManuscript, openWorkbench, rng, semanticResponse } from '../helpers/semantic-routes.mjs';
-import { expectEditorValue, openInspectorTab, readEditorScroll, setEditorScroll, setEditorSelection } from '../helpers/editor.mjs';
+import { expectEditorValue, fillEditor, openInspectorTab, readEditorScroll, setEditorScroll, setEditorSelection } from '../helpers/editor.mjs';
 import { camellyaManuscript, termGroupReport } from '../helpers/term-group-fixture.mjs';
 import { dictionary, echo, FRESH_MATCHER_REVISION, hash } from '../fixtures/manuscript.mjs';
 
@@ -335,4 +335,53 @@ test('manuscript CM6 editors expose accessible names, preserve MyTerms drafts ac
   expect(await page.evaluate(() => document.activeElement?.id ?? '')).not.toBe('review-source');
   await expect(myTerms.getByLabel(M.termbase.fieldSource, { exact: true })).toHaveValue('未保存词条');
   await expect(myTerms.getByLabel(M.termbase.fieldTarget, { exact: true })).toHaveValue('unsaved entry');
+});
+
+test('short-manuscript conflict highlights clear when translation is fixed, and CM6 IME ni -> 你 is one undo step', async ({ page, browserName }) => {
+  await openWorkbench(page, {
+    capabilities: [],
+    reviewReport: body => ({
+      request_id: 'hl-check',
+      source_revision: hash(body.source),
+      target_revision: hash(body.target),
+      rule_version: 'review-v2',
+      matcher_revision: FRESH_MATCHER_REVISION,
+      dictionary,
+      coverage: { evaluated: 1, not_evaluated: 0, rules: ['review.term_pair'] },
+      findings: [
+        {
+          id: '0:2:声骸',
+          rule_id: 'review.term_pair',
+          verdict: 'confirmed_conflict',
+          source_span: { start: 0, end: 2, text: '声骸' },
+          target_span: { start: 0, end: 11, text: 'sound shell' },
+          candidates: [echo],
+          candidates_truncated: false,
+        },
+      ],
+      truncated: false,
+    }),
+  });
+  await fillPair(page, '声骸。', 'sound shell.');
+  await page.getByRole('button', { name: M.review.checkIdle, exact: true }).click();
+  await expect(page.locator('.review-current')).toBeVisible();
+  await expect(page.locator('#review-source .cm-wt-hl-term-conflict')).toHaveCount(1);
+
+  // Fixing the target makes the report stale -> source conflict highlight must also clear immediately.
+  await fillEditor(page, '#review-target', 'Echo.');
+  await expect(page.locator('.review-stale')).toBeVisible();
+  await expect(page.locator('#review-source .cm-wt-hl-term-conflict')).toHaveCount(0);
+
+  // Verify CM6 IME composition (ni -> insertText('你')) is a single undo step in Chromium.
+  if (browserName === 'chromium') {
+    await fillEditor(page, '#review-source', 'Alpha');
+    await setEditorSelection(page, '#review-source', 5, 5);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: 'n', selectionStart: 1, selectionEnd: 1 });
+    await cdp.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
+    await cdp.send('Input.insertText', { text: '你' });
+    await expectEditorValue(page, '#review-source', 'Alpha你');
+    await page.getByRole('button', { name: M.review.undo, exact: true }).click();
+    await expectEditorValue(page, '#review-source', 'Alpha');
+  }
 });

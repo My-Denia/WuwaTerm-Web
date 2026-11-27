@@ -909,13 +909,14 @@ export function DocumentWorkspace() {
   const longInput = sourceLength > 2000 || targetLength > 2000;
 
   // Inline CodeMirror 6 highlight ranges built from one atomic deferred snapshot and
-  // verified against the current text so stale ranges never land on edited characters.
+  // verified against the current text and review-panel validity so stale ranges never linger.
   const highlightInput = useMemo(() => ({
     source,
     target,
     draft,
     basis,
     reviewFeatures,
+    current,
     judged,
     latest,
     longDocument,
@@ -923,7 +924,7 @@ export function DocumentWorkspace() {
     layer1,
     placed: semantic.placed,
     activeSemanticId,
-  }), [source, target, draft, basis, reviewFeatures, judged, latest, longDocument, semantic.long, layer1, semantic.placed, activeSemanticId]);
+  }), [source, target, draft, basis, reviewFeatures, current, judged, latest, longDocument, semantic.long, layer1, semantic.placed, activeSemanticId]);
   const deferredHighlightInput = useDeferredValue(highlightInput);
   const { sourceHighlights, targetHighlights } = useMemo(() => {
     if (quick) return { sourceHighlights: [] as EditorHighlight[], targetHighlights: [] as EditorHighlight[] };
@@ -946,13 +947,12 @@ export function DocumentWorkspace() {
       tgt.push(h);
     };
 
-    if (snap.judged && snap.latest && snap.latest.source === snap.source) {
-      const targetOk = snap.latest.target === snap.target;
+    if (snap.judged && snap.current && snap.latest && snap.latest.source === snap.source && snap.latest.target === snap.target) {
       for (const f of snap.judged.report.findings) {
         const kind = f.verdict === 'confirmed_conflict' ? 'term-conflict'
           : f.verdict === 'verified_constraint' ? 'term-verified' : 'term-review';
         pushSrc({ start: f.source_span.start, end: f.source_span.end, kind, title: f.source_span.text, expectedText: f.source_span.text });
-        if (targetOk && f.target_span) {
+        if (f.target_span) {
           pushTgt({ start: f.target_span.start, end: f.target_span.end, kind, title: f.target_span.text, expectedText: f.target_span.text });
         }
       }

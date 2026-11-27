@@ -346,20 +346,20 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
       composingRef.current = true;
       pendingCompositionEndRef.current = false;
     };
-    // Bubble-phase listener registered AFTER `new EditorView` runs after CM6's own
-    // compositionend handler so `view.state.doc` already reflects the final commit.
+    // Bubble-phase listener registered AFTER `new EditorView`: CM6 sets
+    // `view.inputState.composing = -1` synchronously in its own `compositionend`
+    // handler and schedules `Promise.resolve().then(() => view.observer.flush())`
+    // for the final committed DOM mutation (e.g. `ni -> 你`). Keep the composition
+    // transaction open until that deferred `updateListener` commit lands, or close
+    // cleanly after the microtask flush if no trailing DOM change occurred.
     const onCompositionEndBubble = () => {
       if (!composingRef.current) return;
-      if (view.composing) {
-        pendingCompositionEndRef.current = true;
-        queueMicrotask(() => {
-          if (pendingCompositionEndRef.current && viewRef.current === view) {
-            finalizeComposition(view);
-          }
-        });
-        return;
-      }
-      finalizeComposition(view);
+      pendingCompositionEndRef.current = true;
+      Promise.resolve().then(() => Promise.resolve()).then(() => {
+        if (pendingCompositionEndRef.current && viewRef.current === view) {
+          finalizeComposition(view);
+        }
+      });
     };
     const onFocusOrBlur = () => {
       const snap = captureViewSnapshot(view);
@@ -421,6 +421,8 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     }
 
     return () => {
+      pendingCompositionEndRef.current = false;
+      composingRef.current = false;
       const exitSnap = captureViewSnapshot(view);
       if (exitSnap) onStateSnapshotRef.current?.(exitSnap);
       view.contentDOM.removeEventListener('beforeinput', onBeforeInputCapture, true);

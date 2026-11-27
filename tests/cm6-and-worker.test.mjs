@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   applyDomChangesToRaw,
+  diffDomChange,
   domOffset,
   domUtf16ToScalar,
   normalizeLineBreaks,
@@ -89,7 +90,87 @@ test('applyDomChangesToRaw preserves CRLF bytes on untouched paragraphs and keep
   doc.dispose();
 });
 
-test('createCanonicalComputer keeps small drafts off Worker and falls back to synchronous canonicalOf on async Worker error', async () => {
+test('applyDomChangesToRaw holds normalizeLineBreaks(result) === expectedDom across all CR/LF/CRLF boundaries', () => {
+  const applyDom = (dom, changes) => {
+    let out = '';
+    let cur = 0;
+    for (const c of changes) {
+      out += dom.slice(cur, c.fromA) + c.inserted;
+      cur = c.toA;
+    }
+    return out + dom.slice(cur);
+  };
+
+  // Explicit standalone-CR regression cases:
+  // 1) Pressing Enter right after standalone \r in "A\rB" must not fuse into \r\n.
+  const crEnter = applyDomChangesToRaw('A\rB', [{ fromA: 2, toA: 2, inserted: '\n' }]);
+  assert.equal(normalizeLineBreaks(crEnter), 'A\n\nB');
+  // 2) Deleting 'x' between \r and \n in "A\rx\nB" must not fuse into \r\n.
+  const crDel = applyDomChangesToRaw('A\rx\nB', [{ fromA: 2, toA: 3, inserted: '' }]);
+  assert.equal(normalizeLineBreaks(crDel), 'A\n\nB');
+  // 3) Inserting '\n' after intact CRLF preserves the CRLF bytes and adds one newline.
+  const crlfEnter = applyDomChangesToRaw('A\r\nB', [{ fromA: 2, toA: 2, inserted: '\n' }]);
+  assert.equal(crlfEnter, 'A\r\n\nB');
+  assert.equal(normalizeLineBreaks(crlfEnter), 'A\n\nB');
+
+  // Combinatorial sweep over mixed \r / \n / \r\n / emoji texts with inserts, Enter, deletes, and multi-edits.
+  const samples = [
+    'A\rB',
+    'A\nB',
+    'A\r\nB',
+    '\r\n',
+    '\r\r\n\n',
+    'A\rx\nB\r\nC\rD',
+    '😀\r\n今汐\rx\n声骸\r',
+  ];
+  const inserts = ['', '!', '\n', '\n\n', 'x\n', '\nx'];
+  for (const raw of samples) {
+    const dom = normalizeLineBreaks(raw);
+    assert.equal(diffDomChange(dom, dom), null);
+    for (let fromA = 0; fromA <= dom.length; fromA += 1) {
+      for (let toA = fromA; toA <= dom.length; toA += 1) {
+        for (const inserted of inserts) {
+          const changes = [{ fromA, toA, inserted }];
+          const expectedDom = applyDom(dom, changes);
+          const actualRaw = applyDomChangesToRaw(raw, changes);
+          assert.notEqual(actualRaw, null);
+          assert.equal(
+            normalizeLineBreaks(actualRaw),
+            expectedDom,
+            `invariant violated for raw=${JSON.stringify(raw)} change=${JSON.stringify(changes)} -> ${JSON.stringify(actualRaw)}`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test('deferred compositionend commit (ni -> 你 and cross-line replacement) is a single undo step', () => {
+  const doc = createWorkbenchController({ onPoolRefresh: () => {} });
+
+  // 1) Deferred ni -> 你 commit at compositionend.
+  doc.editText('source', 'Alpha');
+  doc.editText('source', 'Alphan', { composing: true });
+  doc.editText('source', 'Alphani', { composing: true });
+  // Final commit arrives after compositionend via deferred updateListener with composing: false.
+  doc.editText('source', 'Alpha你', { composing: false });
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+
+  // 2) Cross-line selection deletion starts inside composition, followed by n -> ni -> 你.
+  doc.editText('source', 'Line1\nLine2');
+  doc.editText('source', '', { composing: true });
+  doc.editText('source', 'n', { composing: true });
+  doc.editText('source', 'ni', { composing: true });
+  doc.editText('source', '你', { composing: false });
+  assert.equal(doc.getSnapshot().draft.source, '你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Line1\nLine2');
+  doc.dispose();
+});
+
+test('createCanonicalComputer keeps small drafts off Worker (before and after Worker spawn) and falls back on async Worker error', async () => {
   const smallInput = {
     draft: { ...EMPTY_DRAFT, source: '今汐。', target: 'Jinhsi.' },
     choices: [],
@@ -100,15 +181,24 @@ test('createCanonicalComputer keeps small drafts off Worker and falls back to sy
   assert.equal(shouldOffloadCanonicalToWorker(smallInput), false);
 
   let spawned = 0;
+  let posted = 0;
+  let messageListener = null;
   let errorListener = null;
   let terminated = 0;
+  let failNextPost = false;
   const mockWorker = {
     addEventListener(type, fn) {
+      if (type === 'message') messageListener = fn;
       if (type === 'error') errorListener = fn;
     },
-    postMessage() {
-      // Simulate async worker script/runtime failure while request is in flight.
-      queueMicrotask(() => errorListener?.(new Event('error')));
+    postMessage(payload) {
+      posted += 1;
+      if (failNextPost) {
+        queueMicrotask(() => errorListener?.(new Event('error')));
+        return;
+      }
+      const canonical = canonicalOf(payload.draft, payload.choices, payload.reports, payload.semantic, payload.basis);
+      queueMicrotask(() => messageListener?.({ data: { id: payload.id, canonical } }));
     },
     terminate() {
       terminated += 1;
@@ -127,9 +217,9 @@ test('createCanonicalComputer keeps small drafts off Worker and falls back to sy
   assert.equal(computer.computeSync(smallInput), expectedSmall);
   assert.equal(await computer.compute(smallInput), expectedSmall);
   assert.equal(spawned, 0);
+  assert.equal(posted, 0);
 
-  // Large draft crosses offload threshold -> spawns Worker; async Worker `error` must
-  // resolve the in-flight promise with real canonicalOf() (never null!).
+  // Large draft crosses offload threshold -> spawns Worker and posts once.
   const largeInput = {
     draft: { ...EMPTY_DRAFT, source: '今汐。'.repeat(Math.ceil(WORKER_OFFLOAD_CHAR_THRESHOLD / 3) + 10), target: 'Jinhsi. '.repeat(200) },
     choices: [],
@@ -140,9 +230,20 @@ test('createCanonicalComputer keeps small drafts off Worker and falls back to sy
   assert.equal(shouldOffloadCanonicalToWorker(largeInput), true);
   const expectedLarge = canonicalOf(largeInput.draft, largeInput.choices, largeInput.reports, largeInput.semantic, largeInput.basis);
   assert.notEqual(expectedLarge, null);
+  assert.equal(await computer.compute(largeInput), expectedLarge);
+  assert.equal(spawned, 1);
+  assert.equal(posted, 1);
+
+  // Returning to a small draft after Worker creation must bypass postMessage and run locally.
+  assert.equal(await computer.compute(smallInput), expectedSmall);
+  assert.equal(posted, 1);
+
+  // Async Worker `error` while a large request is in flight must resolve with real canonicalOf() (never null!).
+  failNextPost = true;
   const resolved = await computer.compute(largeInput);
   assert.equal(resolved, expectedLarge);
   assert.equal(spawned, 1);
+  assert.equal(posted, 2);
   assert.equal(terminated, 1);
 
   // Subsequent call uses fallback without spawning a second broken Worker.

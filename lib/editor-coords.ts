@@ -46,8 +46,39 @@ export type DomChange = {
 };
 
 /**
+ * Append `right` to `left` without allowing a standalone trailing `\r` in `left`
+ * to fuse with a leading `\n` in `right` into a single `\r\n` (which would swallow
+ * one newline when normalized back to LF).
+ */
+function appendWithoutCrLfFusion(left: string, right: string): string {
+  if (left.endsWith('\r') && right.startsWith('\n')) {
+    return left.slice(0, -1) + '\n' + right;
+  }
+  return left + right;
+}
+
+/**
+ * Compute a single minimal LF-coordinate change between two normalized DOM strings,
+ * or null when they are identical.
+ */
+export function diffDomChange(oldDom: string, newDom: string): DomChange | null {
+  if (oldDom === newDom) return null;
+  let start = 0;
+  const minLen = Math.min(oldDom.length, newDom.length);
+  while (start < minLen && oldDom.charCodeAt(start) === newDom.charCodeAt(start)) start += 1;
+  let oldEnd = oldDom.length;
+  let newEnd = newDom.length;
+  while (oldEnd > start && newEnd > start && oldDom.charCodeAt(oldEnd - 1) === newDom.charCodeAt(newEnd - 1)) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+  return { fromA: start, toA: oldEnd, inserted: newDom.slice(start, newEnd) };
+}
+
+/**
  * Apply ascending, disjoint LF-normalized DOM/CodeMirror change ranges back onto
- * the raw document text so untouched regions keep their exact `\r\n` / `\r` bytes.
+ * the raw document text so untouched regions keep their exact `\r\n` / `\r` bytes
+ * while guaranteeing the invariant `normalizeLineBreaks(result) === expectedDom`.
  * Returns null if any offset falls outside the raw text.
  */
 export function applyDomChangesToRaw(rawText: string, changes: readonly DomChange[]): string | null {
@@ -60,11 +91,11 @@ export function applyDomChangesToRaw(rawText: string, changes: readonly DomChang
     if (rawFrom === null || rawTo === null || rawFrom < rawCursor || rawTo < rawFrom) {
       return null;
     }
-    out += rawText.slice(rawCursor, rawFrom);
-    out += change.inserted;
+    out = appendWithoutCrLfFusion(out, rawText.slice(rawCursor, rawFrom));
+    out = appendWithoutCrLfFusion(out, change.inserted);
     rawCursor = rawTo;
   }
-  out += rawText.slice(rawCursor);
+  out = appendWithoutCrLfFusion(out, rawText.slice(rawCursor));
   return out;
 }
 

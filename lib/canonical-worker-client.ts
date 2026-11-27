@@ -114,7 +114,7 @@ export function createCanonicalComputer(options: CanonicalComputerOptions = {}):
   return {
     compute(input: CanonicalInput): Promise<string | null> {
       if (disposed) return Promise.resolve(null);
-      if (!worker && !shouldOffloadCanonicalToWorker(input, charThreshold)) {
+      if (!shouldOffloadCanonicalToWorker(input, charThreshold)) {
         return Promise.resolve().then(() => (disposed ? null : runSync(input)));
       }
       const instance = ensureWorker();

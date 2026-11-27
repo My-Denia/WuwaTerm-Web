@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
-import { domUtf16ToScalar, rawSpanFromDomRange, scalarToDomUtf16 } from '../../lib/editor-coords';
+import { applyDomChangesToRaw, diffDomChange, domUtf16ToScalar, normalizeLineBreaks, rawSpanFromDomRange, scalarToDomUtf16 } from '../../lib/editor-coords';
 import { highlightSegments } from '../../lib/review-report.js';
 import type { ScalarOffset, Span } from '../../lib/workbench-model';
 import { MarkdownPreview } from './markdown-preview';
@@ -228,11 +228,15 @@ function TextareaPane({
       }
     }
     return () => {
-      // Flush any trailing textarea DOM value before handing off to CM6, and capture live state.
-      if (el.value !== submittedRef.current) {
-        submittedRef.current = el.value;
-        latestRef.current = el.value;
-        onEditRef.current(el.value, { composing: false });
+      // Compare in LF coordinates because HTML <textarea>.value always normalizes CRLF/CR to LF.
+      // Only forward an edit if the user genuinely had an unflushed DOM change, preserving untouched CRLF.
+      const expectedDom = normalizeLineBreaks(latestRef.current);
+      if (el.value !== expectedDom) {
+        const delta = diffDomChange(expectedDom, el.value);
+        const nextRaw = delta ? (applyDomChangesToRaw(latestRef.current, [delta]) ?? el.value) : el.value;
+        submittedRef.current = nextRaw;
+        latestRef.current = nextRaw;
+        onEditRef.current(nextRaw, { composing: false });
       }
       snapshotRef.current(captureTextareaSnapshot(el, latestRef.current));
     };
