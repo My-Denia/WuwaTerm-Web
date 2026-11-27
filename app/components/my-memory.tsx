@@ -102,12 +102,6 @@ export function MyMemory({
   function applyMerge(file: TmFile) {
     try {
       const merged = mergeTranslationMemoryEntries(entries, file.entries);
-      serializeTranslationMemory({
-        format: TM_FORMAT,
-        schema_version: TM_SCHEMA_VERSION,
-        exported_at: tmNow(),
-        entries: merged,
-      });
       setEntries(merged);
       setPending(null);
       notice(fill(t.notices.merged, { added: file.entries.length, total: merged.length }));
