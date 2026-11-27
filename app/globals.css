@@ -439,6 +439,14 @@ footer div { display:flex; gap:20px; }
 .my-memory-segment-nav { display:flex; flex-wrap:wrap; gap:8px; }
 .my-memory-segment-nav .text-button { min-height:28px; padding:0 2px; font-size:12px; }
 .my-memory-confirm-btn { width:100%; }
+.my-memory-status-strip { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.my-memory-status-pill { display:inline-flex; align-items:center; max-width:100%; padding:2px 8px; border:1px solid var(--line); border-radius:8px; background:var(--raised); color:var(--muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+.my-memory-dict-status[data-dict-state="verified"],.my-memory-dict-status[data-dict-state="legacy"] { border-color:var(--ok-line); background:var(--ok-bg); color:var(--ok-text); }
+.my-memory-dict-status[data-dict-state="error"] { border-color:var(--warn-line); background:var(--warn-bg); color:var(--warn-text); }
+.tm-run-receipt { margin:12px 0; padding:12px 14px; border:1px solid var(--ok-line); border-radius:10px; background:var(--surface); overflow-wrap:anywhere; }
+.tm-run-receipt h4 { margin:0 0 6px; font-size:13px; font-weight:650; }
+.tm-run-receipt .tm-receipt-summary { margin:0 0 4px; font-size:13px; font-weight:600; }
+.tm-run-receipt .track-note { margin:4px 0 0; }
 .my-terms-meta { margin:4px 0 0; color:var(--muted); font-size:11px; line-height:1.7; }
 .my-terms-badge { display:block; width:fit-content; max-width:100%; margin-bottom:4px; padding:2px 8px; border:1px solid var(--line-strong); border-radius:8px; color:var(--text); font-size:11px; line-height:1.5; }
 .my-terms-form { margin-top:6px; }

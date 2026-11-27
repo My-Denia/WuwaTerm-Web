@@ -1,7 +1,8 @@
 // Standalone, React-free document controller for the WuwaTerm review workbench.
 // Owns canonical manuscript state, request orchestration, abort/generation/epoch
 // guards, serial run scheduling, waiting timers, and persistence/export shaping.
-import { SEGMENT_LIMIT, core, paragraphRanges, segmentText } from './segmentation.ts';
+import { SEGMENT_LIMIT, alignmentsLeaveGaps, core, paragraphRanges, segmentText } from './segmentation.ts';
+import { sha256Hex } from './sha256.js';
 import { contextBefore, diffSplice, fitRequestBody, initialRun, nextToSend, runReducer, selectPrecedents } from './semantic-run.js';
 import {
   applyResult, chooseTerm, isLong, longFromWorkfile, recheckPlan, reconfirmChoice, recordView,
@@ -34,9 +35,18 @@ import { spliceOccurrence } from './target-revision.js';
 import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from './markdown-report.ts';
 import { msg } from './messages.ts';
 import { applySegmentSuggestionResult, segmentParagraphs, type TmApplySegmentResult } from './tm-segment.ts';
+import {
+  TM_FRESHNESS_STALE,
+  TM_FRESHNESS_UNKNOWN,
+  TM_FRESHNESS_VERIFIED,
+  TM_MATCH_CONTEXT_EXACT,
+  matchTranslationMemory,
+  type TmEntry,
+} from './translation-memory.ts';
+import type { TmServiceBasis } from './tm-live-provenance.ts';
 import { semanticExport, semanticFromWorkfile, semanticWorkfileParts } from './workbench-persistence.ts';
-import { emptyStructure, structurePlan, type StructureFinding, type StructureState } from './structure-layer.ts';
-import { CAPABILITY_STRUCTURE_CHECK, validStructureCheckResponse } from './structure-check.js';
+import { emptyStructure, structureItems, structurePlan, type StructureFinding, type StructureState } from './structure-layer.ts';
+import { CAPABILITY_STRUCTURE_CHECK, STRUCTURE_LIMITS, structureCheckBatches, validStructureCheckResponse } from './structure-check.js';
 import { postWorkbench, REVIEW_REQUEST_LIMIT, runFailure } from './workbench-transport.ts';
 import type { UiLanguage } from './ui-language.ts';
 import { scalarOffset } from './workbench-model.ts';
@@ -46,7 +56,7 @@ import type {
   ParagraphCut, PendingWorkfile, Region, Report, Resolution, RunItem, RunKind, RunState,
   SegmentInput, SemanticActionRecord, SemanticDecisionCommand, SemanticDecisionResult,
   SemanticReport, SemanticState, SessionBasis, Snapshot, Span, TargetRevisionCommand,
-  TargetRevisionResult, TermCandidateRef, TermFindingRef, TermOccurrenceAction, Undo,
+  TargetRevisionResult, TermCandidateRef, TermFindingRef, TermOccurrenceAction, TmRunReceipt, Undo,
 } from './workbench-model.ts';
 
 export const MAX_CHOICES = MAX_V4_CHOICES;
@@ -129,6 +139,10 @@ export type WorkbenchControllerOptions = {
   initialCapabilities?: string[] | null;
   initialLang?: UiLanguage;
   initialMode?: WorkspaceMode;
+  /** Current confirmed TM entries held by the workspace (page memory or self-hosted SQLite). */
+  getTmEntries?: () => readonly TmEntry[];
+  /** Freshly resolves live server dictionary identity before batch TM auto-reuse; must fail closed when unavailable. */
+  resolveTmAutoReuseBasis?: (latest: Snapshot | null) => Promise<TmServiceBasis>;
 };
 
 export type WorkbenchSnapshot = {
@@ -174,6 +188,11 @@ export type WorkbenchSnapshot = {
    * format leave it out, and nothing writes it to browser storage; a result shows only while its segment's texts are unchanged.
    */
   structure: StructureState;
+  /**
+   * Non-text TM incremental reuse receipt for the most recent multi-segment translation run (ADR 0023):
+   * counts and provenance only, never segment text, never written to manuscripts or browser storage.
+   */
+  tmReceipt: TmRunReceipt | null;
 };
 
 type TranslateRunStep =
@@ -192,6 +211,7 @@ type TranslateRunPlan = {
   appendPrefix: string;
   tailStart: number;
   initialBefore: { source: string; target: string } | null;
+  trackTmModelCalls?: boolean;
 };
 
 const defaultClock: WorkbenchClock = {
@@ -275,6 +295,9 @@ export class WorkbenchController {
   private readonly clock: WorkbenchClock;
   private readonly onPoolRefresh: () => void;
   private readonly uid: () => string;
+  private readonly getTmEntriesOption?: () => readonly TmEntry[];
+  private readonly resolveTmAutoReuseBasis: (latest: Snapshot | null) => Promise<TmServiceBasis>;
+  private tmEntries: readonly TmEntry[] = [];
 
   private state: WorkbenchSnapshot;
   private readonly listeners = new Set<() => void>();
@@ -302,6 +325,8 @@ export class WorkbenchController {
   private capabilitiesAbort: AbortController | null = null;
   private capabilitiesPromise: Promise<string[]> | null = null;
   private structureAbort: AbortController | null = null;
+  private tmPrepareAbort: AbortController | null = null;
+  private tmPrepareGeneration = 0;
 
   private runGeneration = 0;
   private runAbort: AbortController | null = null;
@@ -320,6 +345,8 @@ export class WorkbenchController {
     this.clock = options.clock ?? defaultClock;
     this.onPoolRefresh = options.onPoolRefresh ?? (() => {});
     this.uid = options.uid ?? defaultUid;
+    this.getTmEntriesOption = options.getTmEntries;
+    this.resolveTmAutoReuseBasis = options.resolveTmAutoReuseBasis ?? (async () => ({ currentTermsDbRevision: null, currentGameVersion: null }));
     this.state = {
       draft: EMPTY_DRAFT,
       choices: [],
@@ -353,6 +380,7 @@ export class WorkbenchController {
       lastTranslation: null,
       redoCount: 0,
       structure: emptyStructure(),
+      tmReceipt: null,
     };
   }
 
@@ -390,6 +418,9 @@ export class WorkbenchController {
     this.capabilitiesPromise = null;
     this.structureAbort?.abort();
     this.structureAbort = null;
+    this.tmPrepareAbort?.abort();
+    this.tmPrepareAbort = null;
+    this.tmPrepareGeneration += 1;
     this.inflight = null;
     this.translateRun = null;
   }
@@ -465,6 +496,15 @@ export class WorkbenchController {
 
   setCapabilities(capabilities: string[] | null): void {
     this.setState({ capabilities });
+  }
+
+  /** Sync the workspace's confirmed TM entries into the controller without triggering a React re-render. */
+  setTmEntries(entries: readonly TmEntry[]): void {
+    this.tmEntries = entries;
+  }
+
+  private currentTmEntries(): readonly TmEntry[] {
+    return this.getTmEntriesOption ? this.getTmEntriesOption() : this.tmEntries;
   }
 
   /** The review features this session asks Core for (manuscript-v5 SPEC "Review features"); null while capabilities are unknown. */
@@ -606,6 +646,9 @@ export class WorkbenchController {
     this.runGeneration += 1;
     this.runAbort?.abort();
     this.runAbort = null;
+    this.tmPrepareAbort?.abort();
+    this.tmPrepareAbort = null;
+    this.tmPrepareGeneration += 1;
     this.inflight = null;
     this.translateRun = null;
   }
@@ -634,6 +677,7 @@ export class WorkbenchController {
       resetSignal: this.state.resetSignal + 1,
       lastSemanticAction: null,
       structure: emptyStructure(),
+      tmReceipt: null,
     });
     this.structureAbort?.abort();
     this.structureAbort = null;
@@ -1915,8 +1959,20 @@ export class WorkbenchController {
 
   async translateInReview(options: { translationClosed?: boolean } = {}): Promise<void> {
     const { draft, phase, translating } = this.state;
-    const { source, direction, alignments } = draft;
+    const { source, target, direction, alignments } = draft;
     if (!source.trim() || chars(source).length > 2000 || phase === 'loading' || translating || options.translationClosed) return;
+    // In manuscript mode, a multi-paragraph blank draft with confirmed TM entries runs through the incremental
+    // batch path so trusted `context_exact` + `verified_fresh` segments can be reused with Layer 1 checks and a receipt.
+    if (
+      this.state.workspaceMode === 'manuscript'
+      && !target.trim()
+      && alignments === null
+      && segmentParagraphs(source).length > 1
+      && this.currentTmEntries().length > 0
+    ) {
+      await this.startTranslateRun();
+      return;
+    }
 
     this.discardInFlight();
     const mine = this.docGeneration;
@@ -2506,6 +2562,14 @@ export class WorkbenchController {
       return;
     }
     try {
+      if (plan.trackTmModelCalls && this.state.tmReceipt) {
+        this.setState({
+          tmReceipt: {
+            ...this.state.tmReceipt,
+            modelCalls: this.state.tmReceipt.modelCalls + 1,
+          },
+        });
+      }
       const { response, value } = await this.post('/api/translations', fitted.body, { signal, allowInvalidJson: true });
       const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
       if (!live()) return;
@@ -2617,18 +2681,407 @@ export class WorkbenchController {
     this.startBatch('term', plan.order.map((i: number) => ({ key: termSegmentKey(i, items[i]), index: i })));
   }
 
-  startTranslateRun(): void {
+  async startTranslateRun(): Promise<void> {
     const d = this.state.draft;
-    const built = this.buildTranslatePlan(d);
+    if (!d.source.trim()) return;
+    const tmEntries = this.currentTmEntries();
+    const hasExplicitAlignments = d.alignments !== null && d.alignments.length > 0;
+    const blankMultiParagraph = !d.target.trim() && d.alignments === null && segmentParagraphs(d.source).length > 1;
+    const explicitUntranslatedEligible =
+      hasExplicitAlignments
+      && !alignmentsLeaveGaps(d.source, d.target, d.alignments)
+      && d.alignments!.some(item => item.target === null);
+
+    // P1-03 fail-closed: only blank targets or explicitly aligned `target: null` segments may ever enter auto-reuse;
+    // unaligned non-empty targets (including partial prefixes) NEVER guess alignment or auto-reuse.
+    if (tmEntries.length > 0 && (blankMultiParagraph || explicitUntranslatedEligible)) {
+      const handled = await this.startIncrementalTmTranslateRun(d, tmEntries, blankMultiParagraph);
+      if (handled) return;
+    }
+
+    const built = this.buildTranslatePlan(this.state.draft);
     if (!built) return;
     this.translateRun = built.plan;
     // One undo step for the whole generated translation: the state before the batch.
     if (built.plan.kind === 'blank') {
-      this.commit({ draft: { ...d, target: '' }, remember: true, notice: null });
+      this.commit({ draft: { ...this.state.draft, target: '' }, remember: true, notice: null });
     } else {
       this.commit({ remember: true, notice: null });
     }
     this.startBatch('translate', built.items);
+  }
+
+  private async startIncrementalTmTranslateRun(
+    startDraft: Draft,
+    tmEntries: readonly TmEntry[],
+    isBlankMode: boolean,
+  ): Promise<boolean> {
+    this.tmPrepareAbort?.abort();
+    const abort = new AbortController();
+    this.tmPrepareAbort = abort;
+    const prepGen = ++this.tmPrepareGeneration;
+    const epoch = this.documentEpoch;
+    const live = () =>
+      !this.disposed
+      && !abort.signal.aborted
+      && this.tmPrepareGeneration === prepGen
+      && this.documentEpoch === epoch
+      && this.state.draft === startDraft;
+
+    try {
+      if (this.state.capabilities === null && this.capabilitiesPromise) {
+        await this.capabilitiesPromise.catch(() => []);
+        if (!live()) return true;
+      }
+
+      // ADR 0023 / Part 5 rule 1: always resolve fresh live server dictionary identity before batch reuse.
+      let basis: TmServiceBasis = { currentTermsDbRevision: null, currentGameVersion: null };
+      try {
+        basis = await this.resolveTmAutoReuseBasis(this.state.reports.at(-1) ?? null);
+      } catch {
+        basis = { currentTermsDbRevision: null, currentGameVersion: null };
+      }
+      if (!live()) return true;
+
+      type CandidateUnit = {
+        segmentIndex: number;
+        sourceText: string;
+        prevSource: string | null;
+        nextSource: string | null;
+      };
+
+      const sourceSegments = segmentParagraphs(startDraft.source);
+      const candidates: CandidateUnit[] = [];
+
+      if (isBlankMode) {
+        if (sourceSegments.length > 64) {
+          // Exceeds explicit alignment capacity (64): fall back cleanly without fabricating alignments.
+          return false;
+        }
+        for (let i = 0; i < sourceSegments.length; i += 1) {
+          candidates.push({
+            segmentIndex: i,
+            sourceText: sourceSegments[i]!.text,
+            prevSource: i > 0 ? sourceSegments[i - 1]!.text : null,
+            nextSource: i + 1 < sourceSegments.length ? sourceSegments[i + 1]!.text : null,
+          });
+        }
+      } else {
+        const sc = chars(startDraft.source);
+        const tc = chars(startDraft.target);
+        const alignments = startDraft.alignments!;
+        const sourceCoreOf = (span: Span): string => {
+          const [cs, ce] = core(sc, span.start, span.end);
+          return slice(sc, cs, ce);
+        };
+        for (let i = 0; i < alignments.length; i += 1) {
+          const entry = alignments[i]!;
+          if (entry.target !== null) continue;
+          // Verify the gap in target is strictly whitespace-only before considering auto-reuse.
+          let prevEnd = 0;
+          for (let j = i - 1; j >= 0; j -= 1) {
+            if (alignments[j]!.target !== null) {
+              prevEnd = alignments[j]!.target!.end;
+              break;
+            }
+          }
+          let nextStart = tc.length;
+          for (let j = i + 1; j < alignments.length; j += 1) {
+            if (alignments[j]!.target !== null) {
+              nextStart = alignments[j]!.target!.start;
+              break;
+            }
+          }
+          if (prevEnd > nextStart || slice(tc, prevEnd, nextStart).trim().length > 0) continue;
+          const srcText = sourceCoreOf(entry.source);
+          if (!srcText) continue;
+          candidates.push({
+            segmentIndex: i,
+            sourceText: srcText,
+            prevSource: i > 0 ? sourceCoreOf(alignments[i - 1]!.source) || null : null,
+            nextSource: i + 1 < alignments.length ? sourceCoreOf(alignments[i + 1]!.source) || null : null,
+          });
+        }
+      }
+
+      if (candidates.length === 0) return false;
+
+      let referenced = 0;
+      let staleOrUnknown = 0;
+      const reusedUnits: (CandidateUnit & { targetText: string })[] = [];
+
+      for (const unit of candidates) {
+        const matches = matchTranslationMemory(tmEntries, unit.sourceText, startDraft.direction, {
+          prevSource: unit.prevSource,
+          nextSource: unit.nextSource,
+          currentTermsDbRevision: basis.currentTermsDbRevision,
+          currentGameVersion: basis.currentGameVersion,
+          limit: 1,
+        });
+        const top = matches[0] ?? null;
+        if (
+          basis.currentTermsDbRevision !== null
+          && top !== null
+          && top.matchKind === TM_MATCH_CONTEXT_EXACT
+          && top.freshness === TM_FRESHNESS_VERIFIED
+          && segmentParagraphs(top.entry.target_text).length === 1
+          && chars(unit.sourceText).length <= SEGMENT_LIMIT
+          && chars(top.entry.target_text).length <= SEGMENT_LIMIT
+        ) {
+          reusedUnits.push({ ...unit, targetText: top.entry.target_text });
+        } else if (top !== null) {
+          if (top.freshness === TM_FRESHNESS_STALE || top.freshness === TM_FRESHNESS_UNKNOWN) {
+            staleOrUnknown += 1;
+          } else {
+            referenced += 1;
+          }
+        }
+      }
+
+      // Construct updated draft with explicit alignments for reused segments.
+      let updatedDraft: Draft = startDraft;
+      let appliedReusedUnits: (CandidateUnit & { targetText: string })[] = [];
+
+      if (reusedUnits.length > 0) {
+        if (isBlankMode) {
+          const reusedByIndex = new Map(reusedUnits.map(u => [u.segmentIndex, u]));
+          const targetParts: string[] = [];
+          const targetSpans = new Map<number, Span>();
+          let cursor = 0;
+          for (let i = 0; i < sourceSegments.length; i += 1) {
+            const unit = reusedByIndex.get(i);
+            if (!unit) continue;
+            if (targetParts.length > 0) {
+              targetParts.push('\n\n');
+              cursor += 2;
+            }
+            const len = chars(unit.targetText).length;
+            targetParts.push(unit.targetText);
+            targetSpans.set(i, {
+              start: scalarOffset(cursor),
+              end: scalarOffset(cursor + len),
+              text: unit.targetText,
+            });
+            cursor += len;
+          }
+          const nextTarget = targetParts.join('');
+          const nextAlignments = sourceSegments.map((seg, i) => ({
+            source: { start: seg.coreStart, end: seg.coreEnd, text: seg.text },
+            target: targetSpans.get(i) ?? null,
+          }));
+          if (validAlignments(nextAlignments, startDraft.source, nextTarget)) {
+            updatedDraft = { ...startDraft, target: nextTarget, alignments: nextAlignments };
+            appliedReusedUnits = reusedUnits;
+          }
+        } else {
+          let curTarget = startDraft.target;
+          let curAlignments = startDraft.alignments ? [...startDraft.alignments] : null;
+          const sc = chars(startDraft.source);
+          for (const unit of reusedUnits) {
+            // Find the matching sourceSegment index for this alignment entry.
+            const alignmentEntry = curAlignments?.[unit.segmentIndex];
+            if (!alignmentEntry || alignmentEntry.target !== null) continue;
+            const [aCoreStart, aCoreEnd] = core(sc, alignmentEntry.source.start, alignmentEntry.source.end);
+            const segIdx = sourceSegments.findIndex(seg => seg.coreStart === aCoreStart && seg.coreEnd === aCoreEnd);
+            if (segIdx < 0) continue;
+            const applied = applySegmentSuggestionResult(curTarget, sourceSegments, segIdx, unit.targetText, {
+              source: startDraft.source,
+              alignments: curAlignments,
+            });
+            if (applied.applied) {
+              curTarget = applied.target;
+              curAlignments = applied.alignments;
+              appliedReusedUnits.push(unit);
+            }
+          }
+          if (appliedReusedUnits.length > 0) {
+            updatedDraft = { ...startDraft, target: curTarget, alignments: curAlignments };
+          }
+        }
+      }
+
+      // ADR 0023 rule 1: run Layer 1 `structure-check-v1` on every reused segment; demote to needs_review on findings or failure.
+      let structureCheckStatus: TmRunReceipt['structureCheckStatus'] = 'skipped';
+      const demotedSet = new Set<number>();
+      const mergedStructureResults: StructureState['results'] = { ...this.state.structure.results };
+      let structureChecks = this.state.structure.checks;
+      let structurePhase = this.state.structure.phase;
+      let structureError = this.state.structure.error;
+
+      if (appliedReusedUnits.length > 0) {
+        const structureOn = !!this.state.capabilities?.includes(CAPABILITY_STRUCTURE_CHECK);
+        if (!structureOn) {
+          structureCheckStatus = 'unavailable';
+          for (const unit of appliedReusedUnits) demotedSet.add(unit.segmentIndex);
+        } else {
+          const checkItems: { id: string; key: string; source: string; target: string; segmentIndex?: number }[] = [];
+          const seenKeys = new Set<string>();
+          for (const unit of appliedReusedUnits) {
+            const key = `${sha256Hex(unit.sourceText)}:${sha256Hex(unit.targetText)}`;
+            seenKeys.add(key);
+            checkItems.push({
+              id: `tm-${unit.segmentIndex}`,
+              key,
+              source: unit.sourceText,
+              target: unit.targetText,
+              segmentIndex: unit.segmentIndex,
+            });
+          }
+          // Also include any merged ready pair in `updatedDraft` so Layer 1 UI shows findings immediately.
+          for (const viewItem of structureItems(updatedDraft)) {
+            if (!viewItem.target.trim() || seenKeys.has(viewItem.key)) continue;
+            seenKeys.add(viewItem.key);
+            checkItems.push({
+              id: `tmv-${viewItem.index}`,
+              key: viewItem.key,
+              source: viewItem.source,
+              target: viewItem.target,
+            });
+          }
+          const byId = new Map(checkItems.map(item => [item.id, item]));
+          const { batches, skipped } = structureCheckBatches(
+            checkItems.map(({ id, source, target }) => ({ id, source, target })),
+            STRUCTURE_LIMITS.batchBytes,
+          );
+          for (const skippedId of skipped) {
+            const item = byId.get(skippedId);
+            if (item?.segmentIndex !== undefined) demotedSet.add(item.segmentIndex);
+          }
+
+          let checkFailed = false;
+          const checkedSegmentIndices = new Set<number>();
+          for (const batch of batches) {
+            try {
+              const { response, value } = await this.post('/api/structure-checks', batch, {
+                signal: abort.signal,
+                allowInvalidJson: true,
+              });
+              if (!live()) return true;
+              this.onPoolRefresh();
+              const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
+              if (!response.ok || !validStructureCheckResponse(body, batch)) {
+                checkFailed = true;
+                structureError = response.ok
+                  ? { reason: 'responseInvalid' }
+                  : { reason: runFailure(response, body).code };
+                break;
+              }
+              const answer = body as {
+                checks: string[];
+                segments: { segment_id: string; findings: StructureFinding[]; omitted_findings: number; layout: StructureState['results'][string]['layout'] }[];
+              };
+              structureChecks = answer.checks;
+              for (const segment of answer.segments) {
+                const item = byId.get(segment.segment_id);
+                if (!item) continue;
+                mergedStructureResults[item.key] = {
+                  findings: segment.findings,
+                  omitted: segment.omitted_findings,
+                  layout: segment.layout,
+                };
+                if (item.segmentIndex !== undefined) {
+                  checkedSegmentIndices.add(item.segmentIndex);
+                  if (segment.findings.length > 0 || segment.omitted_findings > 0) {
+                    demotedSet.add(item.segmentIndex);
+                  }
+                }
+              }
+            } catch {
+              if (!live()) return true;
+              checkFailed = true;
+              structureError = { reason: 'requestFailed' };
+              break;
+            }
+          }
+
+          if (checkFailed) {
+            structureCheckStatus = 'failed';
+            structurePhase = 'failed';
+            for (const unit of appliedReusedUnits) {
+              if (!checkedSegmentIndices.has(unit.segmentIndex)) {
+                demotedSet.add(unit.segmentIndex);
+              }
+            }
+          } else {
+            structurePhase = 'done';
+            structureError = null;
+            structureCheckStatus = demotedSet.size > 0 ? 'findings' : 'passed';
+          }
+        }
+      }
+
+      const demotedSegmentIndices = [...demotedSet].sort((a, b) => a - b);
+      const remainingCount = candidates.length - appliedReusedUnits.length;
+      const tmReceipt: TmRunReceipt = {
+        reused: appliedReusedUnits.length,
+        referenced,
+        staleOrUnknown,
+        retranslated: remainingCount,
+        demotedByStructureCheck: demotedSegmentIndices.length,
+        demotedSegmentIndices,
+        modelCalls: 0,
+        baselineRequests: candidates.length,
+        termsDbRevision: basis.currentTermsDbRevision,
+        gameVersion: basis.currentGameVersion,
+        structureCheckStatus,
+      };
+
+      const nextStructure: StructureState = {
+        ...this.state.structure,
+        phase: structurePhase,
+        results: mergedStructureResults,
+        checks: structureChecks,
+        error: structureError,
+      };
+
+      if (remainingCount === 0 && appliedReusedUnits.length > 0) {
+        // Every segment was served from verified TM with 0 model calls!
+        this.commit({
+          draft: updatedDraft,
+          remember: true,
+          notice: 'sem:translateRunDone',
+          extraPatch: () => ({
+            structure: nextStructure,
+            tmReceipt,
+            run: initialRun() as RunState,
+          }),
+        });
+        return true;
+      }
+
+      const built = this.buildTranslatePlan(updatedDraft);
+      if (!built) {
+        this.commit({
+          draft: updatedDraft,
+          remember: true,
+          notice: null,
+          extraPatch: () => ({ structure: nextStructure, tmReceipt }),
+        });
+        return true;
+      }
+
+      built.plan.trackTmModelCalls = true;
+      this.translateRun = built.plan;
+      if (built.plan.kind === 'blank') {
+        this.commit({
+          draft: { ...updatedDraft, target: '' },
+          remember: true,
+          notice: null,
+          extraPatch: () => ({ structure: nextStructure, tmReceipt }),
+        });
+      } else {
+        this.commit({
+          draft: updatedDraft !== startDraft ? updatedDraft : undefined,
+          remember: true,
+          notice: null,
+          extraPatch: () => ({ structure: nextStructure, tmReceipt }),
+        });
+      }
+      this.startBatch('translate', built.items);
+      return true;
+    } finally {
+      if (this.tmPrepareAbort === abort) this.tmPrepareAbort = null;
+    }
   }
 
   async translatePair(viewOrIndex: PairView | number): Promise<void> {

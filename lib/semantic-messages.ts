@@ -317,6 +317,19 @@ const zh = {
     adoptCategory: '（{category}）',
     ignore: '忽略（按普通字处理）',
   },
+  tmReceipt: {
+    title: '翻译记忆增量复用回执',
+    summary: '直接复用 {reused} / {baseline} 段 · 模型调用 {modelCalls} 次 · 送模型翻译 {retranslated} 段',
+    detail: '仅作参考 {referenced} 段 · 过期或未知版本 {stale} 段',
+    structurePassed: '第一层结构核查已通过全部复用段。',
+    structureDemoted: '{n} 段复用未通过第一层结构核查，已降级为需复核（第 {segments} 段）。',
+    structureUnavailable: '服务未启用第一层结构核查，复用段已降级为需复核。',
+    structureFailed: '第一层结构核查请求失败，复用段已降级为需复核。',
+    provenance: '词库 {rev} · 游戏版本 {game}',
+    provenanceNoGame: '词库 {rev}',
+    provenanceUnknown: '词库版本未实时校验（0 段自动复用）',
+    noTextNote: '回执只记录计数与版本依据，不含任何原文或译文内容。',
+  },
 };
 
 export type SemanticMessages = typeof zh;
@@ -633,6 +646,19 @@ const en: SemanticMessages = {
     adopt: 'Adopt {zh} / {en}',
     adoptCategory: ' ({category})',
     ignore: 'Ignore (ordinary word)',
+  },
+  tmReceipt: {
+    title: 'Translation memory incremental reuse receipt',
+    summary: 'Reused {reused} / {baseline} segments · {modelCalls} model call(s) · {retranslated} sent to translation',
+    detail: 'Reference only: {referenced} · stale or unknown provenance: {stale}',
+    structurePassed: 'Layer 1 structure checks passed for all reused segments.',
+    structureDemoted: '{n} reused segment(s) did not pass Layer 1 structure checks and were demoted to needs_review (segment {segments}).',
+    structureUnavailable: 'Layer 1 structure checks are unavailable on this service; reused segments were demoted to needs_review.',
+    structureFailed: 'Layer 1 structure checks failed; reused segments were demoted to needs_review.',
+    provenance: 'Dictionary {rev} · game {game}',
+    provenanceNoGame: 'Dictionary {rev}',
+    provenanceUnknown: 'Live dictionary identity unavailable (0 segments auto-reused)',
+    noTextNote: 'Receipt records counts and provenance only — never segment text.',
   },
 };
 

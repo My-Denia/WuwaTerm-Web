@@ -17,23 +17,31 @@ import { isAmbiguousMention, isLong, sessionReviewFeatures } from '../../lib/lon
 import { judgedReport, layerTwoCounts, layerTwoRows, structureSummary, structureViews } from '../../lib/structure-layer';
 import { CAPABILITY_STRUCTURE_CHECK } from '../../lib/structure-check.js';
 import { useRuntime, useRuntimeStore } from '../../lib/runtime-provider';
-import { META_FRESH_TTL_MS } from '../../lib/runtime-store';
+import { DICTIONARY_FRESH_TTL_MS, META_FRESH_TTL_MS } from '../../lib/runtime-store';
 import { numberLocale } from '../../lib/ui-language';
-import { isMetaFresh, tmServiceBasis } from '../../lib/tm-live-provenance';
-import { describeTmSegmentAlignment, resolveActiveSegment, segmentParagraphs, type TmSegmentCursor } from '../../lib/tm-segment';
+import { isSelfHosted, workbenchPath } from '../../lib/ui-runtime';
+import {
+  isDictionaryFresh,
+  isMetaFresh,
+  sanitizeGameVersion,
+  tmAutoReuseBasis,
+  tmConfirmBasis,
+  tmDisplayMatchBasis,
+} from '../../lib/tm-live-provenance';
+import { describeTmSegmentAlignment, resolveActiveSegment, type TmSegmentCursor } from '../../lib/tm-segment';
 import { semanticSegmentViews } from '../../lib/semantic-state.js';
 import { semanticMsg } from '../../lib/semantic-messages';
 import {
   findMatchingTermbaseEntry, inferDirection, promoteTermbaseEntry,
   type TermbaseDirection, type TermbaseEntry, type TermbaseKind,
 } from '../../lib/termbase';
-import type { TmEntry } from '../../lib/translation-memory';
+import { TranslationMemoryError, type TmConfirmCandidate, type TmConfirmResult, type TmEntry, type TmErrorCode, type TmFile } from '../../lib/translation-memory';
 import {
   canonicalOf, createWorkbenchController, documentSignature, isRunActive, workPresent,
 } from '../../lib/workbench-controller';
 import type { Candidate, Choice, Draft, Finding, PairView, PendingWorkfile, Snapshot, Span } from '../../lib/workbench-model';
 import { EditorSurfaceAdapter, type EditorEdit, type EditorSurfaceHandle } from './editor-surface';
-import { MyMemory } from './my-memory';
+import { MyMemory, type TmDictionaryStatusView, type TmPersistenceAdapter } from './my-memory';
 import { MyTerms, type TermbaseDraftSeed, type TermbaseExternalFeedback } from './my-terms';
 import { QuickTermLookup } from './quick-term-lookup';
 import { RequestId } from './request-feedback';
@@ -87,11 +95,22 @@ function unloadUrl(anchor: HTMLAnchorElement): string | null {
 export function DocumentWorkspace() {
   const { lang } = useUiLanguage();
   const runtime = useRuntimeStore();
-  const { pool, meta } = useRuntime();
+  const { pool, meta, dictionary } = useRuntime();
+  const selfHosted = isSelfHosted();
+  const [tmEntries, setTmEntries] = useState<TmEntry[]>([]);
   const [doc] = useState(() => createWorkbenchController({
     initialLang: lang,
     fetchCapabilities: () => runtime.capabilities(),
     onPoolRefresh: () => runtime.refreshPool(),
+    resolveTmAutoReuseBasis: async (liveLatest) => {
+      await runtime.loadDictionary();
+      const afterDict = runtime.getSnapshot();
+      if (afterDict.dictionary.kind === 'unsupported') {
+        await runtime.loadMeta();
+      }
+      const liveSnap = runtime.getSnapshot();
+      return tmAutoReuseBasis(liveSnap.dictionary, liveSnap.meta, liveLatest);
+    },
   }));
   const snapshot = useSyncExternalStore(doc.subscribe, doc.getSnapshot, doc.getSnapshot);
   const {
@@ -129,7 +148,7 @@ export function DocumentWorkspace() {
   const [termbaseDraftSeed, setTermbaseDraftSeed] = useState<TermbaseDraftSeed | null>(null);
   const [termbaseFeedback, setTermbaseFeedback] = useState<TermbaseExternalFeedback | null>(null);
   const termbaseSeq = useRef(0);
-  const [tmEntries, setTmEntries] = useState<TmEntry[]>([]);
+  const [tmStorageState, setTmStorageState] = useState<'idle' | 'loading' | 'ready' | 'error'>(selfHosted ? 'loading' : 'ready');
   const [tmOpen, setTmOpen] = useState(false);
   const [tmCursor, setTmCursor] = useState<TmSegmentCursor | null>(null);
   const [revision, setRevision] = useState<RevisionIntent | null>(null);
@@ -154,25 +173,68 @@ export function DocumentWorkspace() {
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;
-  const targetSegments = useMemo(() => segmentParagraphs(target), [target]);
   const activeTmSegment = useMemo(() => resolveActiveSegment(source, target, tmCursor, alignments), [source, target, tmCursor, alignments]);
   const tmAlignmentStatus = useMemo(
     () => describeTmSegmentAlignment(source, target, activeTmSegment, alignments),
     [source, target, activeTmSegment, alignments],
   );
   const [, setTmTtlVersion] = useState(0);
+  // Self-hosted instances load persisted confirmed TM entries from private `/api/tm` on mount;
+  // public Cloudflare Web stays strictly in React page memory and never calls `/api/tm`.
   useEffect(() => {
-    if (tmOpen) void runtime.loadMeta();
+    doc.setTmEntries(tmEntries);
+  }, [doc, tmEntries]);
+
+  useEffect(() => {
+    if (!selfHosted) return;
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch(workbenchPath('/api/tm'), { cache: 'no-store' });
+        if (!active) return;
+        if (!response.ok) {
+          setTmStorageState('error');
+          return;
+        }
+        const value = await response.json() as { entries?: unknown };
+        if (!active) return;
+        if (Array.isArray(value?.entries)) {
+          setTmEntries(value.entries as TmEntry[]);
+          setTmStorageState('ready');
+        } else {
+          setTmStorageState('error');
+        }
+      } catch {
+        if (active) setTmStorageState('error');
+      }
+    })();
+    return () => { active = false; };
+  }, [selfHosted]);
+
+  useEffect(() => {
+    if (!tmOpen) return;
+    void (async () => {
+      await runtime.loadDictionary();
+      if (runtime.getSnapshot().dictionary.kind === 'unsupported') {
+        await runtime.loadMeta();
+      }
+    })();
   }, [runtime, tmOpen]);
+
   useEffect(() => {
-    if (!tmOpen || meta.kind !== 'success') return;
-    const remaining = meta.fetchedAt + META_FRESH_TTL_MS - Date.now();
+    if (!tmOpen) return;
+    let remaining = -1;
+    if (dictionary.kind === 'success') {
+      remaining = dictionary.fetchedAt + DICTIONARY_FRESH_TTL_MS - Date.now();
+    } else if (dictionary.kind === 'unsupported' && meta.kind === 'success') {
+      remaining = meta.fetchedAt + META_FRESH_TTL_MS - Date.now();
+    }
     if (remaining <= 0) return;
     const timer = setTimeout(() => {
       setTmTtlVersion(v => v + 1);
     }, remaining + 1);
     return () => clearTimeout(timer);
-  }, [tmOpen, meta]);
+  }, [tmOpen, dictionary, meta]);
   const [tmResetSeen, setTmResetSeen] = useState(snapshot.resetSignal);
   if (tmResetSeen !== snapshot.resetSignal) {
     setTmResetSeen(snapshot.resetSignal);
@@ -187,9 +249,32 @@ export function DocumentWorkspace() {
   }, [draft, semantic, basis, reviewFeatures, layer1]);
   // Ambiguous one-character names (ambiguous-mention-v1) are listed apart, folded, and never counted with the judged findings.
   const judged = useMemo(() => (latest ? judgedReport(latest.report) : null), [latest]);
-  // The translation memory may only call itself current against the running service: a live review's dictionary while
-  // `/api/meta` still reports that same dictionary within TTL, plus the game version `/api/meta` last confirmed.
-  const tmBasis = tmServiceBasis(meta, latest);
+  // Tier 1 / 2 display basis: fresh `/api/dictionary` when supported, else legacy `/api/meta` + trusted live review.
+  const tmDisplayBasis = tmDisplayMatchBasis(dictionary, meta, latest);
+  const tmDictionaryStatus: TmDictionaryStatusView = (() => {
+    if (dictionary.kind === 'loading') return { kind: 'loading', revision: null, gameVersion: null };
+    if (isDictionaryFresh(dictionary)) {
+      return {
+        kind: 'verified',
+        revision: dictionary.data.revision,
+        gameVersion: sanitizeGameVersion(dictionary.data.game_version),
+      };
+    }
+    if (dictionary.kind === 'error') return { kind: 'error', revision: null, gameVersion: null };
+    if (dictionary.kind === 'unsupported') {
+      if (meta.kind === 'loading') return { kind: 'loading', revision: null, gameVersion: null };
+      if (meta.kind === 'error') return { kind: 'error', revision: null, gameVersion: null };
+      if (tmDisplayBasis.currentTermsDbRevision) {
+        return {
+          kind: 'legacy',
+          revision: tmDisplayBasis.currentTermsDbRevision,
+          gameVersion: tmDisplayBasis.currentGameVersion,
+        };
+      }
+      return { kind: 'unverified', revision: null, gameVersion: null };
+    }
+    return { kind: 'unverified', revision: null, gameVersion: null };
+  })();
   const visibleFindings = judged ? filterFindings(judged.report.findings, verdictFilter) : [];
   const findingCounts = findingVerdictCounts(judged?.report.findings ?? []);
   const activeFindingId = reconcileActiveId(canonicalFindingId, visibleFindings);
@@ -364,14 +449,121 @@ export function DocumentWorkspace() {
     return outcome;
   }
 
-  const getLiveTmBasis = useCallback(() => {
-    const liveMeta = runtime.getSnapshot().meta;
+  const getDisplayTmBasis = useCallback(() => {
+    const live = runtime.getSnapshot();
     const liveLatest = doc.getSnapshot().reports.at(-1) ?? null;
-    if (liveMeta.kind === 'success' && !isMetaFresh(liveMeta)) {
+    if (
+      (live.dictionary.kind === 'success' && !isDictionaryFresh(live.dictionary))
+      || (live.dictionary.kind === 'unsupported' && live.meta.kind === 'success' && !isMetaFresh(live.meta))
+    ) {
       setTmTtlVersion(v => v + 1);
     }
-    return tmServiceBasis(liveMeta, liveLatest);
+    return tmDisplayMatchBasis(live.dictionary, live.meta, liveLatest);
   }, [runtime, doc]);
+
+  const getConfirmTmBasis = useCallback(() => {
+    const live = runtime.getSnapshot();
+    const liveLatest = doc.getSnapshot().reports.at(-1) ?? null;
+    if (
+      (live.dictionary.kind === 'success' && !isDictionaryFresh(live.dictionary))
+      || (live.dictionary.kind === 'unsupported' && live.meta.kind === 'success' && !isMetaFresh(live.meta))
+    ) {
+      setTmTtlVersion(v => v + 1);
+    }
+    return tmConfirmBasis(live.dictionary, live.meta, liveLatest);
+  }, [runtime, doc]);
+
+  const tmPersistence = useMemo<TmPersistenceAdapter | undefined>(() => {
+    if (!selfHosted) return undefined;
+    const postTm = async (payload: object) => fetch(workbenchPath('/api/tm'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify(payload),
+    });
+    const toTmError = (value: unknown) => {
+      if (value && typeof value === 'object' && typeof (value as { code?: unknown }).code === 'string') {
+        const v = value as { code: TmErrorCode; detail?: string };
+        return new TranslationMemoryError(v.code, typeof v.detail === 'string' ? v.detail : '');
+      }
+      return undefined;
+    };
+    return {
+      async confirm(candidate: TmConfirmCandidate): Promise<TmConfirmResult | { status: 'error' }> {
+        try {
+          const response = await postTm({ action: 'confirm', candidate });
+          const value = await response.json() as Record<string, unknown>;
+          if (response.ok && (value.status === 'added' || value.status === 'updated') && Array.isArray(value.entries)) {
+            setTmStorageState('ready');
+            return {
+              status: value.status,
+              entry: value.entry as TmEntry,
+              entries: value.entries as TmEntry[],
+            };
+          }
+          if (value.status === 'invalid' && typeof value.error === 'string') {
+            return value as unknown as TmConfirmResult;
+          }
+          setTmStorageState('error');
+          return { status: 'error' };
+        } catch {
+          setTmStorageState('error');
+          return { status: 'error' };
+        }
+      },
+      async replace(file: TmFile) {
+        try {
+          const response = await postTm({ action: 'replace', file });
+          const value = await response.json() as Record<string, unknown>;
+          if (response.ok && Array.isArray(value.entries)) {
+            setTmStorageState('ready');
+            return { ok: true as const, entries: value.entries as TmEntry[] };
+          }
+          return { ok: false as const, error: toTmError(value) };
+        } catch {
+          setTmStorageState('error');
+          return { ok: false as const };
+        }
+      },
+      async merge(file: TmFile) {
+        try {
+          const response = await postTm({ action: 'merge', file });
+          const value = await response.json() as Record<string, unknown>;
+          if (response.ok && Array.isArray(value.entries)) {
+            setTmStorageState('ready');
+            return { ok: true as const, entries: value.entries as TmEntry[] };
+          }
+          return { ok: false as const, error: toTmError(value) };
+        } catch {
+          setTmStorageState('error');
+          return { ok: false as const };
+        }
+      },
+      async remove(entry: TmEntry) {
+        try {
+          const response = await postTm({
+            action: 'delete',
+            entry: {
+              direction: entry.direction,
+              source_text: entry.source_text,
+              target_text: entry.target_text,
+              prev_source_hash: entry.prev_source_hash,
+              next_source_hash: entry.next_source_hash,
+            },
+          });
+          const value = await response.json() as Record<string, unknown>;
+          if (response.ok && Array.isArray(value.entries)) {
+            setTmStorageState('ready');
+            return { ok: true as const, entries: value.entries as TmEntry[] };
+          }
+          return { ok: false as const };
+        } catch {
+          setTmStorageState('error');
+          return { ok: false as const };
+        }
+      },
+    };
+  }, [selfHosted]);
 
   function promoteSelectionToTermbase() {
     const selectedSource = sourceEditor.current?.selection()?.text.trim() ?? '';
@@ -932,12 +1124,16 @@ export function DocumentWorkspace() {
           nextSource={activeTmSegment.nextSource}
           segmentIndex={activeTmSegment.index}
           segmentTotal={activeTmSegment.total}
-          targetSegmentTotal={targetSegments.length}
           alignmentStatus={tmAlignmentStatus}
           direction={effectiveTermbaseDirection}
-          currentTermsDbRevision={tmBasis.currentTermsDbRevision}
-          currentGameVersion={tmBasis.currentGameVersion}
-          getServiceBasis={getLiveTmBasis}
+          currentTermsDbRevision={tmDisplayBasis.currentTermsDbRevision}
+          currentGameVersion={tmDisplayBasis.currentGameVersion}
+          getDisplayBasis={getDisplayTmBasis}
+          getConfirmBasis={getConfirmTmBasis}
+          dictionaryStatus={tmDictionaryStatus}
+          storageMode={selfHosted ? 'selfhost_sqlite' : 'public_memory'}
+          storageState={tmStorageState}
+          persistence={tmPersistence}
           entries={tmEntries}
           setEntries={setTmEntries}
           onApplySuggestion={applyMemorySuggestion}

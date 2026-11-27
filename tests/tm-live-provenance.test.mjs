@@ -11,8 +11,19 @@ import {
   confirmTranslationMemoryEntry,
   matchTranslationMemory,
 } from '../lib/translation-memory.ts';
-import { isMetaFresh, liveGameVersion, liveTermsDbRevision, tmServiceBasis } from '../lib/tm-live-provenance.ts';
 import {
+  isDictionaryFresh,
+  isMetaFresh,
+  liveGameVersion,
+  liveTermsDbRevision,
+  tmAutoReuseBasis,
+  tmConfirmBasis,
+  tmDisplayMatchBasis,
+  tmServiceBasis,
+} from '../lib/tm-live-provenance.ts';
+import {
+  DICTIONARY_ERROR_RETRY_COOLDOWN_MS,
+  DICTIONARY_FRESH_TTL_MS,
   META_ERROR_RETRY_COOLDOWN_MS,
   META_FRESH_TTL_MS,
   RuntimeStore,
@@ -261,4 +272,158 @@ test('confirming against a fresh live review and matching /api/meta writes the r
   assert.equal(stale.freshness, TM_FRESHNESS_STALE);
   assert.deepEqual(stale.staleReasons, [TM_STALE_GAME_VERSION]);
   assert.equal(stale.needsRecheck, true);
+});
+
+const DICT = {
+  revision: REVISION,
+  schema_version: '2',
+  source_commit: 'commit-live',
+  game_version: '3.7.0',
+  term_count: 1200,
+  request_id: 'dict-1',
+};
+const dictSuccess = (over = {}, fetchedAt = NOW) => ({ kind: 'success', data: { ...DICT, ...over }, fetchedAt });
+
+test('four-tier operation provenance: direct /api/dictionary, legacy fallback, and P1-02 confirm never leaks lastKnown', () => {
+  // Tier 1 & 2 (Browse / Manual reference apply): fresh /api/dictionary grants verified_fresh without any review.
+  assert.equal(isDictionaryFresh(dictSuccess(), { now: NOW }), true);
+  assert.deepEqual(tmDisplayMatchBasis(dictSuccess(), { kind: 'idle' }, null, { now: NOW }), {
+    currentTermsDbRevision: REVISION,
+    currentGameVersion: '3.7.0',
+  });
+
+  // Expired or errored /api/dictionary keeps lastKnown game_version ONLY for display known_stale drift, never verified_fresh.
+  assert.deepEqual(tmDisplayMatchBasis(dictSuccess({}, NOW - DICTIONARY_FRESH_TTL_MS), { kind: 'idle' }, null, { now: NOW }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: '3.7.0',
+  });
+  assert.deepEqual(tmDisplayMatchBasis({ kind: 'error', lastKnown: DICT, failedAt: NOW }, { kind: 'idle' }, null, { now: NOW }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: '3.7.0',
+  });
+
+  // Tier 3 (Human confirm, P1-02): ONLY genuinely fresh live provenance; idle/loading/error/expired MUST return null for BOTH!
+  assert.deepEqual(tmConfirmBasis(dictSuccess(), { kind: 'idle' }, null, { now: NOW }), {
+    currentTermsDbRevision: REVISION,
+    currentGameVersion: '3.7.0',
+  });
+  assert.deepEqual(tmConfirmBasis({ kind: 'unsupported' }, success(), liveSnapshot(), { now: NOW }), {
+    currentTermsDbRevision: REVISION,
+    currentGameVersion: '3.7.0',
+  });
+  assert.deepEqual(tmConfirmBasis({ kind: 'unsupported' }, success(), null, { now: NOW }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: '3.7.0',
+  });
+
+  for (const [label, dictView, metaView] of [
+    ['dict idle', { kind: 'idle' }, success()],
+    ['dict loading with lastKnown', { kind: 'loading', lastKnown: DICT }, success()],
+    ['dict error with lastKnown', { kind: 'error', lastKnown: DICT, failedAt: NOW }, success()],
+    ['dict TTL expired', dictSuccess({}, NOW - DICTIONARY_FRESH_TTL_MS), success()],
+    ['legacy meta idle', { kind: 'unsupported' }, { kind: 'idle' }],
+    ['legacy meta loading with lastKnown', { kind: 'unsupported' }, { kind: 'loading', lastKnown: META }],
+    ['legacy meta error with lastKnown', { kind: 'unsupported' }, { kind: 'error', lastKnown: META, failedAt: NOW }],
+    ['legacy meta TTL expired', { kind: 'unsupported' }, success({}, NOW - META_FRESH_TTL_MS)],
+  ]) {
+    assert.deepEqual(
+      tmConfirmBasis(dictView, metaView, liveSnapshot(), { now: NOW }),
+      { currentTermsDbRevision: null, currentGameVersion: null },
+      `P1-02 confirm must not leak lastKnown for ${label}`,
+    );
+  }
+
+  // Tier 4 (Auto batch reuse): requires fresh live revision; fails closed when unavailable/expired/unverified.
+  assert.deepEqual(tmAutoReuseBasis(dictSuccess(), { kind: 'idle' }, null, { now: NOW }), {
+    currentTermsDbRevision: REVISION,
+    currentGameVersion: '3.7.0',
+  });
+  assert.deepEqual(tmAutoReuseBasis({ kind: 'unsupported' }, success(), liveSnapshot(), { now: NOW }), {
+    currentTermsDbRevision: REVISION,
+    currentGameVersion: '3.7.0',
+  });
+  assert.deepEqual(tmAutoReuseBasis({ kind: 'unsupported' }, success(), null, { now: NOW }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: null,
+  });
+  assert.deepEqual(tmAutoReuseBasis({ kind: 'error', lastKnown: DICT, failedAt: NOW }, success(), liveSnapshot(), { now: NOW }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: null,
+  });
+  assert.deepEqual(tmAutoReuseBasis(dictSuccess({}, NOW - DICTIONARY_FRESH_TTL_MS), success(), liveSnapshot(), { now: NOW }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: null,
+  });
+});
+
+test('RuntimeStore.loadDictionary checks capabilities first, caches for 10m TTL, and enforces fixed 30s error retry cooldown', async () => {
+  let clock = NOW;
+  let dictCalls = 0;
+  let dictMode = 'fail';
+
+  // Legacy server without dictionary-identity-v1 sets unsupported without calling /api/dictionary.
+  const legacyStore = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        return new Response(JSON.stringify({ capabilities: ['translation-context-v1'], request_id: 'cap-1' }), { status: 200 });
+      }
+      throw new Error(`unexpected fetch to ${path}`);
+    },
+  });
+  await legacyStore.loadDictionary();
+  assert.deepEqual(legacyStore.getSnapshot().dictionary, { kind: 'unsupported' });
+
+  // Modern server advertising dictionary-identity-v1.
+  const store = new RuntimeStore({
+    pool: false,
+    now: () => clock,
+    fetch: async (path) => {
+      if (path === '/api/capabilities') {
+        return new Response(JSON.stringify({ capabilities: ['dictionary-identity-v1'], request_id: 'cap-2' }), { status: 200 });
+      }
+      assert.equal(path, '/api/dictionary');
+      dictCalls += 1;
+      if (dictMode === 'fail') return new Response('unavailable', { status: 503 });
+      return new Response(JSON.stringify(DICT), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+
+  await store.loadDictionary();
+  assert.equal(dictCalls, 1);
+  assert.deepEqual(store.getSnapshot().dictionary, { kind: 'error', lastKnown: null, failedAt: NOW });
+
+  // Inside fixed 30s cooldown: non-forced call skips fetch.
+  clock += DICTIONARY_ERROR_RETRY_COOLDOWN_MS - 1;
+  await store.loadDictionary();
+  assert.equal(dictCalls, 1);
+
+  // After 30s cooldown: retries automatically and succeeds.
+  clock += 1;
+  dictMode = 'ok';
+  await store.loadDictionary();
+  assert.equal(dictCalls, 2);
+  assert.deepEqual(store.getSnapshot().dictionary, { kind: 'success', data: DICT, fetchedAt: clock });
+
+  // Within 10m TTL: cached without hitting /api/dictionary.
+  clock += DICTIONARY_FRESH_TTL_MS - 1;
+  await store.loadDictionary();
+  assert.equal(dictCalls, 2);
+
+  // Past 10m TTL: refreshes automatically.
+  clock += 1;
+  await store.loadDictionary();
+  assert.equal(dictCalls, 3);
+  assert.deepEqual(store.getSnapshot().dictionary, { kind: 'success', data: DICT, fetchedAt: clock });
+
+  // Forced refresh failing preserves lastKnown while denying confirm & auto-reuse.
+  dictMode = 'fail';
+  await store.loadDictionary(true);
+  assert.equal(dictCalls, 4);
+  assert.deepEqual(store.getSnapshot().dictionary, { kind: 'error', lastKnown: DICT, failedAt: clock });
+  assert.deepEqual(tmConfirmBasis(store.getSnapshot().dictionary, { kind: 'idle' }, null, { now: clock }), {
+    currentTermsDbRevision: null,
+    currentGameVersion: null,
+  });
 });
