@@ -12,6 +12,7 @@ import {
   matchTranslationMemory,
 } from '../lib/translation-memory.ts';
 import { liveGameVersion, liveTermsDbRevision, tmServiceBasis } from '../lib/tm-live-provenance.ts';
+import { RuntimeStore } from '../lib/runtime-store.ts';
 
 const REVISION = 'a'.repeat(64);
 const STAMP = '2026-11-27T00:00:00Z';
@@ -45,20 +46,39 @@ const makeEntry = (over = {}) => ({
   ...over,
 });
 
-test('the live game version is adopted only from a successful /api/meta read that reports a usable value', () => {
+test('the live game version is adopted only from a confirmed /api/meta read that reports a usable value', () => {
   assert.equal(liveGameVersion(success()), '3.7.0');
-  for (const meta of [{ kind: 'idle' }, { kind: 'loading' }, { kind: 'error' }]) {
-    assert.equal(liveGameVersion(meta), null, `${meta.kind} reports no live game version`);
-  }
+  assert.equal(liveGameVersion({ kind: 'idle' }), null);
+  assert.equal(liveGameVersion({ kind: 'loading', lastKnown: null }), null);
+  assert.equal(liveGameVersion({ kind: 'error', lastKnown: null }), null);
+  // A re-read in flight or failed keeps what the last confirmed read reported.
+  assert.equal(liveGameVersion({ kind: 'loading', lastKnown: META }), '3.7.0');
+  assert.equal(liveGameVersion({ kind: 'error', lastKnown: META }), '3.7.0');
+
   assert.equal(liveGameVersion(success({ game_version: null })), null);
   assert.equal(liveGameVersion(success({ game_version: '' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '   ' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '\u3000' })), null);
+  // The sentinel is "not reported" regardless of case or surrounding whitespace.
   assert.equal(liveGameVersion(success({ game_version: 'unavailable' })), null);
+  assert.equal(liveGameVersion(success({ game_version: 'UNAVAILABLE' })), null);
+  assert.equal(liveGameVersion(success({ game_version: ' unavailable ' })), null);
   // `source_commit` names the dictionary build, never the game.
   assert.equal(liveGameVersion(success({ game_version: null, source_commit: '3.7.0' })), null);
+  // Surrounding whitespace is trimmed; the trimmed value is what an entry records and compares.
+  assert.equal(liveGameVersion(success({ game_version: ' 3.7.0 ' })), '3.7.0');
   // The value has to fit the entry field it will be written into (1..128 scalar characters).
   assert.equal(liveGameVersion(success({ game_version: '3'.repeat(128) })), '3'.repeat(128));
   assert.equal(liveGameVersion(success({ game_version: '3'.repeat(129) })), null);
+  assert.equal(liveGameVersion(success({ game_version: ` ${'3'.repeat(128)} ` })), '3'.repeat(128));
+  // C0/C1 control characters and isolated surrogates cannot be stored in an entry, so they are not a basis.
   assert.equal(liveGameVersion(success({ game_version: '3.7\u0000' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '3.7\u001f' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '3.7\u007f' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '3.7\u0081' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '3.7\u009f' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '3.7\uD800' })), null);
+  assert.equal(liveGameVersion(success({ game_version: '3.7\uDC00' })), null);
 });
 
 test('only a live review supplies the current dictionary revision, and a disagreeing /api/meta withdraws it', () => {
@@ -66,7 +86,13 @@ test('only a live review supplies the current dictionary revision, and a disagre
   assert.equal(rev({ kind: 'idle' }, null), null, 'no review yet');
   assert.equal(rev(success(), importedSnapshot()), null, 'an imported manuscript report is saved history, not the live service');
   assert.equal(rev({ kind: 'idle' }, liveSnapshot()), REVISION, 'a live review is its own evidence until /api/meta says otherwise');
-  assert.equal(rev({ kind: 'error' }, liveSnapshot()), REVISION, 'a failed meta read does not disprove the live review');
+  assert.equal(rev({ kind: 'error', lastKnown: null }, liveSnapshot()), REVISION, 'a page that confirmed no read does not disprove the live review');
+  assert.equal(rev({ kind: 'loading', lastKnown: META }, liveSnapshot()), REVISION, 'a re-read in flight keeps the confirmed match');
+  assert.equal(
+    rev({ kind: 'error', lastKnown: META }, liveSnapshot({ source_commit: 'commit-old' })),
+    null,
+    'a confirmed read that withdrew the revision keeps it withdrawn when a re-read fails',
+  );
   assert.equal(rev(success(), liveSnapshot()), REVISION);
 
   // Any disagreement in the dictionary identity means the service's dictionary changed under the saved review.
@@ -105,6 +131,44 @@ test('a dictionary change under the saved review reads as provenance_unknown, wh
   assert.equal(noRecordedGame.freshness, TM_FRESHNESS_UNKNOWN);
   assert.deepEqual(noRecordedGame.staleReasons, [TM_STALE_PROVENANCE_UNKNOWN]);
   assert.equal(noRecordedGame.needsRecheck, true);
+});
+
+test('a re-read in flight or failed keeps the confirmed service identity, so a withdrawn revision never comes back', async () => {
+  let status = 'ok';
+  const fetcher = async (path) => {
+    assert.equal(path, '/api/meta');
+    return status === 'ok'
+      ? new Response(JSON.stringify(META), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('upstream-unavailable', { status: 502 });
+  };
+  const store = new RuntimeStore({ fetch: fetcher, pool: false });
+  const saved = liveSnapshot({ source_commit: 'commit-old' });
+  await store.loadMeta();
+  assert.equal(store.getSnapshot().meta.kind, 'success');
+  assert.deepEqual(tmServiceBasis(store.getSnapshot().meta, saved), {
+    currentTermsDbRevision: null,
+    currentGameVersion: '3.7.0',
+  });
+
+  status = 'fail';
+  const reread = store.loadMeta(true);
+  assert.equal(store.getSnapshot().meta.kind, 'loading');
+  assert.deepEqual(tmServiceBasis(store.getSnapshot().meta, saved), {
+    currentTermsDbRevision: null,
+    currentGameVersion: '3.7.0',
+  });
+  await reread;
+  assert.equal(store.getSnapshot().meta.kind, 'error');
+  assert.deepEqual(tmServiceBasis(store.getSnapshot().meta, saved), {
+    currentTermsDbRevision: null,
+    currentGameVersion: '3.7.0',
+  });
+
+  // A successful re-read that still reports another dictionary keeps it withdrawn as well.
+  status = 'ok';
+  await store.loadMeta(true);
+  assert.equal(store.getSnapshot().meta.kind, 'success');
+  assert.equal(tmServiceBasis(store.getSnapshot().meta, saved).currentTermsDbRevision, null);
 });
 
 test('confirming against a live review and a matching /api/meta writes the real basis and reads back verified_fresh', () => {

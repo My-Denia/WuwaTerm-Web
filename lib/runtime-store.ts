@@ -15,7 +15,13 @@ export type Provenance = {
   term_count: number;
   request_id: string;
 };
-export type MetaView = { kind: 'idle' } | { kind: 'loading' } | { kind: 'success'; data: Provenance } | { kind: 'error' };
+export type MetaView =
+  | { kind: 'idle' }
+  // A re-read keeps the last successful provenance so a reader that needs the running service's identity (TM freshness)
+  // keeps judging drift against what was last confirmed, instead of silently reviving a revision a confirmed read withdrew.
+  | { kind: 'loading'; lastKnown: Provenance | null }
+  | { kind: 'success'; data: Provenance }
+  | { kind: 'error'; lastKnown: Provenance | null };
 
 export type RuntimeSnapshot = {
   pool: PoolView;
@@ -140,19 +146,28 @@ export class RuntimeStore {
   loadMeta(force = false): Promise<void> {
     if (this.metaPromise) return this.metaPromise;
     if (!force && (this.state.meta.kind === 'success' || this.state.meta.kind === 'error')) return Promise.resolve();
-    this.set({ meta: { kind: 'loading' } });
+    const lastKnown = this.lastKnownMeta();
+    this.set({ meta: { kind: 'loading', lastKnown } });
     const promise = (async () => {
       try {
         const response = await this.fetcher('/api/meta', { cache: 'no-store' });
         const value = await json(response);
-        this.set({ meta: response.ok && isProvenance(value) ? { kind: 'success', data: value } : { kind: 'error' } });
+        this.set({ meta: response.ok && isProvenance(value) ? { kind: 'success', data: value } : { kind: 'error', lastKnown } });
       } catch {
-        this.set({ meta: { kind: 'error' } });
+        this.set({ meta: { kind: 'error', lastKnown } });
       } finally {
         this.metaPromise = null;
       }
     })();
     this.metaPromise = promise;
     return promise;
+  }
+
+  /** The latest confirmed provenance of this page load, if any; a read in flight or a failed re-read does not erase it. */
+  private lastKnownMeta(): Provenance | null {
+    const meta = this.state.meta;
+    if (meta.kind === 'success') return meta.data;
+    if (meta.kind === 'loading' || meta.kind === 'error') return meta.lastKnown;
+    return null;
   }
 }
