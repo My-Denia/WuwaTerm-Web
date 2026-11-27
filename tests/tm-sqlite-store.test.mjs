@@ -7,6 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createNodeEnvironment, NODE_ENVIRONMENT } from '../lib/runtime/node.js';
 import { openTmStore, TM_APPLICATION_ID, TM_SQLITE_SCHEMA_VERSION } from '../lib/runtime/tm-store.js';
+import { MAX_TM_BYTES, serializeTranslationMemory, TM_FORMAT, TM_SCHEMA_VERSION } from '../lib/translation-memory.ts';
 import { GET as getTm, POST as postTm } from '../app/api/tm/route.ts';
 
 const fixtureRoot = mkdtempSync(join(process.env.WUWATERM_TEST_TMPDIR || tmpdir(), 'wuwaterm-tm-sqlite-'));
@@ -883,5 +884,138 @@ test('confirmEntry and mergeEntries reject invalid inputs and enforce bounds ato
     assert.equal(store.getVersion(), vBefore);
   } finally {
     store.close();
+  }
+});
+
+test('confirmEntry rejects re-confirming a use_count=9 entry (+1 byte to 10) when store is at exact 8 MiB MAX_TM_BYTES', async () => {
+  const prevMode = process.env.WUWATERM_RUNTIME_MODE;
+  const prevEnv = globalThis[NODE_ENVIRONMENT];
+  const { env } = selfhostConfig('exact-8mib');
+  const runtime = createNodeEnvironment(env);
+  const stamp = '2026-11-28T00:00:00Z';
+  const rev = 'a'.repeat(64);
+
+  try {
+    process.env.WUWATERM_RUNTIME_MODE = 'selfhost';
+    globalThis[NODE_ENVIRONMENT] = runtime;
+
+    // Build a valid store at EXACTLY MAX_TM_BYTES (8 * 1,048,576 = 8,388,608 bytes) with target entry at use_count=9.
+    const measureBytes = (list) => Buffer.byteLength(JSON.stringify({
+      format: TM_FORMAT,
+      schema_version: TM_SCHEMA_VERSION,
+      exported_at: stamp,
+      entries: list,
+    }, null, 2) + '\n', 'utf8');
+    const makeBulkEntry = (i) => ({
+      direction: 'en',
+      source_text: `s_${i}_${'源'.repeat(600)}`,
+      target_text: `t_${i}_${'a'.repeat(1800)}`,
+      prev_source_hash: null,
+      next_source_hash: null,
+      origin: 'human_confirmed',
+      terms_db_revision: rev,
+      game_version: '3.7.0',
+      note: '',
+      use_count: i === 0 ? 9 : 1,
+      created_at: stamp,
+      updated_at: stamp,
+    });
+    const sampleSize = measureBytes([makeBulkEntry(0), makeBulkEntry(1)]) - measureBytes([makeBulkEntry(0)]);
+    const approxCount = Math.floor((MAX_TM_BYTES - 4500) / sampleSize);
+    const entries = Array.from({ length: approxCount }, (_, i) => makeBulkEntry(i));
+    while (measureBytes(entries) + 1200 <= MAX_TM_BYTES) {
+      entries.push(makeBulkEntry(entries.length));
+    }
+    while (measureBytes(entries) + 600 > MAX_TM_BYTES) {
+      entries.pop();
+    }
+    const emptyBase = measureBytes([
+      ...entries,
+      {
+        direction: 'en',
+        source_text: 's',
+        target_text: 't',
+        prev_source_hash: null,
+        next_source_hash: null,
+        origin: 'human_confirmed',
+        terms_db_revision: rev,
+        game_version: '3.7.0',
+        note: '',
+        use_count: 1,
+        created_at: stamp,
+        updated_at: stamp,
+      },
+    ]);
+    const extraBytes = MAX_TM_BYTES - emptyBase;
+    assert.ok(extraBytes >= 0 && extraBytes <= 3998, `expected extraBytes in 0..3998, got ${extraBytes}`);
+    const srcPad = Math.min(1999, extraBytes);
+    const tgtPad = extraBytes - srcPad;
+    entries.push({
+      direction: 'en',
+      source_text: 's'.repeat(1 + srcPad),
+      target_text: 't'.repeat(1 + tgtPad),
+      prev_source_hash: null,
+      next_source_hash: null,
+      origin: 'human_confirmed',
+      terms_db_revision: rev,
+      game_version: '3.7.0',
+      note: '',
+      use_count: 1,
+      created_at: stamp,
+      updated_at: stamp,
+    });
+    const exactBytes = Buffer.byteLength(serializeTranslationMemory({
+      format: TM_FORMAT,
+      schema_version: TM_SCHEMA_VERSION,
+      exported_at: stamp,
+      entries,
+    }), 'utf8');
+    assert.equal(exactBytes, MAX_TM_BYTES);
+
+    runtime.TM_DB.replaceEntries(entries);
+    const vBefore = runtime.TM_DB.getVersion();
+
+    // Re-confirming entry[0] with identical revision, gameVersion, and note bumps use_count 9 -> 10 (+1 byte) -> MUST reject 413 list_too_large!
+    const res = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: entries[0].source_text,
+          targetText: entries[0].target_text,
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: rev,
+          gameVersion: '3.7.0',
+          note: '',
+        },
+      }),
+    }));
+    assert.equal(res.status, 413);
+    const body = await res.json();
+    assert.equal(body.status, 'invalid');
+    assert.equal(body.error, 'list_too_large');
+    assert.equal(runtime.TM_DB.getVersion(), vBefore);
+    assert.equal(runtime.TM_DB.listEntries()[0].use_count, 9);
+
+    // Export serialization must still succeed within MAX_TM_BYTES.
+    const exported = serializeTranslationMemory({
+      format: TM_FORMAT,
+      schema_version: TM_SCHEMA_VERSION,
+      exported_at: stamp,
+      entries: runtime.TM_DB.listEntries(),
+    });
+    assert.equal(Buffer.byteLength(exported, 'utf8'), MAX_TM_BYTES);
+
+    runtime.TM_DB.close();
+    runtime.DB.close();
+  } finally {
+    if (prevEnv === undefined) delete globalThis[NODE_ENVIRONMENT];
+    else globalThis[NODE_ENVIRONMENT] = prevEnv;
+    if (prevMode === undefined) delete process.env.WUWATERM_RUNTIME_MODE;
+    else process.env.WUWATERM_RUNTIME_MODE = prevMode;
   }
 });

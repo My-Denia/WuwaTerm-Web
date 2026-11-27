@@ -270,7 +270,12 @@ export class RuntimeStore {
         }
         const lastKnown = this.lastKnownDictionary();
         this.set({ dictionary: { kind: 'loading', lastKnown } });
-        const response = await this.fetcher('/api/dictionary', { cache: 'no-store' });
+        const response = await this.fetcher(
+          '/api/dictionary',
+          force
+            ? { cache: 'no-store', headers: { 'cache-control': 'no-cache' } }
+            : { cache: 'no-store' },
+        );
         const value = await json(response);
         const at = this.now();
         if (response.ok && isDictionaryIdentity(value)) {
@@ -318,7 +323,12 @@ export class RuntimeStore {
     this.set({ meta: { kind: 'loading', lastKnown } });
     const promise = (async () => {
       try {
-        const response = await this.fetcher('/api/meta', { cache: 'no-store' });
+        const response = await this.fetcher(
+          '/api/meta',
+          force
+            ? { cache: 'no-store', headers: { 'cache-control': 'no-cache' } }
+            : { cache: 'no-store' },
+        );
         const value = await json(response);
         const at = this.now();
         this.set({

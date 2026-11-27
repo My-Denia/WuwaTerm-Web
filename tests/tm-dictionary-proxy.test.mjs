@@ -2,7 +2,12 @@
 // quota charging (kind = 'meta'), sensitive value redaction, and bounded server-side TTL cache.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { GET as getDictionaryRoute } from '../app/api/dictionary/route.ts';
+import { NODE_ENVIRONMENT } from '../lib/runtime/node.js';
+import { RuntimeStore } from '../lib/runtime-store.ts';
+import { POOL_LIMITS } from '../lib/shared-pool.js';
 import { CAPABILITY_DICTIONARY_IDENTITY, projectCapabilities } from '../lib/semantic-review.js';
+import { resolveTmAutoReuseBasisFromRuntime } from '../lib/tm-live-provenance.ts';
 import { proxyCapabilitiesRequest, proxyDictionaryRequest } from '../lib/wuwaterm-proxy.js';
 import { createPool, fixtureEnvironment } from './helpers/pool-fixture.mjs';
 
@@ -158,5 +163,134 @@ test('proxyDictionaryRequest projects Core schema, charges meta quota, caches 60
     } finally {
       DB.close();
     }
+  }
+});
+
+test('forceRefresh bypasses the 60s proxyDictionaryRequest cache within 15s and refreshes cached identity', async () => {
+  const DB = createPool();
+  const REV_2 = 'e'.repeat(64);
+  let clock = 1_700_000_000_000;
+  let activeDict = validCoreDict();
+  try {
+    const env = fixtureEnvironment(DB);
+    const up = makeUpstream({ dict: () => activeDict });
+
+    // Initial read populates 60s server proxy cache with REV.
+    const first = await proxyDictionaryRequest({ environment: env, fetchImpl: up.fetchImpl, now: () => clock });
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).revision, REV);
+    assert.equal(up.count('v1/dictionary'), 1);
+
+    // 15s later (inside 60s proxy TTL), upstream rotates to REV_2.
+    clock += 15_000;
+    DB.prepare('UPDATE shared_pool SET second_key = second_key - 5 WHERE id = 1').first();
+    activeDict = validCoreDict({ revision: REV_2, source_game_version: '3.8.0', request_id: 'req-dict-2' });
+
+    // Non-forced display read still hits 60s proxy cache and returns REV.
+    const cached = await proxyDictionaryRequest({ environment: env, fetchImpl: up.fetchImpl, now: () => clock });
+    assert.equal(cached.status, 200);
+    assert.equal((await cached.json()).revision, REV);
+    assert.equal(up.count('v1/dictionary'), 1);
+
+    // RuntimeStore + resolveTmAutoReuseBasisFromRuntime sends Cache-Control: no-cache -> penetrates 60s proxy cache!
+    const runtime = new RuntimeStore({
+      pool: false,
+      now: () => clock,
+      fetch: async (path, init) => {
+        if (path === '/api/capabilities') {
+          return proxyCapabilitiesRequest({ environment: env, fetchImpl: up.fetchImpl });
+        }
+        if (path === '/api/dictionary') {
+          const headers = new Headers(init?.headers);
+          const forceRefresh = headers.get('cache-control')
+            ?.split(',')
+            .some(token => token.trim().toLowerCase() === 'no-cache') ?? false;
+          return proxyDictionaryRequest({
+            environment: env,
+            fetchImpl: up.fetchImpl,
+            now: () => clock,
+            forceRefresh,
+          });
+        }
+        throw new Error(`Unexpected path: ${path}`);
+      },
+    });
+    // Pre-warm RuntimeStore with normal load (hits 60s cache -> REV), then rotate check via resolveTmAutoReuseBasisFromRuntime.
+    await runtime.loadDictionary();
+    assert.equal(runtime.getSnapshot().dictionary.data.revision, REV);
+    assert.equal(up.count('v1/dictionary'), 1);
+
+    const basis = await resolveTmAutoReuseBasisFromRuntime(runtime, null, { now: clock });
+    assert.equal(up.count('v1/dictionary'), 2);
+    assert.deepEqual(basis, { currentTermsDbRevision: REV_2, currentGameVersion: '3.8.0' });
+
+    // Proxy cache is now updated to REV_2, so subsequent normal display read sees REV_2 without extra upstream fetch.
+    const afterCached = await proxyDictionaryRequest({ environment: env, fetchImpl: up.fetchImpl, now: () => clock });
+    assert.equal(afterCached.status, 200);
+    assert.equal((await afterCached.json()).revision, REV_2);
+    assert.equal(up.count('v1/dictionary'), 2);
+  } finally {
+    DB.close();
+  }
+
+  // Verify /api/dictionary route handler forwards Cache-Control: no-cache and ?refresh=1 to bypass 60s cache.
+  const prevMode = process.env.WUWATERM_RUNTIME_MODE;
+  const prevEnv = globalThis[NODE_ENVIRONMENT];
+  const DB2 = createPool();
+  const prevFetch = globalThis.fetch;
+  try {
+    let routeDict = validCoreDict({ revision: REV });
+    let upstreamCount = 0;
+    const env2 = {
+      ...fixtureEnvironment(DB2),
+      WUWATERM_RUNTIME_MODE: 'selfhost',
+      WUWATERM_LOCAL_LIMITS: POOL_LIMITS,
+    };
+    process.env.WUWATERM_RUNTIME_MODE = 'selfhost';
+    globalThis[NODE_ENVIRONMENT] = env2;
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith('/v1/capabilities')) {
+        return json({ api_version: 'v1', capabilities: [CAPABILITY_DICTIONARY_IDENTITY], request_id: 'cap-route' });
+      }
+      if (u.endsWith('/v1/dictionary')) {
+        upstreamCount += 1;
+        return json(routeDict);
+      }
+      throw new Error(`Unexpected fetch: ${u}`);
+    };
+
+    const r1 = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary'));
+    assert.equal(r1.status, 200);
+    assert.equal((await r1.json()).revision, REV);
+    assert.equal(upstreamCount, 1);
+
+    routeDict = validCoreDict({ revision: REV_2, request_id: 'req-route-2' });
+    DB2.prepare('UPDATE shared_pool SET second_key = second_key - 5 WHERE id = 1').first();
+
+    const rCached = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary'));
+    assert.equal((await rCached.json()).revision, REV);
+    assert.equal(upstreamCount, 1);
+
+    const rNoCache = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary', {
+      headers: { 'cache-control': 'no-cache' },
+    }));
+    assert.equal(rNoCache.status, 200);
+    assert.equal((await rNoCache.json()).revision, REV_2);
+    assert.equal(upstreamCount, 2);
+
+    routeDict = validCoreDict({ revision: 'f'.repeat(64), request_id: 'req-route-3' });
+    DB2.prepare('UPDATE shared_pool SET second_key = second_key - 5 WHERE id = 1').first();
+    const rQueryRefresh = await getDictionaryRoute(new Request('http://127.0.0.1/api/dictionary?refresh=1'));
+    assert.equal(rQueryRefresh.status, 200);
+    assert.equal((await rQueryRefresh.json()).revision, 'f'.repeat(64));
+    assert.equal(upstreamCount, 3);
+  } finally {
+    globalThis.fetch = prevFetch;
+    DB2.close();
+    if (prevEnv === undefined) delete globalThis[NODE_ENVIRONMENT];
+    else globalThis[NODE_ENVIRONMENT] = prevEnv;
+    if (prevMode === undefined) delete process.env.WUWATERM_RUNTIME_MODE;
+    else process.env.WUWATERM_RUNTIME_MODE = prevMode;
   }
 });
