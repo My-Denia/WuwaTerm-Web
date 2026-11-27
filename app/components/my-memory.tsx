@@ -34,7 +34,8 @@ export type ApplySuggestionOutcome = {
     | 'unaligned_target'
     | 'multi_paragraph_suggestion'
     | 'target_gap_occupied'
-    | 'whitespace_target_alignment';
+    | 'whitespace_target_alignment'
+    | 'cleared_alignments_skip';
 };
 
 export type TmLiveBasis = {
@@ -147,16 +148,18 @@ export function MyMemory({
     ? t.segmentTargetCursorUnalignedHint
     : effectiveAlignmentStatus.status === 'whitespace_target_alignment'
       ? t.segmentWhitespaceAlignmentHint
-      : effectiveAlignmentStatus.status === 'target_extra_paragraphs'
-        ? fill(t.segmentUnalignedHint, {
-          sourceTotal: effectiveAlignmentStatus.sourceTotal,
-          targetTotal: effectiveAlignmentStatus.targetTotal,
-        })
-        : effectiveAlignmentStatus.status === 'alignment_ambiguous'
-          ? t.segmentAmbiguousHint
-          : effectiveAlignmentStatus.status === 'target_gap_occupied'
-            ? t.segmentGapOccupiedHint
-            : null;
+      : effectiveAlignmentStatus.status === 'cleared_alignments_skip'
+        ? t.segmentClearedSkipHint
+        : effectiveAlignmentStatus.status === 'target_extra_paragraphs'
+          ? fill(t.segmentUnalignedHint, {
+            sourceTotal: effectiveAlignmentStatus.sourceTotal,
+            targetTotal: effectiveAlignmentStatus.targetTotal,
+          })
+          : effectiveAlignmentStatus.status === 'alignment_ambiguous'
+            ? t.segmentAmbiguousHint
+            : effectiveAlignmentStatus.status === 'target_gap_occupied'
+              ? t.segmentGapOccupiedHint
+              : null;
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
@@ -282,6 +285,8 @@ export function MyMemory({
         failure(t.errors.targetGapOccupied);
       } else if (reason === 'whitespace_target_alignment') {
         failure(t.errors.whitespaceTargetAlignment);
+      } else if (reason === 'cleared_alignments_skip') {
+        failure(t.errors.clearedAlignmentsSkip);
       } else if (targetHasMoreSegments) {
         failure(fill(t.errors.segmentUnaligned, {
           sourceTotal: effectiveAlignmentStatus.sourceTotal,
@@ -331,23 +336,31 @@ export function MyMemory({
         <p className="field-hint my-terms-note">{t.memoryNote}</p>
         <p className="field-hint my-terms-note">{t.referenceNote}</p>
         {isMultiSegment && (
-          <div className="my-memory-segment-bar" data-testid="my-memory-segment-scope">
-            <span className="my-memory-segment-label">{fill(t.segmentScope, { i: segmentIndex + 1, n: segmentTotal })}</span>
+          <div
+            className="my-memory-segment-bar"
+            data-testid="my-memory-segment-scope"
+            data-target-unaligned={isTargetCursorUnaligned ? 'true' : 'false'}
+          >
+            <span className="my-memory-segment-label">
+              {isTargetCursorUnaligned
+                ? fill(t.segmentScopeUnaligned, { n: segmentTotal })
+                : fill(t.segmentScope, { i: segmentIndex + 1, n: segmentTotal })}
+            </span>
             {onSelectSegment && (
               <div className="my-memory-segment-nav">
                 <button
                   type="button"
                   className="text-button"
-                  disabled={segmentIndex <= 0}
-                  onClick={() => onSelectSegment(segmentIndex - 1)}
+                  disabled={!isTargetCursorUnaligned && segmentIndex <= 0}
+                  onClick={() => onSelectSegment(isTargetCursorUnaligned ? 0 : segmentIndex - 1)}
                 >
                   {t.segmentPrev}
                 </button>
                 <button
                   type="button"
                   className="text-button"
-                  disabled={segmentIndex >= segmentTotal - 1}
-                  onClick={() => onSelectSegment(segmentIndex + 1)}
+                  disabled={!isTargetCursorUnaligned && segmentIndex >= segmentTotal - 1}
+                  onClick={() => onSelectSegment(isTargetCursorUnaligned ? Math.min(segmentTotal - 1, 1) : segmentIndex + 1)}
                 >
                   {t.segmentNext}
                 </button>

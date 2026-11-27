@@ -423,4 +423,72 @@ test('target caret inside non-whitespace unaligned prose returns null instead of
     sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(leadingTarget), srcSegs, leadingAlign, 3),
     null,
   );
+
+  // Even when segment 1's aligned range includes trailing newlines (`Uno\n\n` ending at offset 5) right up to the
+  // start of `Dos draft` (offset 5), offset 5 and offset 14 (end of `Dos draft`) MUST hit the gap check before end-fallback!
+  const withTrailingNl = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(5), text: 'Uno\n\n' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: null },
+    { source: { start: scalarOffset(8), end: scalarOffset(10), text: '丙。' }, target: { start: scalarOffset(tresStart), end: scalarOffset(tresStart + 4), text: 'Tres' } },
+  ];
+  assert.equal(
+    sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(target), srcSegs, withTrailingNl, 5),
+    null,
+  );
+  assert.equal(
+    sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(target), srcSegs, withTrailingNl, 14),
+    null,
+  );
+  // Conversely, when segment 1 is `[0, 3)` (`Uno` only, followed by `\n\n` then `Dos draft` at 5..14),
+  // offset 3 stays outside `[5, 14]` and still resolves cleanly to segment 0 (`Uno`).
+  assert.equal(
+    sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(target), srcSegs, alignments, 3),
+    0,
+  );
+
+  // Same guarantee under CRLF separators (`Uno\r\n\r\nDos draft\r\n\r\nTres`, segment 1 ends at offset 7).
+  const crlfTarget = 'Uno\r\n\r\nDos draft\r\n\r\nTres';
+  const crlfTresStart = Array.from('Uno\r\n\r\nDos draft\r\n\r\n').length;
+  const crlfWithTrailingNl = [
+    { source: { start: scalarOffset(0), end: scalarOffset(2), text: '甲。' }, target: { start: scalarOffset(0), end: scalarOffset(7), text: 'Uno\r\n\r\n' } },
+    { source: { start: scalarOffset(4), end: scalarOffset(6), text: '乙。' }, target: null },
+    { source: { start: scalarOffset(8), end: scalarOffset(10), text: '丙。' }, target: { start: scalarOffset(crlfTresStart), end: scalarOffset(crlfTresStart + 4), text: 'Tres' } },
+  ];
+  assert.equal(
+    sourceSegmentIndexForTargetOffset(Array.from(source), Array.from(crlfTarget), srcSegs, crlfWithTrailingNl, 7),
+    null,
+  );
+});
+
+test('invariant A: cleared-alignment mode (alignments: []) never turns into null or synthesizes non-empty alignments', () => {
+  const source3 = '甲。\n\n乙。\n\n丙。';
+  const segs3 = segmentParagraphs(source3);
+
+  // Replace existing paragraph keeps []
+  const replaced = applySegmentSuggestionResult('Uno', segs3, 0, 'Uno TM', { source: source3, alignments: [] });
+  assert.equal(replaced.applied, true);
+  assert.equal(replaced.target, 'Uno TM');
+  assert.deepEqual(replaced.alignments, []);
+
+  // Sequential append keeps []
+  const appended = applySegmentSuggestionResult('Uno TM', segs3, 1, 'Dos TM', { source: source3, alignments: [] });
+  assert.equal(appended.applied, true);
+  assert.equal(appended.target, 'Uno TM\n\nDos TM');
+  assert.deepEqual(appended.alignments, []);
+
+  // Multi-paragraph refusal keeps []
+  const multiRefused = applySegmentSuggestionResult('Uno', segs3, 0, 'A\n\nB', { source: source3, alignments: [] });
+  assert.equal(multiRefused.applied, false);
+  assert.equal(multiRefused.reason, 'multi_paragraph_suggestion');
+  assert.deepEqual(multiRefused.alignments, []);
+
+  // Skip-fill while alignments === [] MUST refuse instead of synthesizing [Uno, null, Tres] alignments!
+  const activeSkip = resolveActiveSegment(source3, 'Uno', { kind: 'index', index: 2 }, []);
+  assert.equal(describeTmSegmentAlignment(source3, 'Uno', activeSkip, []).status, 'cleared_alignments_skip');
+
+  const skipRefused = applySegmentSuggestionResult('Uno', segs3, 2, 'Tres TM', { source: source3, alignments: [] });
+  assert.equal(skipRefused.applied, false);
+  assert.equal(skipRefused.reason, 'cleared_alignments_skip');
+  assert.equal(skipRefused.target, 'Uno');
+  assert.deepEqual(skipRefused.alignments, []);
 });

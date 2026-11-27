@@ -584,18 +584,27 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   // Manually type handwritten text into the unaligned middle gap in target, keeping segment 2 aligned as null.
   await page.locator('#review-target').fill('Uno\n\nDos manual draft\n\nTres (TM)');
   // Clicking directly inside handwritten `Dos manual draft` must NOT fall back to segment 1 (`Uno`);
-  // panel displays target-cursor-unaligned warning and disables Apply until user moves to a segment!
+  // segment label reports unmapped caret (NOT `当前第 1 / 3 段`), displays unaligned hint, and disables Apply & Confirm!
   const unalignedTargetCaret = 'Uno\n\nDos '.length;
   await page.locator('#review-target').evaluate((el, pos) => {
     el.focus();
     el.setSelectionRange(pos, pos);
     el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   }, unalignedTargetCaret);
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toHaveAttribute('data-target-unaligned', 'true');
+  await expect(panel(page).locator('.my-memory-segment-label')).toHaveText(
+    tmMsg.segmentScopeUnaligned.replace('{n}', '3'),
+  );
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentTargetCursorUnalignedHint);
+  await expect(panel(page).getByRole('button', { name: tmMsg.confirmSegmentButton, exact: true })).toBeDisabled();
   await expect(hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true })).toBeDisabled();
   await expect(page.locator('#review-target')).toHaveValue('Uno\n\nDos manual draft\n\nTres (TM)');
 
   await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-segment-scope')).toHaveAttribute('data-target-unaligned', 'false');
+  await expect(panel(page).locator('.my-memory-segment-label')).toHaveText(
+    tmMsg.segmentScope.replace('{i}', '2').replace('{n}', '3'),
+  );
   await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentGapOccupiedHint);
   await expect(hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true })).toBeEnabled();
   await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
@@ -653,8 +662,18 @@ test('gap-occupied handwritten draft blocks skip-fill, aligned extra paragraphs 
   await expect(hits(page).first()).toHaveAttribute('data-freshness', 'provenance_unknown');
 
   // Clearing/removing every alignment row leaves `draft.alignments` as empty `[]` (instead of null);
-  // applying TM suggestions must keep `alignments: []` intact so backend review-v2 keeps receiving `alignments: []`.
+  // 1) Skip-fill past empty segments must be refused without rewriting `[]` to auto-generated alignments;
+  // 2) Sequential replace/apply keeps `alignments: []` intact so backend review-v2 keeps receiving `alignments: []`.
   await page.getByRole('button', { name: m.review.alignmentClear, exact: true }).click();
+  await page.locator('#review-source').fill('首段原文。\n\n中段原文。\n\n末段原文。');
+  await page.locator('#review-target').fill('Uno');
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await panel(page).getByRole('button', { name: tmMsg.segmentNext, exact: true }).click();
+  await expect(panel(page).getByTestId('my-memory-alignment-hint')).toHaveText(tmMsg.segmentClearedSkipHint);
+  await hits(page).first().getByRole('button', { name: tmMsg.applyButton, exact: true }).click();
+  await expect(panel(page).locator('.my-terms-feedback')).toHaveText(tmMsg.errors.clearedAlignmentsSkip);
+  await expect(page.locator('#review-target')).toHaveValue('Uno');
+
   await page.locator('#review-source').fill('首段原文。');
   await page.locator('#review-target').fill('Draft with empty alignments');
   await expect(panel(page).getByRole('button', { name: tmMsg.confirmButton, exact: true })).toBeEnabled();

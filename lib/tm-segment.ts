@@ -49,7 +49,8 @@ export type TmApplySegmentResult = {
     | 'unaligned_target'
     | 'multi_paragraph_suggestion'
     | 'target_gap_occupied'
-    | 'whitespace_target_alignment';
+    | 'whitespace_target_alignment'
+    | 'cleared_alignments_skip';
 };
 
 export type TmSegmentAlignmentStatus = {
@@ -59,7 +60,8 @@ export type TmSegmentAlignmentStatus = {
     | 'alignment_ambiguous'
     | 'target_gap_occupied'
     | 'target_cursor_unaligned'
-    | 'whitespace_target_alignment';
+    | 'whitespace_target_alignment'
+    | 'cleared_alignments_skip';
   sourceTotal: number;
   targetTotal: number;
 };
@@ -167,7 +169,12 @@ function locateAlignmentForSourceSegment(
 
 /**
  * Maps a target scalar `offset` onto its explicitly aligned source segment index.
- * Returns `null` when `offset` sits inside an unaligned non-whitespace gap instead of falling back to an earlier span.
+ *
+ * Order of precedence:
+ * 1. Strict half-open span `[entry.target.start, entry.target.end)`.
+ * 2. Any uncovered gap's closed non-whitespace prose range `[gapNonWsStart, gapNonWsEnd]` -> returns `null`
+ *    (even when `offset === entry.target.end` touches trailing whitespace inside an earlier span!).
+ * 3. Exact trailing boundary `offset === entry.target.end` fallback, or nearest preceding span only when the enclosing gap is pure whitespace.
  */
 export function sourceSegmentIndexForTargetOffset(
   sourceChars: readonly string[],
@@ -178,38 +185,68 @@ export function sourceSegmentIndexForTargetOffset(
 ): number | null {
   const targetEntries = alignments
     .filter((a): a is Alignment & { target: Span } => a.target !== null)
-    .sort((a, b) => a.target.start - b.target.start);
+    .sort((a, b) => a.target.start - b.target.start || a.target.end - b.target.end);
   if (targetEntries.length === 0) return null;
+
+  const clamped = Math.max(0, Math.min(targetChars.length, Math.trunc(offset)));
   let matched: (Alignment & { target: Span }) | null = null;
-  // Half-open [start, end) hit test first so adjacent spans [0,1) and [1,2) resolve offset=1 to the second span.
+
+  // Step 1: strict half-open [start, end) hit test so adjacent spans [0,1) and [1,2) resolve offset=1 to the second span.
   for (const entry of targetEntries) {
-    if (offset >= entry.target.start && offset < entry.target.end) {
+    if (clamped >= entry.target.start && clamped < entry.target.end) {
       matched = entry;
       break;
     }
   }
-  // Exact trailing boundary (offset === entry.target.end) matches that span when no half-open interval contains offset.
+
+  // Compute uncovered intervals [gapStart, gapEnd] and their non-whitespace core bounds [nonWsStart, nonWsEnd].
+  const gapNonWsRanges: { gapStart: number; gapEnd: number; nonWsStart: number; nonWsEnd: number }[] = [];
+  let scanPos = 0;
+  for (const entry of targetEntries) {
+    if (entry.target.start > scanPos) {
+      const [nonWsStart, nonWsEnd] = core(targetChars, scanPos, entry.target.start);
+      gapNonWsRanges.push({ gapStart: scanPos, gapEnd: entry.target.start, nonWsStart, nonWsEnd });
+    }
+    if (entry.target.end > scanPos) {
+      scanPos = entry.target.end;
+    }
+  }
+  if (targetChars.length > scanPos) {
+    const [nonWsStart, nonWsEnd] = core(targetChars, scanPos, targetChars.length);
+    gapNonWsRanges.push({ gapStart: scanPos, gapEnd: targetChars.length, nonWsStart, nonWsEnd });
+  }
+
+  // Step 2: if caret sits inside any unaligned gap's non-whitespace prose [nonWsStart, nonWsEnd] (inclusive), return null
+  // before attempting any trailing `offset === entry.target.end` fallback.
+  if (!matched) {
+    for (const gap of gapNonWsRanges) {
+      if (gap.nonWsStart < gap.nonWsEnd && clamped >= gap.nonWsStart && clamped <= gap.nonWsEnd) {
+        return null;
+      }
+    }
+  }
+
+  // Step 3: exact trailing boundary fallback (`offset === entry.target.end`), then pure-whitespace gap fallback.
   if (!matched) {
     for (const entry of targetEntries) {
-      if (offset === entry.target.end) {
+      if (clamped === entry.target.end) {
         matched = entry;
       }
     }
   }
   if (!matched) {
-    let prev: (Alignment & { target: Span }) | null = null;
-    let next: (Alignment & { target: Span }) | null = null;
-    for (const entry of targetEntries) {
-      if (entry.target.end < offset) prev = entry;
-      else if (entry.target.start > offset && !next) next = entry;
+    for (const gap of gapNonWsRanges) {
+      if (clamped >= gap.gapStart && clamped <= gap.gapEnd && gap.nonWsStart < gap.nonWsEnd) {
+        return null;
+      }
     }
-    const gapStart = prev ? prev.target.end : 0;
-    const gapEnd = next ? next.target.start : targetChars.length;
-    if (gapStart <= gapEnd && targetChars.slice(gapStart, gapEnd).join('').trim().length > 0) {
-      return null;
+    let prev: (Alignment & { target: Span }) | null = null;
+    for (const entry of targetEntries) {
+      if (entry.target.end < clamped) prev = entry;
     }
     matched = prev ?? targetEntries[0]!;
   }
+
   const [mCoreStart, mCoreEnd] = core(sourceChars, matched.source.start, matched.source.end);
   const sIdx = sourceSegments.findIndex(seg => {
     const lookup = locateAlignmentForSourceSegment(sourceChars, seg, alignments);
@@ -666,7 +703,18 @@ export function applySegmentSuggestionResult(
     };
   }
 
+  const isClearedMode = rawAlignments !== null && rawAlignments.length === 0;
   const isSkipInsert = index > targetSegments.length;
+  if (isSkipInsert && isClearedMode) {
+    return {
+      target,
+      alignments: [],
+      splice: null,
+      invalidated: [],
+      applied: false,
+      reason: 'cleared_alignments_skip',
+    };
+  }
   if (isSkipInsert && (!source || total > MAX_AUTO_ALIGNMENTS)) {
     return {
       target,
@@ -793,6 +841,9 @@ export function describeTmSegmentAlignment(
     return { status: 'ok', sourceTotal, targetTotal };
   }
 
+  if (sourceTotal > 1 && alignments !== null && alignments.length === 0 && activeSegment.index > targetTotal) {
+    return { status: 'cleared_alignments_skip', sourceTotal, targetTotal };
+  }
   if (sourceTotal > 1 && targetTotal > sourceTotal) {
     return { status: 'target_extra_paragraphs', sourceTotal, targetTotal };
   }
