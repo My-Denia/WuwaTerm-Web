@@ -476,6 +476,12 @@ footer div { display:flex; gap:20px; }
 .inspector-stack { display:grid; gap:16px; align-content:start; }
 .inspector-stack .term-lookup,.inspector-stack .my-terms,.inspector-stack .my-memory { padding:0; border:0; border-radius:0; background:transparent; }
 .inspector-stack .my-terms { padding-top:14px; border-top:1px solid var(--line); }
+.workspace-inspector .semantic-body { grid-template-columns:minmax(0,1fr); gap:14px; margin-top:14px; }
+.workspace-inspector .semantic-filters label { margin-bottom:0; }
+.workspace-inspector .semantic-card > .finding-nav:first-child { margin-top:0; }
+@media(min-width:721px) {
+  .workspace-inspector .semantic-items { max-height:240px; padding:2px; }
+}
 
 .editor-toolbar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:10px; }
 .toolbar-toggle { min-height:34px; padding:4px 11px; font-size:11px; font-weight:600; color:var(--muted); background:var(--raised); border-color:var(--line); transition:color .15s ease, border-color .15s ease, background-color .15s ease; }
