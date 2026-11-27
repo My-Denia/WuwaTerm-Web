@@ -499,7 +499,7 @@ test('confirmTranslationMemoryEntry and mergeTranslationMemoryEntries enforce hu
   assert.equal(merged[0].note, '人工');
   assert.equal(isTmTimestamp(tmNow()), true);
 
-  // Merge exceeding MAX_TM_BYTES is rejected by serializeTranslationMemory.
+  // Merge exceeding MAX_TM_BYTES is rejected directly by mergeTranslationMemoryEntries.
   const mkLarge = (prefix, count) => Array.from({ length: count }, (_, i) => makeEntry({
     source_text: `${prefix}-${i}-` + 'x'.repeat(1800),
     target_text: `${prefix}-${i}-` + 'y'.repeat(1800),
@@ -508,8 +508,7 @@ test('confirmTranslationMemoryEntry and mergeTranslationMemoryEntries enforce hu
   const halfB = mkLarge('b', 1200);
   assert.ok(Buffer.byteLength(serializeTranslationMemory(makeFile(halfA)), 'utf8') < MAX_TM_BYTES);
   assert.ok(Buffer.byteLength(serializeTranslationMemory(makeFile(halfB)), 'utf8') < MAX_TM_BYTES);
-  const combined = mergeTranslationMemoryEntries(halfA, halfB);
-  assert.equal(codeOf(() => serializeTranslationMemory(makeFile(combined))), 'tm_too_large');
+  assert.equal(codeOf(() => mergeTranslationMemoryEntries(halfA, halfB)), 'tm_too_large');
 
   // Export failure copy is distinct from import failure copy in both languages.
   for (const lang of ['zh', 'en']) {

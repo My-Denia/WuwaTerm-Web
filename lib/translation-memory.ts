@@ -642,6 +642,12 @@ export function mergeTranslationMemoryEntries(existing: readonly TmEntry[], inco
     byKey.set(key, merged.length);
     merged.push({ ...item });
   }
+  serializeTranslationMemory({
+    format: TM_FORMAT,
+    schema_version: TM_SCHEMA_VERSION,
+    exported_at: tmNow(),
+    entries: merged,
+  });
   return merged;
 }
 
