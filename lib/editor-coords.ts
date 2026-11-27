@@ -102,6 +102,8 @@ export function applyDomChangesToRaw(rawText: string, changes: readonly DomChang
 export type CompositionTrackerCallbacks = {
   /** Schedule a cross-frame fallback (e.g. requestAnimationFrame -> setTimeout 50ms) and return a cancel function. */
   scheduleFallback(onFire: () => void): () => void;
+  /** Flush any queued CM6 DOMObserver mutations synchronously before closing a pending composition on interrupt. */
+  flushPendingObserver?(): void;
   /** Flush a closing `{ composing: false }` edit when composition ends without a trailing docChanged. */
   onFinalize(): void;
 };
@@ -113,8 +115,10 @@ export type CompositionTracker = {
   begin(): void;
   /** Called on capture-phase non-composition beforeinput / keydown / blur. */
   onNonComposeEvent(): void;
-  /** Called on bubble-phase compositionend (after CM6's own listener). */
+  /** Called on bubble-phase contentDOM compositionend (after CM6's own listener). */
   onCompositionEnd(): void;
+  /** Close immediately (e.g. EditContext compositionend where textupdate already committed synchronously). */
+  finalizeNow(): void;
   /**
    * Called inside CM6 updateListener for every local docChanged.
    * Returns the `composing` flag to pass to `onEdit(nextRaw, { composing })`.
@@ -126,10 +130,11 @@ export type CompositionTracker = {
 
 /**
  * Coordinates CodeMirror 6 IME composition boundaries across desktop microtask
- * flushes and Android Chrome's next-frame `DOMObserver.flushSoon()`.
+ * flushes, Android Chrome's next-frame `DOMObserver.flushSoon()`, and EditContext.
  * Keeps the composition transaction open until the final deferred `docChanged`
- * lands, another non-composition user event arrives, or the cross-frame fallback
- * fires for a cancelled/unchanged composition.
+ * lands, flushes queued observer mutations on interrupting non-compose events
+ * (blur/keydown/beforeinput), or closes via the cross-frame fallback for a
+ * cancelled/unchanged composition.
  */
 export function createCompositionTracker(callbacks: CompositionTrackerCallbacks): CompositionTracker {
   let composing = false;
@@ -151,17 +156,23 @@ export function createCompositionTracker(callbacks: CompositionTrackerCallbacks)
     callbacks.onFinalize();
   };
 
+  const flushAndFinalizeIfPending = () => {
+    if (!pendingEnd) return;
+    callbacks.flushPendingObserver?.();
+    if (pendingEnd) finalize();
+  };
+
   return {
     isComposing: () => composing,
     isPendingEnd: () => pendingEnd,
     begin() {
-      if (pendingEnd) finalize();
+      flushAndFinalizeIfPending();
       clearFallback();
       composing = true;
       pendingEnd = false;
     },
     onNonComposeEvent() {
-      if (pendingEnd) finalize();
+      flushAndFinalizeIfPending();
     },
     onCompositionEnd() {
       if (!composing) return;
@@ -171,6 +182,10 @@ export function createCompositionTracker(callbacks: CompositionTrackerCallbacks)
         cancelFallback = null;
         if (pendingEnd) finalize();
       });
+    },
+    finalizeNow() {
+      if (!composing && !pendingEnd) return;
+      finalize();
     },
     onLocalDocChange(viewComposing: boolean, isComposeEvent: boolean): boolean {
       if (pendingEnd && !viewComposing) {

@@ -265,6 +265,7 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
       ...defaultKeymap,
     ]);
 
+    let editContext: EventTarget | null = null;
     const composition = createCompositionTracker({
       scheduleFallback(onFire) {
         let timerId: ReturnType<typeof setTimeout> | null = null;
@@ -285,6 +286,10 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
             timerId = null;
           }
         };
+      },
+      flushPendingObserver() {
+        const activeView = viewRef.current as (EditorView & { observer?: { flush?: () => void } }) | null;
+        activeView?.observer?.flush?.();
       },
       onFinalize() {
         composingActiveRef.current = false;
@@ -321,6 +326,13 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
           const isComposeEvent = update.transactions.some(tr => tr.isUserEvent('input.type.compose'));
 
           if (update.docChanged && !isExternal) {
+            // In Chromium EditContext mode, CM6 can close a missed compositionend
+            // internally (`view.composing === false`) before a normal non-compose
+            // `textupdate` (e.g. typing `!`). Close the prior IME step first so `!`
+            // becomes its own separate undo entry.
+            if (editContext && composition.isComposing() && !composition.isPendingEnd() && !update.view.composing && !isComposeEvent) {
+              composition.finalizeNow();
+            }
             const edits: DomChange[] = [];
             update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
               edits.push({ fromA, toA, inserted: inserted.toString() });
@@ -381,6 +393,14 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     const onCompositionEndBubble = () => {
       composition.onCompositionEnd();
     };
+    // With Chromium EditContext, compositionstart/compositionend fire on
+    // `view.contentDOM.editContext` (not `contentDOM`), and `textupdate` commits
+    // synchronously before `compositionend`, so close immediately so subsequent
+    // non-IME input (e.g. `!`) starts its own undo step.
+    const onEditContextCompositionEnd = () => {
+      composition.finalizeNow();
+      composingActiveRef.current = composition.isComposing();
+    };
     const onFocus = () => {
       const snap = captureViewSnapshot(view);
       if (snap) onStateSnapshotRef.current?.(snap);
@@ -408,6 +428,11 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
     view.contentDOM.addEventListener('focus', onFocus);
     view.contentDOM.addEventListener('blur', onBlur);
     view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+    editContext = (view.contentDOM as HTMLElement & { editContext?: EventTarget | null }).editContext ?? null;
+    if (editContext) {
+      editContext.addEventListener('compositionstart', onCompositionStartCapture);
+      editContext.addEventListener('compositionend', onEditContextCompositionEnd);
+    }
 
     const initialDecos = buildDecorations(latestRaw.current, view.state.doc.length, latestHighlights.current);
     if (initialDecos !== Decoration.none) {
@@ -459,6 +484,11 @@ export const Cm6Editor = forwardRef<Cm6EditorHandle, Cm6EditorProps>(function Cm
       view.contentDOM.removeEventListener('focus', onFocus);
       view.contentDOM.removeEventListener('blur', onBlur);
       view.scrollDOM.removeEventListener('scroll', onScroll);
+      if (editContext) {
+        editContext.removeEventListener('compositionstart', onCompositionStartCapture);
+        editContext.removeEventListener('compositionend', onEditContextCompositionEnd);
+        editContext = null;
+      }
       delete (view.contentDOM as unknown as { __cm6View?: unknown }).__cm6View;
       if (suppressRaf.current !== null) {
         cancelAnimationFrame(suppressRaf.current);

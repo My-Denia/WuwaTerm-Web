@@ -224,15 +224,70 @@ test('Android next-frame compositionend commit (ni -> 你), cancelled compositio
   assert.equal(tracker.isPendingEnd(), false);
   assert.equal(tracker.isComposing(), false);
 
-  // 4) Next non-compose event (keydown / blur) immediately closes a pending end before subsequent edits.
+  // 4) Interleaved `compositionend -> blur` BEFORE Android's next frame:
+  //    blur flushes CM6's queued DOMObserver mutation (`Alpha你`) into the open
+  //    composition transaction before closing, so one undo restores `Alpha`.
+  doc.editText('source', 'Alpha');
+  currentText = 'Alpha';
+  let queuedObserverCommit = null;
+  const blurTracker = createCompositionTracker({
+    scheduleFallback(onFire) {
+      scheduledFallback = onFire;
+      return () => {
+        if (scheduledFallback === onFire) scheduledFallback = null;
+      };
+    },
+    flushPendingObserver() {
+      if (queuedObserverCommit) {
+        const commit = queuedObserverCommit;
+        queuedObserverCommit = null;
+        commit();
+      }
+    },
+    onFinalize() {
+      doc.editText('source', currentText, { composing: false });
+    },
+  });
+  const emitBlurDocChange = (nextText, viewComposing, isComposeEvent = false) => {
+    currentText = nextText;
+    const composing = blurTracker.onLocalDocChange(viewComposing, isComposeEvent);
+    doc.editText('source', nextText, { composing });
+  };
+  blurTracker.begin();
+  emitBlurDocChange('Alphan', true, true);
+  emitBlurDocChange('Alphani', true, true);
+  blurTracker.onCompositionEnd();
+  // Queued Android next-frame commit waiting in CM6's DOMObserver.
+  queuedObserverCommit = () => emitBlurDocChange('Alpha你', false, false);
+  // Blur fires before the next animation frame -> must flush observer first, merging 'Alpha你'.
+  blurTracker.onNonComposeEvent();
+  assert.equal(queuedObserverCommit, null);
+  assert.equal(blurTracker.isPendingEnd(), false);
+  assert.equal(blurTracker.isComposing(), false);
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
+  blurTracker.dispose();
+
+  // 5) Chromium EditContext: `compositionend` on editContext commits `Alpha你`, then
+  //    typing `!` must be its own undo step (1st undo -> `Alpha你`, 2nd undo -> `Alpha`).
+  doc.editText('source', 'Alpha');
+  currentText = 'Alpha';
   tracker.begin();
-  emitDocChange('Line1\nLine2b', true, true);
-  tracker.onCompositionEnd();
-  assert.equal(tracker.isPendingEnd(), true);
-  tracker.onNonComposeEvent();
-  assert.equal(tracker.isPendingEnd(), false);
+  emitDocChange('Alphan', true, true);
+  emitDocChange('Alphani', true, true);
+  emitDocChange('Alpha你', true, true);
+  // EditContext fires `compositionend` after synchronous `textupdate` -> finalizeNow().
+  tracker.finalizeNow();
   assert.equal(tracker.isComposing(), false);
-  assert.equal(scheduledFallback, null);
+  assert.equal(tracker.isPendingEnd(), false);
+  // Subsequent plain input `!` arrives via EditContext `textupdate` (view.composing=false).
+  emitDocChange('Alpha你!', false, false);
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你!');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha你');
+  doc.undo();
+  assert.equal(doc.getSnapshot().draft.source, 'Alpha');
 
   tracker.dispose();
   doc.dispose();
