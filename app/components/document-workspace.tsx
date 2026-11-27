@@ -95,7 +95,7 @@ function unloadUrl(anchor: HTMLAnchorElement): string | null {
 export function DocumentWorkspace() {
   const { lang } = useUiLanguage();
   const runtime = useRuntimeStore();
-  const { pool, meta, dictionary } = useRuntime();
+  const { pool, meta, dictionary, capabilities: runtimeCapabilities } = useRuntime();
   const selfHosted = isSelfHosted();
   const [tmEntries, setTmEntries] = useState<TmEntry[]>([]);
   const [doc] = useState(() => createWorkbenchController({
@@ -171,6 +171,11 @@ export function DocumentWorkspace() {
   useEffect(() => {
     doc.setLang(lang);
   }, [doc, lang]);
+  useEffect(() => {
+    if (runtimeCapabilities !== null) {
+      doc.setCapabilities(runtimeCapabilities);
+    }
+  }, [doc, runtimeCapabilities]);
 
   const latest = reports.at(-1) ?? null;
   const previous = reports.at(-2) ?? null;

@@ -332,13 +332,71 @@ test('/api/tm route returns 404 memory_only in public mode and persists confirme
     assert.equal(conflictBody.entries.length, 2);
     assert.equal(conflictBody.storageVersion, getBeforeConflict.storageVersion);
 
-    // Explicit forceReplace: true overwrites intentionally and bumps storageVersion.
+    // Item #1: Even with forceReplace: true, a stale expectedVersion (Tab A vs Tab B race) or missing
+    // expectedVersion on a non-empty store MUST return 409 Conflict and preserve Tab B's entry!
+    const tabBConfirm = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        candidate: {
+          sourceText: '标签页B新增段落。',
+          targetText: 'Tab B added paragraph.',
+          direction: 'en',
+          prevSource: null,
+          nextSource: null,
+          origin: 'human_confirmed',
+          termsDbRevision: rev,
+          gameVersion: '3.7.0',
+        },
+      }),
+    }));
+    assert.equal(tabBConfirm.status, 200);
+    const afterTabB = await tabBConfirm.json();
+    assert.equal(afterTabB.entries.length, 3);
+
+    const staleForceReplace = await postTm(new Request('http://127.0.0.1/api/tm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'replace',
+        forceReplace: true,
+        expectedVersion: getBeforeConflict.storageVersion,
+        file: {
+          format: 'wuwaterm-tm-v1',
+          schema_version: 1,
+          exported_at: '2026-11-27T00:00:00Z',
+          entries: [{
+            direction: 'en',
+            source_text: '单条覆盖',
+            target_text: 'Single overwrite',
+            prev_source_hash: null,
+            next_source_hash: null,
+            origin: 'imported_confirmed',
+            terms_db_revision: null,
+            game_version: null,
+            note: '',
+            use_count: 1,
+            created_at: '2026-11-27T00:00:00Z',
+            updated_at: '2026-11-27T00:00:00Z',
+          }],
+        },
+      }),
+    }));
+    assert.equal(staleForceReplace.status, 409);
+    const staleForceBody = await staleForceReplace.json();
+    assert.equal(staleForceBody.code, 'tm_storage_conflict');
+    assert.equal(staleForceBody.entries.length, 3, 'Tab B entry must be preserved on stale forceReplace');
+    assert.equal(staleForceBody.storageVersion, afterTabB.storageVersion);
+
+    // Explicit forceReplace: true with matching latest storageVersion succeeds and bumps storageVersion.
     const forcedReplace = await postTm(new Request('http://127.0.0.1/api/tm', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         action: 'replace',
         forceReplace: true,
+        expectedVersion: staleForceBody.storageVersion,
         file: {
           format: 'wuwaterm-tm-v1',
           schema_version: 1,
@@ -364,7 +422,7 @@ test('/api/tm route returns 404 memory_only in public mode and persists confirme
     const forcedBody = await forcedReplace.json();
     assert.equal(forcedBody.entries.length, 1);
     assert.equal(forcedBody.entries[0].source_text, '单条覆盖');
-    assert.notEqual(forcedBody.storageVersion, getBeforeConflict.storageVersion);
+    assert.notEqual(forcedBody.storageVersion, staleForceBody.storageVersion);
 
     runtime.TM_DB.close();
     runtime.DB.close();

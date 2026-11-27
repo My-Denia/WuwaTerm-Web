@@ -40,7 +40,9 @@ function explicitAlignmentUnits(draft: Draft): {
   source: string;
   target: string;
   sourceStart: ScalarOffset;
+  sourceEnd: ScalarOffset;
   targetStart: ScalarOffset;
+  targetEnd: ScalarOffset;
   checkable: boolean;
 }[] | null {
   const alignments = draft.alignments;
@@ -52,10 +54,12 @@ function explicitAlignmentUnits(draft: Draft): {
     const [sCs, sCe] = core(sc, entry.source.start, entry.source.end);
     const sourceText = sc.slice(sCs, sCe).join('');
     let tCs = 0;
+    let tCe = 0;
     let targetText = '';
     if (entry.target !== null) {
       const [cs, ce] = core(tc, entry.target.start, entry.target.end);
       tCs = cs;
+      tCe = ce;
       targetText = tc.slice(cs, ce).join('');
     }
     return {
@@ -64,7 +68,9 @@ function explicitAlignmentUnits(draft: Draft): {
       source: sourceText,
       target: targetText,
       sourceStart: scalarOffset(sCs),
+      sourceEnd: scalarOffset(sCe),
       targetStart: scalarOffset(tCs),
+      targetEnd: scalarOffset(tCe),
       checkable: !!sourceText.trim(),
     };
   });
@@ -100,7 +106,9 @@ export type StructureView = {
   index: number;
   checkable: boolean;
   sourceStart: ScalarOffset;
+  sourceEnd: ScalarOffset;
   targetStart: ScalarOffset;
+  targetEnd: ScalarOffset;
   result: (Omit<StructureResult, 'findings'> & { findings: (StructureFinding & { source_span: Span | null; target_span: Span | null })[] }) | null;
 };
 
@@ -118,7 +126,9 @@ export function structureViews(draft: Draft, structure: StructureState): Structu
         index: unit.index,
         checkable: unit.checkable,
         sourceStart: unit.sourceStart,
+        sourceEnd: unit.sourceEnd,
         targetStart: unit.targetStart,
+        targetEnd: unit.targetEnd,
         result: stored && unit.checkable ? {
           ...stored,
           findings: stored.findings.map(f => ({
@@ -137,7 +147,9 @@ export function structureViews(draft: Draft, structure: StructureState): Structu
       index,
       checkable,
       sourceStart: item.range.source_start,
+      sourceEnd: item.range.source_end,
       targetStart: item.range.target_start,
+      targetEnd: item.range.target_end,
       result: stored && checkable ? {
         ...stored,
         findings: stored.findings.map(f => ({ ...f, source_span: shift(f.source_span, item.range.source_start), target_span: shift(f.target_span, item.range.target_start) })),
@@ -220,11 +232,22 @@ export function layerTwoRows(semantic: SemanticState, views: readonly PairView[]
     const segment = view ? view.pair.index : null;
     const position = p.live.source_span?.start ?? p.live.target_span?.start ?? resultOf(p)?.region.source.start ?? 0;
     const issueCheck = { category: p.issue.category, source_span: p.live.source_span, target_span: p.live.target_span };
-    const covered = !isHandled(info.status) && segment !== null && (
-      layer1.length === views.length
-        ? coveredByStructure(issueCheck, layer1[segment])
-        : layer1.some(v => coveredByStructure(issueCheck, v))
-    );
+    const matchingLayer1 = layer1.length === views.length
+      ? (segment !== null && layer1[segment] ? [layer1[segment]!] : [])
+      : layer1.filter(v => {
+          if (p.live.source_span) {
+            return overlaps(p.live.source_span, { start: v.sourceStart, end: v.sourceEnd });
+          }
+          if (p.live.target_span) {
+            return v.targetEnd > v.targetStart && overlaps(p.live.target_span, { start: v.targetStart, end: v.targetEnd });
+          }
+          return view !== null && overlaps(
+            { start: view.pair.source.core_start, end: view.pair.source.core_end },
+            { start: v.sourceStart, end: v.sourceEnd },
+          );
+        });
+    const covered = !isHandled(info.status) && segment !== null
+      && matchingLayer1.some(v => coveredByStructure(issueCheck, v));
     return { placed: p, ...info, segment, position, imported: !!resultOf(p)?.imported, covered };
   }).sort((a, b) => a.position - b.position || a.placed.id.localeCompare(b.placed.id));
 }

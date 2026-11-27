@@ -216,7 +216,10 @@ export async function POST(request: Request): Promise<Response> {
       const forceReplace = body.forceReplace === true;
       const expectedVersion = typeof body.expectedVersion === 'string' ? body.expectedVersion : null;
       const outcome = resolved.store.runAtomic<{ conflict: boolean; entries: TmEntry[] }>((current, currentVersion) => {
-        if (!forceReplace && (current.length > 0 || (expectedVersion !== null && expectedVersion !== currentVersion))) {
+        const versionMissingOnNonEmpty = expectedVersion === null && current.length > 0;
+        const versionMismatch = expectedVersion !== null && expectedVersion !== currentVersion;
+        const unconfirmedOverwrite = !forceReplace && current.length > 0;
+        if (versionMissingOnNonEmpty || versionMismatch || unconfirmedOverwrite) {
           return { write: false, result: { conflict: true, entries: current } };
         }
         return { write: true, entries: validated, result: { conflict: false, entries: validated } };

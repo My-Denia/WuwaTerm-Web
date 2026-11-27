@@ -214,6 +214,15 @@ type TranslateRunPlan = {
   tailStart: number;
   initialBefore: { source: string; target: string } | null;
   trackTmModelCalls?: boolean;
+  /**
+   * Deferred commit for `sourceDirtyForTranslation` incremental updates: keeps the user's
+   * existing target untouched in the editor until the first untranslated segment succeeds.
+   */
+  staged?: {
+    draft: Draft;
+    structure: StructureState;
+    tmReceipt: TmRunReceipt;
+  };
 };
 
 const defaultClock: WorkbenchClock = {
@@ -1991,7 +2000,10 @@ export class WorkbenchController {
         return;
       }
       if (sourceDirtyForTranslation && !!target.trim()) {
-        const handled = await this.startIncrementalTmTranslateRun(draft, tmEntries, true, { requireReuse: true });
+        const handled = await this.startIncrementalTmTranslateRun(draft, tmEntries, true, {
+          requireReuse: true,
+          stageUntilFirstSuccess: true,
+        });
         if (handled) return;
       }
     }
@@ -2561,7 +2573,11 @@ export class WorkbenchController {
           : null;
       if (contextOn) contextPayload = { context: before ? { before } : {} };
     } else {
-      const pairView = this.viewsFor().items.find(
+      const pairDraft = plan.staged ? plan.staged.draft : d;
+      const pairViews = plan.staged
+        ? (semanticSegmentViews(pairDraft, { results: this.state.semantic.results, long: this.state.semantic.long }, this.state.basis, this.reviewFeatures()) as { items: PairView[] }).items
+        : this.viewsFor().items;
+      const pairView = pairViews.find(
         v => v.pair.status === 'untranslated'
           && v.pair.source.core_start === step.sourceCoreStart
           && v.pair.source.core_end === step.sourceCoreEnd,
@@ -2573,10 +2589,10 @@ export class WorkbenchController {
       }
       coreText = pairView.sCore;
       if (contextOn) {
-        const list = inputsOf(d).items.map(entry => entry.pair);
-        const before = contextBefore({ pairs: list, segmentIndex: pairView.pair.index, source: d.source, target: d.target });
+        const list = inputsOf(pairDraft).items.map(entry => entry.pair);
+        const before = contextBefore({ pairs: list, segmentIndex: pairView.pair.index, source: pairDraft.source, target: pairDraft.target });
         const precedents = this.state.usePrecedents
-          ? selectPrecedents({ items: this.precedentItems(d, this.state.semantic), source: d.source, pairs: list, segmentIndex: pairView.pair.index })
+          ? selectPrecedents({ items: this.precedentItems(pairDraft, this.state.semantic), source: pairDraft.source, pairs: list, segmentIndex: pairView.pair.index })
           : [];
         contextPayload = { context: { ...(before ? { before } : {}), ...(precedents.length ? { precedents } : {}) } };
       }
@@ -2591,25 +2607,11 @@ export class WorkbenchController {
       const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
       if (!live()) return;
       this.onPoolRefresh();
-      const failureReason = typeof body?.reason === 'string' ? body.reason : '';
-      const localGateRejection = !response.ok && [
-        'shared_pool_busy',
-        'translation_pool_exhausted',
-        'shared_pool_unavailable',
-        'translation_disabled',
-        'site_not_configured',
-        'site_invalid_request',
-        'body_too_large',
-      ].includes(failureReason);
-      const countModelCall = plan.trackTmModelCalls && !localGateRejection;
       if (!response.ok || typeof body?.text !== 'string') {
-        if (countModelCall && this.state.tmReceipt) {
-          this.setState({
-            tmReceipt: {
-              ...this.state.tmReceipt,
-              modelCalls: this.state.tmReceipt.modelCalls + 1,
-            },
-          });
+        if (plan.staged) {
+          // Keep the user's original editor draft intact when the first staged update fails;
+          // still expose the accurate receipt (0 model calls, 0 retranslated, N pending).
+          this.setState({ tmReceipt: plan.staged.tmReceipt });
         }
         this.failRun({
           type: 'failed',
@@ -2619,14 +2621,17 @@ export class WorkbenchController {
         });
         return;
       }
+      const countModelCall = plan.trackTmModelCalls && body.kind === 'llm';
       const latest = this.state.draft;
       if (latest.source !== plan.source || latest.direction !== plan.direction || latest.target !== plan.expectedTarget) {
         this.failRun({ type: 'failed', key: item.key, code: 'translateTargetChanged', classification: { action: 'stop' }, now: this.clock.now() });
         this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
         return;
       }
+      const staged = plan.staged;
+      const workingDraft = staged ? staged.draft : latest;
       let nextTarget = '';
-      let nextAlignments: Draft['alignments'] = latest.alignments === null ? null : [];
+      let nextAlignments: Draft['alignments'] = workingDraft.alignments === null ? null : [];
       let fillRemap: AlignmentRemap | null = null;
       let splices: DraftEditSplices | undefined;
       if (step.kind === 'blank') {
@@ -2641,7 +2646,10 @@ export class WorkbenchController {
         nextTarget = plan.base + (joined ? plan.appendPrefix + joined : '');
         nextAlignments = null;
       } else {
-        const currentView = this.viewsFor().items.find(
+        const currentViews = staged
+          ? (semanticSegmentViews(workingDraft, { results: this.state.semantic.results, long: this.state.semantic.long }, this.state.basis, this.reviewFeatures()) as { items: PairView[] }).items
+          : this.viewsFor().items;
+        const currentView = currentViews.find(
           v => v.pair.status === 'untranslated'
             && v.pair.source.core_start === step.sourceCoreStart
             && v.pair.source.core_end === step.sourceCoreEnd,
@@ -2651,7 +2659,7 @@ export class WorkbenchController {
           this.commit({ semantic: x => x, notice: 'sem:translateTargetChanged', remember: false });
           return;
         }
-        const tc = chars(latest.target);
+        const tc = chars(workingDraft.target);
         const region = currentView.pair.target;
         const head = slice(tc, 0, region.start);
         const ws = slice(tc, region.start, region.end);
@@ -2664,8 +2672,8 @@ export class WorkbenchController {
         const coreEnd = coreStart + chars(body.text).length;
         const delta = chars(lead + body.text + trail).length;
         fillRemap = remapForTargetFill(
-          latest.alignments,
-          latest.source,
+          workingDraft.alignments,
+          workingDraft.source,
           nextTarget,
           currentView.pair.source.start,
           currentView.pair.source.end,
@@ -2675,38 +2683,52 @@ export class WorkbenchController {
           delta,
         );
         nextAlignments = fillRemap.alignments;
-        splices = {
-          target: {
-            start: scalarOffset(insertAt),
-            oldEnd: scalarOffset(insertAt),
-            newEnd: scalarOffset(insertAt + delta),
-          },
-        };
+        if (!staged) {
+          splices = {
+            target: {
+              start: scalarOffset(insertAt),
+              oldEnd: scalarOffset(insertAt),
+              newEnd: scalarOffset(insertAt + delta),
+            },
+          };
+        }
         plan.pieces[item.index] = body.text;
       }
+      if (staged) plan.staged = undefined;
       plan.expectedTarget = nextTarget;
       const done = plan.pieces.filter(p => p !== undefined).length === plan.steps.length;
-      const lostAlignments = fillRemap ? alignmentNotice(latest.alignments, fillRemap) : null;
+      const lostAlignments = fillRemap ? alignmentNotice(workingDraft.alignments, fillRemap) : null;
+      const activeReceipt = staged ? staged.tmReceipt : this.state.tmReceipt;
       this.commit({
-        draft: { ...latest, target: nextTarget, alignments: nextAlignments },
+        draft: { ...workingDraft, target: nextTarget, alignments: nextAlignments },
         ...(splices ? { splices } : {}),
         ...(fillRemap ? { invalidated: fillRemap.invalidated } : {}),
-        remember: false,
+        remember: Boolean(staged),
         notice: lostAlignments ?? (done ? 'sem:translateRunDone' : null),
-        ...(plan.trackTmModelCalls && this.state.tmReceipt ? {
-          extraPatch: () => ({
-            tmReceipt: this.state.tmReceipt ? {
-              ...this.state.tmReceipt,
-              modelCalls: this.state.tmReceipt.modelCalls + (countModelCall ? 1 : 0),
-              retranslated: this.state.tmReceipt.retranslated + 1,
-              pendingRetranslate: Math.max(0, this.state.tmReceipt.pendingRetranslate - 1),
-            } : null,
-          }),
+        ...((plan.trackTmModelCalls && activeReceipt) || staged ? {
+          extraPatch: () => {
+            const baseReceipt = staged ? staged.tmReceipt : this.state.tmReceipt;
+            const nextReceipt = plan.trackTmModelCalls && baseReceipt ? {
+              ...baseReceipt,
+              modelCalls: baseReceipt.modelCalls + (countModelCall ? 1 : 0),
+              retranslated: done
+                ? Math.max(0, baseReceipt.baselineRequests - baseReceipt.reused)
+                : baseReceipt.retranslated + 1,
+              pendingRetranslate: done
+                ? 0
+                : Math.max(0, baseReceipt.pendingRetranslate - 1),
+            } : this.state.tmReceipt;
+            return {
+              ...(staged ? { structure: staged.structure } : {}),
+              tmReceipt: nextReceipt,
+            };
+          },
         } : {}),
       });
       this.dispatchRun({ type: 'done', key: item.key });
     } catch {
       if (live() && !signal.aborted) {
+        if (plan.staged) this.setState({ tmReceipt: plan.staged.tmReceipt });
         this.failRun({ type: 'failed', key: item.key, code: 'requestFailed', classification: { action: 'stop' }, now: this.clock.now() });
       }
     }
@@ -2762,7 +2784,7 @@ export class WorkbenchController {
     startDraft: Draft,
     tmEntries: readonly TmEntry[],
     isBlankMode: boolean,
-    options: { requireReuse?: boolean } = {},
+    options: { requireReuse?: boolean; stageUntilFirstSuccess?: boolean } = {},
   ): Promise<boolean> {
     this.tmPrepareAbort?.abort();
     const abort = new AbortController();
@@ -3007,19 +3029,39 @@ export class WorkbenchController {
       let structureError = this.state.structure.error;
 
       if (appliedReusedUnits.length > 0) {
+        // Sync capabilities if previous initial fetch failed (e.g. 503) and RuntimeStore has now recovered.
+        if (
+          this.fetchCapabilities
+          && (this.state.capabilities === null || !this.state.capabilities.includes(CAPABILITY_STRUCTURE_CHECK))
+        ) {
+          const refreshed = await this.fetchCapabilities(abort.signal).catch(() => null);
+          if (!live()) return true;
+          if (Array.isArray(refreshed)) {
+            this.setState({ capabilities: refreshed });
+          }
+        }
         const structureOn = !!this.state.capabilities?.includes(CAPABILITY_STRUCTURE_CHECK);
         if (!structureOn) {
           structureCheckStatus = 'unavailable';
           for (const unit of appliedReusedUnits) demotedSet.add(unit.segmentIndex);
         } else {
+          const trimCore = (value: string) => {
+            const list = chars(value);
+            const [cs, ce] = core(list, 0, list.length);
+            return slice(list, cs, ce);
+          };
           const checkItems: { id: string; key: string; source: string; target: string; segmentIndex?: number }[] = [];
           for (const unit of appliedReusedUnits) {
-            const key = `${sha256Hex(unit.sourceText)}:${sha256Hex(unit.targetText)}`;
+            // Normalize source/target to the exact scalar core used by structureItems/structureViews
+            // so whitespace-padded TM entries always match their stored Layer 1 result keys.
+            const sourceCore = trimCore(unit.sourceText);
+            const targetCore = trimCore(unit.targetText);
+            const key = `${sha256Hex(sourceCore)}:${sha256Hex(targetCore)}`;
             checkItems.push({
               id: `tm-${unit.segmentIndex}`,
               key,
-              source: unit.sourceText,
-              target: unit.targetText,
+              source: sourceCore,
+              target: targetCore,
               segmentIndex: unit.segmentIndex,
             });
           }
@@ -3150,6 +3192,15 @@ export class WorkbenchController {
       }
 
       built.plan.trackTmModelCalls = true;
+      if (options.stageUntilFirstSuccess && updatedDraft !== startDraft) {
+        // Keep the existing translation visible in the editor until the first untranslated segment
+        // succeeds, so a pool rejection or upstream error never wipes the user's prior translation.
+        built.plan.staged = { draft: updatedDraft, structure: nextStructure, tmReceipt };
+        built.plan.expectedTarget = startDraft.target;
+        this.translateRun = built.plan;
+        this.startBatch('translate', built.items);
+        return true;
+      }
       this.translateRun = built.plan;
       if (built.plan.kind === 'blank') {
         this.commit({
@@ -3199,7 +3250,7 @@ export class WorkbenchController {
 
     const abort = new AbortController();
     this.pairAbort = abort;
-    this.setState({ pairTranslating: view.pair.index });
+    this.setState({ pairTranslating: view.pair.index, tmReceipt: null });
     try {
       const { response, value } = await this.post('/api/translations', fitted.body, { signal: abort.signal, allowInvalidJson: true });
       const body = value && typeof value === 'object' ? value as Record<string, unknown> : null;
