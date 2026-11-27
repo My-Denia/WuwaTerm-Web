@@ -723,6 +723,19 @@ function buildMatch(
   };
 }
 
+/** Re-evaluates a single cached TM hit's staleness/provenance against current service basis. */
+export function recheckTmMatchFreshness(
+  match: TmMatch,
+  options: { currentTermsDbRevision?: string | null; currentGameVersion?: string | null } = {},
+): TmMatch {
+  return buildMatch(
+    match.entry,
+    match.matchKind,
+    options.currentTermsDbRevision ?? null,
+    options.currentGameVersion ?? null,
+  );
+}
+
 /**
  * Matches confirmed TM entries against `source` in `direction`, ranked by:
  * `context_exact` > `exact` > `numeric_variant` > `normalized_exact`,

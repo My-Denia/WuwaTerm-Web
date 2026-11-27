@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { highlightSegments, scalarToUtf16 } from '../../lib/review-report.js';
-import type { Span, Utf16Offset } from '../../lib/workbench-model';
+import { scalarOffset, type ScalarOffset, type Span, type Utf16Offset } from '../../lib/workbench-model';
 import { MarkdownPreview } from './markdown-preview';
 
 /**
@@ -36,6 +36,8 @@ type Props = {
   previewAriaLabel?: string;
   /** Called with the [0, 1] vertical scroll ratio on user scroll (paused during IME composition and programmatic sync/reveal). */
   onScrollRatio?: (ratio: number) => void;
+  /** Called with the current caret/selection start as a Unicode scalar offset in the raw text. */
+  onCursorChange?: (offset: ScalarOffset) => void;
   /**
    * Every change of the text. `composing` is true while an IME composition is open; its end is reported once more without
    * it, even when the committed text equals the last update, so the controller can close the composition step.
@@ -103,8 +105,20 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
   previewRef.current = !!props.preview;
   const latest = useRef(props.value);
   latest.current = props.value;
+  const submitted = useRef(props.value);
+  submitted.current = props.value;
   const onScrollRatioRef = useRef(props.onScrollRatio);
   onScrollRatioRef.current = props.onScrollRatio;
+  const onCursorChangeRef = useRef(props.onCursorChange);
+  onCursorChangeRef.current = props.onCursorChange;
+
+  const reportCursor = (element: HTMLTextAreaElement, text: string) => {
+    const callback = onCursorChangeRef.current;
+    if (!callback) return;
+    const raw = rawOffset(text, element.selectionStart);
+    if (raw === null) return;
+    callback(scalarOffset(Array.from(text.slice(0, raw)).length));
+  };
 
   const suppressScrollBriefly = () => {
     suppressScroll.current = true;
@@ -185,14 +199,21 @@ export const EditorSurfaceAdapter = forwardRef<EditorSurfaceHandle, Props>(funct
       hidden={!!props.preview}
       aria-describedby={props.describedBy}
       onScroll={event => handleScroll(event.currentTarget)}
+      onClick={event => reportCursor(event.currentTarget, submitted.current)}
+      onKeyUp={event => reportCursor(event.currentTarget, submitted.current)}
+      onSelect={event => reportCursor(event.currentTarget, submitted.current)}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={event => {
         composing.current = false;
+        submitted.current = event.currentTarget.value;
         props.onEdit(event.currentTarget.value, { composing: false });
+        reportCursor(event.currentTarget, event.currentTarget.value);
       }}
       onChange={event => {
         const open = composing.current || (event.nativeEvent as InputEvent).isComposing === true;
+        submitted.current = event.target.value;
         props.onEdit(event.target.value, { composing: open });
+        reportCursor(event.target, event.target.value);
       }}
     />
     {props.preview && (

@@ -33,6 +33,7 @@ import { highlightSegments, revisionOf } from './review-report.js';
 import { spliceOccurrence } from './target-revision.js';
 import { isMarkdownReportExport, renderMarkdownReport, type MarkdownCurrency } from './markdown-report.ts';
 import { msg } from './messages.ts';
+import { applySegmentSuggestionResult, segmentParagraphs, type TmApplySegmentResult } from './tm-segment.ts';
 import { semanticExport, semanticFromWorkfile, semanticWorkfileParts } from './workbench-persistence.ts';
 import { emptyStructure, structurePlan, type StructureFinding, type StructureState } from './structure-layer.ts';
 import { CAPABILITY_STRUCTURE_CHECK, validStructureCheckResponse } from './structure-check.js';
@@ -828,6 +829,33 @@ export class WorkbenchController {
     const { draft } = this.state;
     if (!draft.alignments) return;
     this.edit({ ...draft, alignments: draft.alignments.filter((_, j) => index !== j) }, 'alignmentRemoved');
+  }
+
+  applyMemorySuggestion(activeIndex: number, suggestionText: string): TmApplySegmentResult {
+    const { draft, reports } = this.state;
+    const sourceSegments = segmentParagraphs(draft.source);
+    const outcome = applySegmentSuggestionResult(draft.target, sourceSegments, activeIndex, suggestionText, {
+      source: draft.source,
+      alignments: draft.alignments,
+    });
+    if (!outcome.applied) return outcome;
+    const alignmentsChanged = JSON.stringify(outcome.alignments) !== JSON.stringify(draft.alignments);
+    if (outcome.target === draft.target && !alignmentsChanged) return outcome;
+    const latest = reports.at(-1) ?? null;
+    const message = alignmentNotice(draft.alignments, {
+      alignments: outcome.alignments,
+      invalidated: outcome.invalidated,
+      emptiedTargets: [],
+      fallbackAll: false,
+    }) ?? (latest ? 'editedText' : '');
+    this.commit({
+      draft: { ...draft, target: outcome.target, alignments: outcome.alignments },
+      ...(outcome.splice ? { splices: { target: outcome.splice } } : {}),
+      ...(outcome.invalidated.length ? { invalidated: outcome.invalidated } : {}),
+      notice: message,
+      remember: true,
+    });
+    return outcome;
   }
 
   private commit({

@@ -13,6 +13,7 @@ import {
   matchTranslationMemory,
   mergeTranslationMemoryEntries,
   parseTranslationMemoryBytes,
+  recheckTmMatchFreshness,
   serializeTranslationMemory,
   tmNow,
   type TmDirection,
@@ -20,19 +21,45 @@ import {
   type TmFile,
   type TmMatch,
 } from '../../lib/translation-memory';
+import type { TmSegmentAlignmentStatus } from '../../lib/tm-segment';
 import { useUiLanguage } from './ui-language-context';
 
 type Feedback = { kind: 'notice' | 'error'; text: string } | null;
 
+export type ApplySuggestionOutcome = {
+  applied: boolean;
+  reason?:
+    | 'replaced'
+    | 'inserted'
+    | 'unaligned_target'
+    | 'multi_paragraph_suggestion'
+    | 'target_gap_occupied'
+    | 'whitespace_target_alignment'
+    | 'cleared_alignments_skip';
+};
+
+export type TmLiveBasis = {
+  currentTermsDbRevision: string | null;
+  currentGameVersion: string | null;
+};
+
 type Props = {
-  source: string;
-  target: string;
+  sourceText: string;
+  targetText: string;
+  prevSource?: string | null;
+  nextSource?: string | null;
+  segmentIndex?: number;
+  segmentTotal?: number;
+  targetSegmentTotal?: number;
+  alignmentStatus?: TmSegmentAlignmentStatus;
   direction: TmDirection;
   currentTermsDbRevision?: string | null;
   currentGameVersion?: string | null;
+  getServiceBasis?: () => TmLiveBasis;
   entries: TmEntry[];
   setEntries: Dispatch<SetStateAction<TmEntry[]>>;
-  onApplySuggestion: (targetText: string) => void;
+  onApplySuggestion: (targetText: string) => ApplySuggestionOutcome | boolean | void;
+  onSelectSegment?: (index: number) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 };
@@ -46,14 +73,22 @@ const LIST_PREVIEW_CAP = 50;
  * zero embedding into `.wuwaterm` manuscripts, and only human/imported confirmed entries.
  */
 export function MyMemory({
-  source,
-  target,
+  sourceText,
+  targetText,
+  prevSource = null,
+  nextSource = null,
+  segmentIndex = 0,
+  segmentTotal = 1,
+  targetSegmentTotal = 0,
+  alignmentStatus,
   direction,
   currentTermsDbRevision = null,
   currentGameVersion = null,
+  getServiceBasis,
   entries,
   setEntries,
   onApplySuggestion,
+  onSelectSegment,
   open: controlledOpen,
   onOpenChange,
 }: Props) {
@@ -72,16 +107,59 @@ export function MyMemory({
   const [pending, setPending] = useState<TmFile | null>(null);
   const fileBox = useRef<HTMLInputElement>(null);
 
-  const deferredSource = useDeferredValue(source);
-  const matches = useMemo(
-    () =>
-      matchTranslationMemory(entries, deferredSource, direction, {
+  const currentQuery = useMemo(
+    () => ({
+      segmentIndex,
+      sourceText,
+      prevSource: prevSource ?? null,
+      nextSource: nextSource ?? null,
+    }),
+    [segmentIndex, sourceText, prevSource, nextSource],
+  );
+  const deferredQuery = useDeferredValue(currentQuery);
+  const matchesCurrentSegment =
+    deferredQuery.segmentIndex === currentQuery.segmentIndex
+    && deferredQuery.sourceText === currentQuery.sourceText
+    && deferredQuery.prevSource === currentQuery.prevSource
+    && deferredQuery.nextSource === currentQuery.nextSource;
+  const matchBundle = useMemo(
+    () => ({
+      query: deferredQuery,
+      matches: matchTranslationMemory(entries, deferredQuery.sourceText, direction, {
+        prevSource: deferredQuery.prevSource,
+        nextSource: deferredQuery.nextSource,
         currentTermsDbRevision,
         currentGameVersion,
       }),
-    [entries, deferredSource, direction, currentTermsDbRevision, currentGameVersion],
+    }),
+    [entries, deferredQuery, direction, currentTermsDbRevision, currentGameVersion],
   );
+  const matches = matchBundle.matches;
   const directionLabel = direction === 'en' ? t.directionEn : t.directionZh;
+  const isMultiSegment = segmentTotal > 1;
+  const effectiveAlignmentStatus = alignmentStatus ?? {
+    status: isMultiSegment && targetSegmentTotal > segmentTotal ? 'target_extra_paragraphs' : 'ok',
+    sourceTotal: segmentTotal,
+    targetTotal: targetSegmentTotal,
+  };
+  const targetHasMoreSegments = effectiveAlignmentStatus.status === 'target_extra_paragraphs';
+  const isTargetCursorUnaligned = effectiveAlignmentStatus.status === 'target_cursor_unaligned';
+  const alignmentBannerText = effectiveAlignmentStatus.status === 'target_cursor_unaligned'
+    ? t.segmentTargetCursorUnalignedHint
+    : effectiveAlignmentStatus.status === 'whitespace_target_alignment'
+      ? t.segmentWhitespaceAlignmentHint
+      : effectiveAlignmentStatus.status === 'cleared_alignments_skip'
+        ? t.segmentClearedSkipHint
+        : effectiveAlignmentStatus.status === 'target_extra_paragraphs'
+          ? fill(t.segmentUnalignedHint, {
+            sourceTotal: effectiveAlignmentStatus.sourceTotal,
+            targetTotal: effectiveAlignmentStatus.targetTotal,
+          })
+          : effectiveAlignmentStatus.status === 'alignment_ambiguous'
+            ? t.segmentAmbiguousHint
+            : effectiveAlignmentStatus.status === 'target_gap_occupied'
+              ? t.segmentGapOccupiedHint
+              : null;
 
   const notice = (text: string) => setFeedback({ kind: 'notice', text });
   const failure = (text: string) => setFeedback({ kind: 'error', text });
@@ -146,13 +224,16 @@ export function MyMemory({
   }
 
   function confirmCurrent() {
+    const liveBasis = getServiceBasis ? getServiceBasis() : { currentTermsDbRevision, currentGameVersion };
     const outcome = confirmTranslationMemoryEntry(entries, {
-      sourceText: source,
-      targetText: target,
+      sourceText,
+      targetText,
       direction,
+      prevSource: prevSource ?? null,
+      nextSource: nextSource ?? null,
       origin: TM_ORIGIN_HUMAN,
-      termsDbRevision: currentTermsDbRevision,
-      gameVersion: currentGameVersion,
+      termsDbRevision: liveBasis.currentTermsDbRevision,
+      gameVersion: liveBasis.currentGameVersion,
     });
     if (outcome.status === 'added') {
       setEntries(outcome.entries);
@@ -178,9 +259,52 @@ export function MyMemory({
     else failure(fill(t.errors.fieldInvalid, { field: fieldName }));
   }
 
-  function applySuggestion(match: TmMatch) {
-    onApplySuggestion(match.entry.target_text);
-    notice(match.needsRecheck ? t.notices.appliedRecheck : t.notices.applied);
+  function applySuggestion(match: TmMatch, matchQuery: typeof deferredQuery) {
+    if (isTargetCursorUnaligned) {
+      failure(t.segmentTargetCursorUnalignedHint);
+      return;
+    }
+    if (
+      !matchesCurrentSegment
+      || matchQuery.segmentIndex !== currentQuery.segmentIndex
+      || matchQuery.sourceText !== currentQuery.sourceText
+      || matchQuery.prevSource !== currentQuery.prevSource
+      || matchQuery.nextSource !== currentQuery.nextSource
+    ) {
+      return;
+    }
+    const liveBasis = getServiceBasis ? getServiceBasis() : { currentTermsDbRevision, currentGameVersion };
+    const liveMatch = recheckTmMatchFreshness(match, liveBasis);
+    const outcome = onApplySuggestion(match.entry.target_text);
+    const applied = typeof outcome === 'boolean' ? outcome : outcome ? outcome.applied : true;
+    if (!applied) {
+      const reason = typeof outcome === 'object' && outcome ? outcome.reason : undefined;
+      if (reason === 'multi_paragraph_suggestion') {
+        failure(t.errors.multiParagraphSuggestion);
+      } else if (reason === 'target_gap_occupied') {
+        failure(t.errors.targetGapOccupied);
+      } else if (reason === 'whitespace_target_alignment') {
+        failure(t.errors.whitespaceTargetAlignment);
+      } else if (reason === 'cleared_alignments_skip') {
+        failure(t.errors.clearedAlignmentsSkip);
+      } else if (targetHasMoreSegments) {
+        failure(fill(t.errors.segmentUnaligned, {
+          sourceTotal: effectiveAlignmentStatus.sourceTotal,
+          targetTotal: effectiveAlignmentStatus.targetTotal,
+        }));
+      } else {
+        failure(t.errors.segmentAlignmentRequired);
+      }
+      return;
+    }
+    if (isMultiSegment) {
+      notice(fill(liveMatch.needsRecheck ? t.notices.appliedSegmentRecheck : t.notices.appliedSegment, {
+        i: segmentIndex + 1,
+        n: segmentTotal,
+      }));
+      return;
+    }
+    notice(liveMatch.needsRecheck ? t.notices.appliedRecheck : t.notices.applied);
   }
 
   function removeAt(index: number) {
@@ -211,6 +335,44 @@ export function MyMemory({
       <div id="my-memory-body" hidden={!open}>
         <p className="field-hint my-terms-note">{t.memoryNote}</p>
         <p className="field-hint my-terms-note">{t.referenceNote}</p>
+        {isMultiSegment && (
+          <div
+            className="my-memory-segment-bar"
+            data-testid="my-memory-segment-scope"
+            data-target-unaligned={isTargetCursorUnaligned ? 'true' : 'false'}
+          >
+            <span className="my-memory-segment-label">
+              {isTargetCursorUnaligned
+                ? fill(t.segmentScopeUnaligned, { n: segmentTotal })
+                : fill(t.segmentScope, { i: segmentIndex + 1, n: segmentTotal })}
+            </span>
+            {onSelectSegment && (
+              <div className="my-memory-segment-nav">
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={!isTargetCursorUnaligned && segmentIndex <= 0}
+                  onClick={() => onSelectSegment(isTargetCursorUnaligned ? 0 : segmentIndex - 1)}
+                >
+                  {t.segmentPrev}
+                </button>
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={!isTargetCursorUnaligned && segmentIndex >= segmentTotal - 1}
+                  onClick={() => onSelectSegment(isTargetCursorUnaligned ? Math.min(segmentTotal - 1, 1) : segmentIndex + 1)}
+                >
+                  {t.segmentNext}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+        {alignmentBannerText && (
+          <p className="my-memory-recheck-hint" data-testid="my-memory-alignment-hint" role="status">
+            {alignmentBannerText}
+          </p>
+        )}
         <div className="my-terms-actions">
           <button type="button" className="secondary-button" onClick={() => fileBox.current?.click()}>
             {t.importButton}
@@ -223,10 +385,10 @@ export function MyMemory({
           <button
             type="button"
             className="secondary-button my-memory-confirm-btn"
-            disabled={!source.trim() || !target.trim()}
+            disabled={!sourceText.trim() || !targetText.trim() || isTargetCursorUnaligned}
             onClick={confirmCurrent}
           >
-            {t.confirmButton}
+            {isMultiSegment ? t.confirmSegmentButton : t.confirmButton}
           </button>
         </div>
         <input
@@ -309,7 +471,12 @@ export function MyMemory({
                 )}
                 {match.entry.note && <p className="my-terms-meta">{match.entry.note}</p>}
                 <div className="finding-actions">
-                  <button type="button" className="secondary-button" onClick={() => applySuggestion(match)}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={!matchesCurrentSegment || isTargetCursorUnaligned}
+                    onClick={() => applySuggestion(match, matchBundle.query)}
+                  >
                     {t.applyButton}
                   </button>
                 </div>
