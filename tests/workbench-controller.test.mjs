@@ -421,8 +421,6 @@ test('piece translation, pair translation with epoch guard, and clean dispose()'
 });
 
 test('React workbench views do not assemble commit/commitLong/reconcile/domain mutations directly', () => {
-  const semanticView = readFileSync(fileURLToPath(new URL('../app/components/semantic-workbench.tsx', import.meta.url)), 'utf8');
-  const reviewView = readFileSync(fileURLToPath(new URL('../app/components/document-workspace.tsx', import.meta.url)), 'utf8');
   const forbidden = [
     /\bcommitLong\s*\(/u,
     /\bdoc\.commit\s*\(/u,
@@ -441,10 +439,23 @@ test('React workbench views do not assemble commit/commitLong/reconcile/domain m
     /\bmergeParagraphs\b/u,
     /\blinesToParagraphs\b/u,
   ];
-  for (const [name, src] of [
-    ['app/components/semantic-workbench.tsx', semanticView],
-    ['app/components/document-workspace.tsx', reviewView],
-  ]) {
+  const workspaceFiles = [
+    'app/components/semantic-workbench.tsx',
+    'app/components/document-workspace.tsx',
+    'app/components/workspace/use-canonical-guard.ts',
+    'app/components/workspace/use-revision-dialog.ts',
+    'app/components/workspace/use-termbase-workspace.ts',
+    'app/components/workspace/use-tm-workspace.ts',
+    'app/components/workspace/workspace-dialogs.tsx',
+    'app/components/workspace/workspace-editor-pane.tsx',
+    'app/components/workspace/workspace-excerpt.tsx',
+    'app/components/workspace/workspace-highlights.ts',
+    'app/components/workspace/workspace-inspector.tsx',
+    'app/components/workspace/workspace-status.ts',
+    'app/components/workspace/workspace-term-track.tsx',
+  ];
+  for (const name of workspaceFiles) {
+    const src = readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
     for (const pattern of forbidden) {
       assert.equal(pattern.test(src), false, `${name} must not match ${pattern}`);
     }
