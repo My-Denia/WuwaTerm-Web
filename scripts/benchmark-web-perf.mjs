@@ -17,7 +17,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { Worker as NodeWorker } from 'node:worker_threads';
@@ -378,7 +378,7 @@ async function measureComputeAndController(root) {
   };
 }
 
-async function measureBrowser(root) {
+async function measureBrowser(root, { hasCm6 }) {
   const { chromium } = await import(pathToFileURL(join(root, 'node_modules', '@playwright/test', 'index.mjs')).href);
   const { bootBuilt } = await import(pathToFileURL(join(root, 'tests', 'helpers', 'built-harness.mjs')).href);
   const msMod = await import(pathToFileURL(join(root, 'lib', 'manuscript.js')).href);
@@ -442,27 +442,16 @@ async function measureBrowser(root) {
     });
     const quickJsBytes = jsRequests.reduce((acc, r) => acc + r.bytes, 0);
 
-    // Measure switching from Quick -> Manuscript (loads lazy CM6 chunk in current branch, instant textarea in baseline)
+    // Measure switching from Quick -> Manuscript (loads lazy CM6 chunk in current branch, textarea in baseline)
     const switchT0 = performance.now();
     await quickPage.locator('.mode-switch button').nth(1).click();
     await quickPage.locator('.document-workspace[data-mode="manuscript"]').waitFor({ state: 'visible' });
-    // Wait for CM6 if enhanced editor is present
-    const hasCm6 = await quickPage.evaluate(() => {
-      return new Promise(resolve => {
-        const deadline = performance.now() + 10_000;
-        const tick = () => {
-          const el = document.querySelector('#review-source');
-          if (el?.getAttribute('data-editor-surface') === 'cm6') return resolve(true);
-          if (el?.tagName === 'TEXTAREA') {
-            // Give React 100ms in case CM6 lazy-load triggers after mode attribute flips
-            if (performance.now() - deadline + 10_000 > 150) return resolve(false);
-          }
-          if (performance.now() > deadline) return resolve(false);
-          requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      });
-    });
+    if (hasCm6) {
+      await quickPage.locator('#review-source[data-editor-surface="cm6"]').waitFor({ state: 'visible', timeout: 15_000 });
+    } else {
+      await quickPage.locator('#review-source').waitFor({ state: 'visible' });
+    }
+    await quickPage.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
     const manuscriptSwitchMs = round2(performance.now() - switchT0);
     const postSwitchJsBytes = jsRequests.reduce((acc, r) => acc + r.bytes, 0);
     await quickCtx.close();
@@ -582,10 +571,11 @@ async function runSingle(root, { withBrowser }) {
 
   const bundle = measureBundle(root);
   const compute = await measureComputeAndController(root);
-  const browser = withBrowser ? await measureBrowser(root) : null;
+  const hasCm6 = bundle.cm6Editor !== null;
+  const browser = withBrowser ? await measureBrowser(root, { hasCm6 }) : null;
 
   return {
-    root,
+    checkoutName: basename(root),
     gitHead,
     version: pkg.version,
     environment: {
@@ -650,14 +640,15 @@ function fmtDelta(beforeVal, afterVal, unit = 'ms') {
 }
 
 function formatComparisonMarkdown(before, after) {
+  const beforeLabel = before.gitHead ?? 'before';
   const lines = [];
-  lines.push(`# Benchmark Comparison: ${before.gitHead ?? 'before'} vs ${after.gitHead ?? 'after'}`);
+  lines.push(`# Benchmark Comparison: ${beforeLabel} vs ${after.gitHead ?? 'after'}`);
   lines.push('');
   lines.push(`- Node: \`${after.environment.node}\` | CPU: ${after.environment.cpuModel} (${after.environment.cpuCores} cores) | RAM: ${after.environment.memoryGiB} GiB`);
   lines.push('');
   lines.push('## 1. Source & Bundle Chunk Metrics');
   lines.push('');
-  lines.push('| Metric | Before (`df0a4d0`) | After (Current) | Delta |');
+  lines.push(`| Metric | Before (\`${beforeLabel}\`) | After (Current) | Delta |`);
   lines.push('| --- | ---: | ---: | ---: |');
   lines.push(`| \`document-workspace.tsx\` lines | ${before.sourceMetrics.documentWorkspaceLines} | ${after.sourceMetrics.documentWorkspaceLines} | ${fmtDelta(before.sourceMetrics.documentWorkspaceLines, after.sourceMetrics.documentWorkspaceLines, 'lines')} |`);
   lines.push(`| \`document-workspace.tsx\` bytes | ${fmtBytes(before.sourceMetrics.documentWorkspaceBytes)} | ${fmtBytes(after.sourceMetrics.documentWorkspaceBytes)} | ${fmtDelta(before.sourceMetrics.documentWorkspaceBytes, after.sourceMetrics.documentWorkspaceBytes, 'B')} |`);
@@ -689,7 +680,7 @@ function formatComparisonMarkdown(before, after) {
     lines.push('');
     lines.push('## 3. Real Chromium Browser Metrics (`dist/` via Wrangler Harness)');
     lines.push('');
-    lines.push('| Metric | Before (`df0a4d0`) | After (Current) | Delta |');
+    lines.push(`| Metric | Before (\`${beforeLabel}\`) | After (Current) | Delta |`);
     lines.push('| --- | ---: | ---: | ---: |');
     lines.push(`| Quick mode JS transferred | ${fmtBytes(before.browser.quickMode.jsBytesTransferred)} (${before.browser.quickMode.jsRequests} reqs) | ${fmtBytes(after.browser.quickMode.jsBytesTransferred)} (${after.browser.quickMode.jsRequests} reqs) | ${fmtDelta(before.browser.quickMode.jsBytesTransferred, after.browser.quickMode.jsBytesTransferred, 'B')} |`);
     lines.push(`| Worker requests in Quick mode | ${before.browser.quickMode.workerRequestsInQuickMode} | ${after.browser.quickMode.workerRequestsInQuickMode} | — |`);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -439,20 +439,16 @@ test('React workbench views do not assemble commit/commitLong/reconcile/domain m
     /\bmergeParagraphs\b/u,
     /\blinesToParagraphs\b/u,
   ];
+  const workspaceDir = fileURLToPath(new URL('../app/components/workspace', import.meta.url));
+  const workspaceSubmodules = readdirSync(workspaceDir, { withFileTypes: true })
+    .filter(entry => entry.isFile() && /\.(ts|tsx)$/u.test(entry.name))
+    .map(entry => `app/components/workspace/${entry.name}`)
+    .sort();
+  assert.ok(workspaceSubmodules.length > 0, 'expected workspace submodules under app/components/workspace');
   const workspaceFiles = [
     'app/components/semantic-workbench.tsx',
     'app/components/document-workspace.tsx',
-    'app/components/workspace/use-canonical-guard.ts',
-    'app/components/workspace/use-revision-dialog.ts',
-    'app/components/workspace/use-termbase-workspace.ts',
-    'app/components/workspace/use-tm-workspace.ts',
-    'app/components/workspace/workspace-dialogs.tsx',
-    'app/components/workspace/workspace-editor-pane.tsx',
-    'app/components/workspace/workspace-excerpt.tsx',
-    'app/components/workspace/workspace-highlights.ts',
-    'app/components/workspace/workspace-inspector.tsx',
-    'app/components/workspace/workspace-status.ts',
-    'app/components/workspace/workspace-term-track.tsx',
+    ...workspaceSubmodules,
   ];
   for (const name of workspaceFiles) {
     const src = readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
