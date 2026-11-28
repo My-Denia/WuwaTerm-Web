@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -421,8 +421,6 @@ test('piece translation, pair translation with epoch guard, and clean dispose()'
 });
 
 test('React workbench views do not assemble commit/commitLong/reconcile/domain mutations directly', () => {
-  const semanticView = readFileSync(fileURLToPath(new URL('../app/components/semantic-workbench.tsx', import.meta.url)), 'utf8');
-  const reviewView = readFileSync(fileURLToPath(new URL('../app/components/document-workspace.tsx', import.meta.url)), 'utf8');
   const forbidden = [
     /\bcommitLong\s*\(/u,
     /\bdoc\.commit\s*\(/u,
@@ -441,10 +439,19 @@ test('React workbench views do not assemble commit/commitLong/reconcile/domain m
     /\bmergeParagraphs\b/u,
     /\blinesToParagraphs\b/u,
   ];
-  for (const [name, src] of [
-    ['app/components/semantic-workbench.tsx', semanticView],
-    ['app/components/document-workspace.tsx', reviewView],
-  ]) {
+  const workspaceDir = fileURLToPath(new URL('../app/components/workspace', import.meta.url));
+  const workspaceSubmodules = readdirSync(workspaceDir, { withFileTypes: true })
+    .filter(entry => entry.isFile() && /\.(ts|tsx)$/u.test(entry.name))
+    .map(entry => `app/components/workspace/${entry.name}`)
+    .sort();
+  assert.ok(workspaceSubmodules.length > 0, 'expected workspace submodules under app/components/workspace');
+  const workspaceFiles = [
+    'app/components/semantic-workbench.tsx',
+    'app/components/document-workspace.tsx',
+    ...workspaceSubmodules,
+  ];
+  for (const name of workspaceFiles) {
+    const src = readFileSync(fileURLToPath(new URL(`../${name}`, import.meta.url)), 'utf8');
     for (const pattern of forbidden) {
       assert.equal(pattern.test(src), false, `${name} must not match ${pattern}`);
     }
